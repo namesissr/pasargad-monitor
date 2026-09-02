@@ -1,5 +1,5 @@
 import { requireUser } from '@/lib/auth';
-import { fail, handle, ok } from '@/lib/http';
+import { handle, ok } from '@/lib/http';
 import { getSetting } from '@/lib/settings';
 import { lastMonths, type Calendar, type Period } from '@/lib/period';
 import { computeDailyCosts } from '@/lib/billing';
@@ -76,7 +76,8 @@ export async function GET(req: Request) {
     const months = lastMonths(MONTH_CHOICES, calendar);
 
     const wanted = url.searchParams.get('month');
-    const period: Period = (wanted && months.find((m) => m.key === wanted)) || months[months.length - 1];
+    // اگر ماه خواسته‌شده نامعتبر بود، ماه جاری (آخرین عضو فهرست) برمی‌گردد
+    const period: Period = months.find((m) => m.key === wanted) ?? months[months.length - 1];
 
     const dcParam = url.searchParams.get('datacenter_id');
     const datacenterId = dcParam && dcParam !== 'all' ? Number(dcParam) : null;
@@ -121,7 +122,7 @@ export async function GET(req: Request) {
     for (const d of days) dayTotals.set(d, { bytes: 0, traffic_cost: 0, ip_cost: 0, rent: 0, total: 0 });
 
     for (const r of rows) {
-      const own = perServer.get(r.id) ?? new Map();
+      const own = perServer.get(r.id) ?? new Map<string, { rx: number; tx: number }>();
       // همه روزهای ماه به computeDailyCosts داده می‌شوند تا سهمیه تجمعی
       // درست حساب شود، ولی فقط روزهای گذشته در خروجی جمع می‌شوند.
       const series = allDays.map((day) => ({ day, rx: own.get(day)?.rx ?? 0, tx: own.get(day)?.tx ?? 0 }));

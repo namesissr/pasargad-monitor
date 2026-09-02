@@ -17,7 +17,8 @@ export const dynamic = 'force-dynamic';
 
 type ReportType = 'daily' | 'monthly' | 'yearly';
 
-interface AggRow {
+// type است نه interface — به دلیل محدودیت T extends QueryResultRow در pg
+type AggRow = {
   key: string;
   server_id: number;
   rx: number;
@@ -30,7 +31,7 @@ interface AggRow {
   rx_peak: number;
   tx_peak: number;
   days: number;
-}
+};
 
 export async function GET(req: Request) {
   return handle(async () => {

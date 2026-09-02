@@ -47,15 +47,24 @@ export async function queryOne<T extends QueryResultRow = QueryResultRow>(
   return rows[0] ?? null;
 }
 
+/** یک کوئری محدود به کلاینت تراکنش */
+type ScopedQuery = <R extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params?: unknown[],
+) => Promise<R[]>;
+
 /** اجرای چند دستور داخل یک تراکنش */
-export async function transaction<T>(fn: (q: typeof query) => Promise<T>): Promise<T> {
+export async function transaction<T>(fn: (q: ScopedQuery) => Promise<T>): Promise<T> {
   const client = await getPool().connect();
   try {
     await client.query('BEGIN');
-    const scoped = (async (text: string, params: unknown[] = []) => {
-      const res = await client.query(text, params as never[]);
+    const scoped: ScopedQuery = async <R extends QueryResultRow = QueryResultRow>(
+      text: string,
+      params: unknown[] = [],
+    ): Promise<R[]> => {
+      const res = await client.query<R>(text, params as never[]);
       return res.rows;
-    }) as typeof query;
+    };
     const out = await fn(scoped);
     await client.query('COMMIT');
     return out;

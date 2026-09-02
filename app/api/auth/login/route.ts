@@ -7,13 +7,15 @@ import { fail, handle, ok, readJson } from '@/lib/http';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-interface Row {
+// type است نه interface: کوئری pg محدودیت T extends QueryResultRow دارد
+// و تایپ‌اسکریپت فقط به type alias امضای ایندکس ضمنی می‌دهد.
+type Row = {
   id: number;
   username: string;
   password_hash: string;
   role: string;
   is_active: boolean;
-}
+};
 
 export async function POST(req: Request) {
   return handle(async () => {

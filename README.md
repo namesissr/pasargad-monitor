@@ -229,6 +229,29 @@ python3 /usr/local/bin/pasargad-agent.py --list-ifaces
 
 ---
 
+## پیش از بیلد
+
+```bash
+python3 scripts/check-code.py
+```
+
+هفت دسته خطا را در چند ثانیه می‌گیرد: ایمپورت شکسته، نام صادرنشده، نام
+ایمپورت‌نشده در JSX، تایپ عمومی نادرست در `query`، `catch` خالی،
+`data!` داخل JSX، و مسیر API بدون `requireUser`.
+
+**این جایگزین کامپایلر نیست.** برای فهرست کامل خطاهای تایپ، بدون اینکه
+منتظر بیلد کامل بمانید:
+
+```bash
+docker run --rm -v /root/pasargad-monitor:/app -w /app node:20-alpine sh -c "npm install && npx tsc --noEmit"
+```
+
+نتیجه‌اش در چند دقیقه می‌آید، در حالی که `docker compose build` چند برابر
+طول می‌کشد. اولین بار `package-lock.json` هم ساخته می‌شود؛ آن را کامیت کنید
+تا بیلدهای بعدی تکرارپذیر شوند.
+
+---
+
 ## دستورهای روزمره
 
 ```bash

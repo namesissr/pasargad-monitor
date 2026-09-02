@@ -83,20 +83,21 @@ export function effectiveRates(
   };
 
   const overridden: string[] = [];
-  const pick = <K extends keyof DatacenterRates>(key: K, label: string): number => {
-    const own = num(server?.[key as keyof ServerOverrides]);
-    if (own !== null) {
-      overridden.push(label);
-      return own;
-    }
-    return base[key] as number;
+
+  // عمداً بدون تابع عمومی نوشته شده: کلیدهای ServerOverrides زیرمجموعه
+  // کلیدهای DatacenterRates اند و تبدیل نوع بینشان لغزنده است.
+  const pick = (own: unknown, fallback: number, label: string): number => {
+    const v = num(own);
+    if (v === null) return fallback;
+    overridden.push(label);
+    return v;
   };
 
   return {
-    price_per_tb: pick('price_per_tb', 'قیمت ترابایت'),
-    price_per_ip: pick('price_per_ip', 'قیمت آی‌پی'),
-    included_tb: pick('included_tb', 'ترافیک رایگان'),
-    included_ips: pick('included_ips', 'آی‌پی رایگان'),
+    price_per_tb: pick(server?.price_per_tb, base.price_per_tb, 'قیمت ترابایت'),
+    price_per_ip: pick(server?.price_per_ip, base.price_per_ip, 'قیمت آی‌پی'),
+    included_tb: pick(server?.included_tb, base.included_tb, 'ترافیک رایگان'),
+    included_ips: pick(server?.included_ips, base.included_ips, 'آی‌پی رایگان'),
     billing_direction: base.billing_direction,
     tb_base: base.tb_base,
     overridden,

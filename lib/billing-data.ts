@@ -27,7 +27,8 @@ export interface BillingRow {
   cost: MonthCost;
 }
 
-interface RawRow {
+// type است نه interface — به دلیل محدودیت T extends QueryResultRow در pg
+type RawRow = {
   id: number;
   name: string;
   main_ip: string;
@@ -48,7 +49,7 @@ interface RawRow {
   rx: number;
   tx: number;
   ip_count: number;
-}
+};
 
 const SQL = `
 SELECT
