@@ -1,0 +1,78 @@
+import { query, queryOne } from '@/lib/db';
+import { requireUser } from '@/lib/auth';
+import { fail, handle, ok, readJson } from '@/lib/http';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+/** فهرست بلوک‌های آی‌پی با شمارش وضعیت آدرس‌های داخلشان */
+export async function GET() {
+  return handle(async () => {
+    await requireUser();
+    const rows = await query(
+      `SELECT n.id, n.cidr::text AS cidr, n.version, host(n.gateway) AS gateway,
+              n.provider, n.location, n.label, n.notes, n.created_at,
+              COALESCE(c.total, 0)::int    AS total,
+              COALESCE(c.assigned, 0)::int AS assigned,
+              COALESCE(c.free, 0)::int     AS free,
+              COALESCE(c.blocked, 0)::int  AS blocked
+         FROM ip_subnets n
+         LEFT JOIN LATERAL (
+           SELECT COUNT(*) AS total,
+                  COUNT(*) FILTER (WHERE status = 'assigned') AS assigned,
+                  COUNT(*) FILTER (WHERE status = 'free')     AS free,
+                  COUNT(*) FILTER (WHERE status IN ('blocked','abuse')) AS blocked
+             FROM ip_addresses i WHERE i.subnet_id = n.id
+         ) c ON TRUE
+        ORDER BY n.cidr`,
+    );
+    return ok({ subnets: rows });
+  });
+}
+
+/** ثبت بلوک بدون باز کردن آدرس‌ها — مناسب نسخه ۶ */
+export async function POST(req: Request) {
+  return handle(async () => {
+    await requireUser();
+    const b = await readJson<Record<string, unknown>>(req);
+    const cidr = String(b.cidr ?? '').trim();
+    if (!cidr) return fail('بلوک آی‌پی را وارد کنید', 400);
+
+    const row = await queryOne<{ id: number }>(
+      `INSERT INTO ip_subnets (cidr, version, gateway, provider, location, label, notes)
+       VALUES ($1::cidr, CASE WHEN $1::text LIKE '%:%' THEN 6 ELSE 4 END,
+               NULLIF($2, '')::inet, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''))
+       ON CONFLICT (cidr) DO UPDATE SET
+         gateway  = COALESCE(EXCLUDED.gateway, ip_subnets.gateway),
+         provider = COALESCE(EXCLUDED.provider, ip_subnets.provider),
+         location = COALESCE(EXCLUDED.location, ip_subnets.location),
+         label    = COALESCE(EXCLUDED.label, ip_subnets.label),
+         notes    = COALESCE(EXCLUDED.notes, ip_subnets.notes)
+       RETURNING id`,
+      [
+        cidr,
+        String(b.gateway ?? '').trim(),
+        String(b.provider ?? '').trim(),
+        String(b.location ?? '').trim(),
+        String(b.label ?? '').trim(),
+        String(b.notes ?? '').trim(),
+      ],
+    ).catch(() => {
+      throw new Error('قالب بلوک درست نیست. نمونه درست: 185.1.2.0/24');
+    });
+
+    return ok({ id: row?.id }, { status: 201 });
+  });
+}
+
+export async function DELETE(req: Request) {
+  return handle(async () => {
+    await requireUser();
+    const id = Number(new URL(req.url).searchParams.get('id'));
+    if (!Number.isInteger(id)) return fail('شناسه بلوک نامعتبر است', 400);
+
+    // آدرس‌ها می‌مانند و فقط ارجاعشان به بلوک خالی می‌شود
+    await query('DELETE FROM ip_subnets WHERE id = $1', [id]);
+    return ok({ ok: true });
+  });
+}

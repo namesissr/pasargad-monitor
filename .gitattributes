@@ -1,0 +1,16 @@
+# فایل‌هایی که روی لینوکس اجرا می‌شوند باید همیشه پایان خط LF داشته باشند.
+# با CRLF، بش خطای «bash: \r: command not found» می‌دهد و اسکریپت نصب ایجنت
+# روی سرور مشتری از کار می‌افتد.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.mjs  text eol=lf
+*.sql  text eol=lf
+*.conf text eol=lf
+Dockerfile*     text eol=lf
+docker-compose*.yml text eol=lf
+
+*.png binary
+*.jpg binary
+*.woff2 binary

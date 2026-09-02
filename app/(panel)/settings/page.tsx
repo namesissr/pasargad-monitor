@@ -1,0 +1,309 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { useLoad, LoadState } from '@/components/useLoad';
+import { Field, Mono, Notice } from '@/components/ui';
+import { api, ApiError } from '@/lib/api';
+import { faNum, formatJalaliTime, timeAgo, INCIDENT_KIND_LABEL } from '@/lib/format';
+
+interface SettingsData {
+  settings: Record<string, string>;
+  users: {
+    id: number;
+    username: string;
+    full_name: string | null;
+    phone: string | null;
+    role: string;
+    is_active: boolean;
+    last_login_at: string | null;
+  }[];
+  smsConfigured: boolean;
+  recentSms: { id: number; recipient: string; body: string; ok: boolean; error: string | null; created_at: string }[];
+}
+
+interface RuleRow {
+  id: number;
+  server_id: number | null;
+  server_name: string | null;
+  kind: string;
+  threshold: number;
+  duration_sec: number;
+  send_sms: boolean;
+  enabled: boolean;
+}
+
+const KIND_UNIT: Record<string, string> = {
+  cpu: 'درصد',
+  ram: 'درصد',
+  disk: 'درصد',
+  traffic: 'درصد سهمیه',
+  load: 'بار به‌ازای هسته',
+  down: '—',
+};
+
+export default function SettingsPage() {
+  const { data, loading, error, reload } = useLoad<SettingsData>('/api/settings');
+  const rules = useLoad<{ rules: RuleRow[] }>('/api/alerts');
+
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+  const [testPhone, setTestPhone] = useState('');
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    if (data?.settings) setForm(data.settings);
+  }, [data]);
+
+  if (loading || error || !data) {
+    return <LoadState loading={loading} error={error} onRetry={reload}>{null}</LoadState>;
+  }
+
+  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  async function save() {
+    setMsg(null);
+    setSaving(true);
+    try {
+      await api.patch('/api/settings', form);
+      setMsg({ type: 'success', text: 'تنظیمات ذخیره شد. تغییرات بلافاصله اعمال می‌شود و نیازی به بیلد نیست.' });
+      reload();
+    } catch (e) {
+      setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'ذخیره انجام نشد' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function sendTest() {
+    setMsg(null);
+    setTesting(true);
+    try {
+      await api.post('/api/settings', { phone: testPhone });
+      setMsg({ type: 'success', text: 'پیامک آزمایشی فرستاده شد.' });
+      reload();
+    } catch (e) {
+      setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'ارسال پیامک ناموفق بود' });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function toggleRule(rule: RuleRow, patch: Partial<RuleRow>) {
+    try {
+      await api.patch('/api/alerts', { id: rule.id, ...patch });
+      rules.reload();
+    } catch (e) {
+      setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'تغییر قانون انجام نشد' });
+    }
+  }
+
+  return (
+    <div className="space-y-5 max-w-4xl">
+      <div>
+        <h1 className="text-lg font-bold">تنظیمات</h1>
+        <p className="text-xs text-muted mt-0.5">
+          این مقادیر در جدول settings ذخیره می‌شوند و در زمان اجرا خوانده می‌شوند. مقادیر فایل .env اینجا نمی‌آیند.
+        </p>
+      </div>
+
+      {msg && <Notice type={msg.type}>{msg.text}</Notice>}
+
+      {/* هشدار و پیامک */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">هشدار پیامکی</h2>
+
+        {!data.smsConfigured && (
+          <Notice type="error">
+            کلید کاوه‌نگار در فایل .env تنظیم نشده است (KAVENEGAR_API_KEY). تا وقتی تنظیم نشود هیچ پیامکی ارسال نمی‌شود.
+          </Notice>
+        )}
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="ارسال پیامک">
+            <select className="input" value={form.sms_enabled ?? 'true'} onChange={set('sms_enabled')}>
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+          <Field label="فاصله تکرار پیامک (دقیقه)" hint="تا وقتی مشکل باز است، هر چند دقیقه یادآوری شود">
+            <input className="input ltr" value={form.alert_repeat_min ?? ''} onChange={set('alert_repeat_min')} />
+          </Field>
+        </div>
+
+        <Field
+          label="شماره‌های گیرنده"
+          hint="با کاما جدا کنید. شماره کاربران پنل هم خودکار اضافه می‌شود."
+        >
+          <input className="input ltr" value={form.sms_recipients ?? ''} onChange={set('sms_recipients')} placeholder="09121234567,09351234567" />
+        </Field>
+
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <Field label="ارسال پیامک آزمایشی">
+              <input className="input ltr" value={testPhone} onChange={(e) => setTestPhone(e.target.value)} placeholder="09121234567" />
+            </Field>
+          </div>
+          <button type="button" className="btn-ghost" onClick={sendTest} disabled={testing || !testPhone}>
+            {testing ? 'در حال ارسال…' : 'ارسال'}
+          </button>
+        </div>
+      </section>
+
+      {/* پایش */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">پایش</h2>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="مهلت اعلام قطعی (ثانیه)" hint="بعد از چند ثانیه بی‌خبری از ایجنت، سرور قطع اعلام شود">
+            <input className="input ltr" value={form.down_after_sec ?? ''} onChange={set('down_after_sec')} />
+          </Field>
+          <Field label="فاصله بررسی (ثانیه)" hint="هر چند ثانیه ورکر سرورها و آی‌پی‌ها را بررسی کند">
+            <input className="input ltr" value={form.check_interval_sec ?? ''} onChange={set('check_interval_sec')} />
+          </Field>
+          <Field label="نگهداری نمونه خام (روز)" hint="تجمیع روزانه همیشه می‌ماند؛ فقط نمونه‌های ثانیه‌ای پاک می‌شوند">
+            <input className="input ltr" value={form.raw_retention_days ?? ''} onChange={set('raw_retention_days')} />
+          </Field>
+          <Field label="مبنای دوره ماهانه" hint="گروه‌بندی گزارش ماهانه و محاسبه سهمیه">
+            <select className="input" value={form.traffic_calendar ?? 'jalali'} onChange={set('traffic_calendar')}>
+              <option value="jalali">تقویم شمسی</option>
+              <option value="gregorian">تقویم میلادی</option>
+            </select>
+          </Field>
+        </div>
+
+        <div className="flex justify-end">
+          <button type="button" className="btn-primary" onClick={save} disabled={saving}>
+            {saving ? 'در حال ذخیره…' : 'ذخیره تنظیمات'}
+          </button>
+        </div>
+      </section>
+
+      {/* قوانین هشدار */}
+      <section className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-line">
+          <h2 className="text-sm font-bold">آستانه‌های هشدار</h2>
+          <p className="text-[11px] text-muted mt-0.5">قانون بدون سرور یعنی روی همه سرورها اعمال می‌شود.</p>
+        </div>
+        <div className="table-wrap">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>نوع</th>
+                <th>دامنه</th>
+                <th>آستانه</th>
+                <th>مدت پیوسته</th>
+                <th>پیامک</th>
+                <th>فعال</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(rules.data?.rules ?? []).map((r) => (
+                <tr key={r.id}>
+                  <td className="text-xs">{INCIDENT_KIND_LABEL[r.kind] ?? r.kind}</td>
+                  <td className="text-xs">{r.server_name || 'همه سرورها'}</td>
+                  <td className="text-xs">
+                    {r.kind === 'down' ? (
+                      '—'
+                    ) : (
+                      <input
+                        className="input w-24 ltr py-1"
+                        defaultValue={String(r.threshold)}
+                        onBlur={(e) => {
+                          const v = Number(e.target.value);
+                          if (Number.isFinite(v) && v !== r.threshold) toggleRule(r, { threshold: v });
+                        }}
+                      />
+                    )}
+                    <span className="text-muted ms-1">{KIND_UNIT[r.kind]}</span>
+                  </td>
+                  <td className="text-xs">
+                    <input
+                      className="input w-24 ltr py-1"
+                      defaultValue={String(r.duration_sec)}
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (Number.isFinite(v) && v !== r.duration_sec) toggleRule(r, { duration_sec: v });
+                      }}
+                    />
+                    <span className="text-muted ms-1">ثانیه</span>
+                  </td>
+                  <td>
+                    <input type="checkbox" checked={r.send_sms} onChange={(e) => toggleRule(r, { send_sms: e.target.checked })} />
+                  </td>
+                  <td>
+                    <input type="checkbox" checked={r.enabled} onChange={(e) => toggleRule(r, { enabled: e.target.checked })} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* کاربران */}
+      <section className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-line">
+          <h2 className="text-sm font-bold">کاربران پنل</h2>
+          <p className="text-[11px] text-muted mt-0.5">
+            شماره هر کاربر فعال، خودکار گیرنده هشدار می‌شود. افزودن کاربر با اسکریپت
+            <Mono className="mx-1">node worker/create-user.mjs</Mono>
+            روی سرور انجام می‌شود.
+          </p>
+        </div>
+        <div className="table-wrap">
+          <table className="tbl min-w-[560px]">
+            <thead>
+              <tr>
+                <th>نام کاربری</th>
+                <th>نام</th>
+                <th>شماره</th>
+                <th>نقش</th>
+                <th>آخرین ورود</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.users.map((u) => (
+                <tr key={u.id}>
+                  <td className="text-xs"><Mono>{u.username}</Mono></td>
+                  <td className="text-xs">{u.full_name || '—'}</td>
+                  <td className="text-xs"><Mono>{u.phone || '—'}</Mono></td>
+                  <td className="text-xs">{u.role}</td>
+                  <td className="text-xs text-muted">{u.last_login_at ? timeAgo(u.last_login_at) : 'هرگز'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* پیامک‌های اخیر */}
+      <section className="card overflow-hidden">
+        <div className="px-5 py-3 border-b border-line">
+          <h2 className="text-sm font-bold">پیامک‌های اخیر</h2>
+        </div>
+        {data.recentSms.length === 0 ? (
+          <p className="p-6 text-center text-xs text-muted">پیامکی ارسال نشده است.</p>
+        ) : (
+          <ul className="divide-y divide-line/60">
+            {data.recentSms.map((n) => (
+              <li key={n.id} className="px-5 py-2.5 text-xs flex items-start gap-3">
+                <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${n.ok ? 'bg-ok' : 'bg-danger'}`} />
+                <div className="min-w-0 flex-1">
+                  <Mono className="text-muted">{n.recipient}</Mono>
+                  <p className="truncate">{n.body}</p>
+                  {n.error && <p className="text-danger text-[11px]">{n.error}</p>}
+                </div>
+                <span className="text-muted shrink-0" title={formatJalaliTime(n.created_at)}>{timeAgo(n.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <p className="text-[11px] text-muted/70">
+        نسخه پنل {faNum('1.0')} · تعداد کاربران {faNum(data.users.length)}
+      </p>
+    </div>
+  );
+}

@@ -1,0 +1,130 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  پالت «اتاق سرور» — تیره، سرد، با یک تأکید فیروزه‌ای.
+  عمداً از پالت فیلمینو جداست؛ این یک ابزار عملیاتی است نه یک سایت سرگرمی.
+*/
+:root {
+  --rack: #0a0d12;
+  --panel: #121721;
+  --panel-2: #171e2a;
+  --line: #1e2633;
+  --cyan: #3ed6c5;
+  --amber: #f2b44c;
+  --danger: #f2555a;
+  --ok: #4ade80;
+  --text: #e6edf5;
+  --muted: #7c8aa0;
+}
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+
+html,
+body {
+  background: var(--rack);
+  color: var(--text);
+}
+
+body {
+  font-family: 'Vazirmatn', Tahoma, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* اعداد و آی‌پی همیشه چپ‌به‌راست خوانده می‌شوند */
+.ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--rack);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a3446;
+}
+
+@layer components {
+  .card {
+    @apply bg-panel border border-line rounded-xl;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium
+           transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-cyan text-rack hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply btn border border-line text-muted hover:text-white hover:border-cyan/50;
+  }
+  .btn-danger {
+    @apply btn bg-danger/15 text-danger border border-danger/30 hover:bg-danger/25;
+  }
+
+  .input {
+    @apply w-full bg-rack border border-line rounded-lg px-3 py-2 text-sm text-white
+           placeholder:text-muted/60 focus:outline-none focus:border-cyan/60;
+  }
+  .label {
+    @apply block text-xs text-muted mb-1.5;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium;
+  }
+
+  .table-wrap {
+    @apply overflow-x-auto;
+  }
+  .tbl {
+    @apply w-full text-sm min-w-[720px];
+  }
+  .tbl thead th {
+    @apply text-start text-xs font-medium text-muted px-3 py-2.5 border-b border-line whitespace-nowrap;
+  }
+  .tbl tbody td {
+    @apply px-3 py-2.5 border-b border-line/60 align-middle;
+  }
+  .tbl tbody tr:hover {
+    @apply bg-panel2/60;
+  }
+}
+
+/* همه حرکت‌ها باید prefers-reduced-motion را رعایت کنند */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

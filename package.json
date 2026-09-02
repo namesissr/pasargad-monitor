@@ -1,0 +1,30 @@
+{
+  "name": "pasargad-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "پنل مانیتورینگ سرورهای اختصاصی پاسارگاد میزبان",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "worker": "node worker/index.mjs",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "jose": "5.9.6",
+    "next": "14.2.18",
+    "pg": "8.13.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.9",
+    "@types/pg": "8.11.10",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "autoprefixer": "10.4.20",
+    "postcss": "8.4.49",
+    "tailwindcss": "3.4.15",
+    "typescript": "5.6.3"
+  }
+}
