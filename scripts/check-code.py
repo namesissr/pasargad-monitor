@@ -152,6 +152,28 @@ def clause_names(clause):
     return names
 
 
+def imported_source_names(clause):
+    """
+    نام‌های اصلی که از ماژول مقصد خواسته می‌شوند.
+
+    با clause_names فرق دارد: آن نام محلی را برمی‌گرداند. برای
+    «import { a as b }» نام محلی «b» است ولی چیزی که باید در مقصد صادر
+    شده باشد «a» است. مقایسه با نام محلی، هر ایمپورت نام‌گذاری‌شده را
+    هشدار کاذب می‌کرد.
+    """
+    names = set()
+    braces = re.search(r"\{([^}]*)\}", clause)
+    if not braces:
+        return names
+    for raw in braces.group(1).split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        raw = re.sub(r"^type\s+", "", raw)
+        names.add(raw.split(" as ")[0].strip())
+    return names
+
+
 def module_exports(src):
     names = set(EXPORT_RE.findall(src))
     for block in re.findall(r"export\s+\{([^}]*)\}", src):
@@ -189,7 +211,7 @@ def check_imports():
                 continue  # صادرات ستاره‌دار را دنبال نمی‌کنیم
             exported = module_exports(target_src)
 
-            for name in clause_names(clause):
+            for name in imported_source_names(clause):
                 if name and name not in exported:
                     problems.append(
                         "%s:%d — «%s» از «%s» ایمپورت شده ولی آنجا صادر نشده است."

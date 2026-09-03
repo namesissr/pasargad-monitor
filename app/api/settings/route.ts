@@ -3,6 +3,7 @@ import { requireUser } from '@/lib/auth';
 import { fail, handle, ok, readJson } from '@/lib/http';
 import { getSettings, saveSettings } from '@/lib/settings';
 import { sendSms } from '@/lib/sms';
+import { sendTelegram } from '@/lib/telegram';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,6 +12,12 @@ export const dynamic = 'force-dynamic';
 const ALLOWED = [
   'sms_enabled',
   'sms_recipients',
+  'telegram_enabled',
+  'telegram_chat_ids',
+  'vz_anchor_vpsid',
+  'vz_pool_id',
+  'vz_max_per_run',
+  'vz_auto_enabled',
   'alert_repeat_min',
   'down_after_sec',
   'raw_retention_days',
@@ -27,10 +34,11 @@ export async function GET() {
       `SELECT id, username, full_name, phone, role, is_active, last_login_at FROM users ORDER BY id`,
     );
     const smsConfigured = Boolean(process.env.KAVENEGAR_API_KEY);
+    const telegramConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
     const recent = await query(
       `SELECT id, recipient, body, ok, error, created_at FROM notifications ORDER BY created_at DESC LIMIT 20`,
     );
-    return ok({ settings, users, smsConfigured, recentSms: recent });
+    return ok({ settings, users, smsConfigured, telegramConfigured, recentSms: recent });
   });
 }
 
@@ -55,13 +63,27 @@ export async function PATCH(req: Request) {
   });
 }
 
-/** ارسال پیامک آزمایشی */
+/** ارسال پیام آزمایشی — پیامک یا تلگرام */
 export async function POST(req: Request) {
   return handle(async () => {
     await requireUser();
-    const { phone } = await readJson<{ phone?: string }>(req);
+    const { phone, chatId } = await readJson<{ phone?: string; chatId?: string }>(req);
+
+    const chat = String(chatId ?? '').trim();
+    if (chat) {
+      const body = 'پاسارگاد میزبان: این یک پیام آزمایشی از پنل مانیتورینگ است.';
+      const r = await sendTelegram(chat, body);
+      await query(
+        `INSERT INTO notifications (channel, recipient, body, ok, error)
+         VALUES ('telegram', $1, $2, $3, $4)`,
+        [chat, body, r.ok, r.error ?? null],
+      );
+      if (!r.ok) return fail(r.error || 'ارسال تلگرام ناموفق بود', 502);
+      return ok({ ok: true });
+    }
+
     const to = String(phone ?? '').trim();
-    if (!to) return fail('شماره گیرنده را وارد کنید', 400);
+    if (!to) return fail('شماره گیرنده یا شناسه گفتگو را وارد کنید', 400);
 
     const body = 'پاسارگاد میزبان: این یک پیامک آزمایشی از پنل مانیتورینگ است.';
     const r = await sendSms(to, body);

@@ -1,5 +1,5 @@
 import { q, q1, settingNum, log, logErr } from './db.mjs';
-import { notifyAll } from './sms.mjs';
+import { notify } from './notify.mjs';
 import { clock, formatDuration } from './format.mjs';
 
 /**
@@ -59,7 +59,7 @@ export async function resolveIncident({ serverId = null, ipId = null, kind, reco
   // پیامک بازیابی فقط اگر هشدار اولیه رفته باشد
   if (row.notified_at && recoveryMessage) {
     const text = `${recoveryMessage}\nمدت قطعی: ${formatDuration(durationSec)}\nساعت ${clock()}`;
-    await notifyAll(text, row.id).catch((e) => logErr('پیامک بازیابی ارسال نشد:', e.message));
+    await notify(text, row.id).catch((e) => logErr('پیامک بازیابی ارسال نشد:', e.message));
   }
 
   return row;
@@ -105,7 +105,7 @@ export async function dispatchNotifications() {
     const repeat = inc.notified_at ? '\n[یادآوری — مشکل هنوز باز است]' : '';
     const text = `پاسارگاد میزبان — هشدار\n${target}\n${inc.message}\nساعت ${clock()}${repeat}`;
 
-    const res = await notifyAll(text, inc.id);
+    const res = await notify(text, inc.id);
     if (res.sent > 0 || res.failed > 0) {
       await q('UPDATE incidents SET notified_at = now() WHERE id = $1', [inc.id]);
     }

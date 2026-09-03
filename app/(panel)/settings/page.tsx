@@ -18,6 +18,7 @@ interface SettingsData {
     last_login_at: string | null;
   }[];
   smsConfigured: boolean;
+  telegramConfigured: boolean;
   recentSms: { id: number; recipient: string; body: string; ok: boolean; error: string | null; created_at: string }[];
 }
 
@@ -64,6 +65,8 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const [testPhone, setTestPhone] = useState('');
   const [testing, setTesting] = useState(false);
+  const [testChat, setTestChat] = useState('');
+  const [tgTesting, setTgTesting] = useState(false);
 
   useEffect(() => {
     if (data?.settings) setForm(data.settings);
@@ -87,6 +90,20 @@ export default function SettingsPage() {
       setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'ذخیره انجام نشد' });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function sendTelegramTest() {
+    setMsg(null);
+    setTgTesting(true);
+    try {
+      await api.post('/api/settings', { chatId: testChat });
+      setMsg({ type: 'success', text: 'پیام آزمایشی تلگرام فرستاده شد.' });
+      reload();
+    } catch (e) {
+      setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'ارسال تلگرام ناموفق بود' });
+    } finally {
+      setTgTesting(false);
     }
   }
 
@@ -187,6 +204,87 @@ export default function SettingsPage() {
           <button type="button" className="btn-ghost" onClick={sendTest} disabled={testing || !testPhone}>
             {testing ? 'در حال ارسال…' : 'ارسال'}
           </button>
+        </div>
+      </section>
+
+      {/* هشدار تلگرام */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">هشدار تلگرام</h2>
+
+        {!data.telegramConfigured && (
+          <Notice type="error">
+            توکن ربات در فایل .env تنظیم نشده است (TELEGRAM_BOT_TOKEN). تا وقتی تنظیم نشود هیچ پیامی ارسال نمی‌شود.
+          </Notice>
+        )}
+
+        <Notice type="warn">
+          اگر سرور پنل داخل ایران است، <Mono>api.telegram.org</Mono> مستقیم در دسترس نیست. متغیر{' '}
+          <Mono>TELEGRAM_API_BASE</Mono> را روی یک واسط یا پروکسی بگذارید، وگرنه هر ارسال با خطای
+          اتصال شکست می‌خورد.
+        </Notice>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="ارسال تلگرام">
+            <select className="input" value={form.telegram_enabled ?? 'false'} onChange={set('telegram_enabled')}>
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+        </div>
+
+        <Field
+          label="شناسه گفتگوها"
+          hint="با کاما جدا کنید. برای گروه، عدد منفی است. شناسه را از ربات @userinfobot بگیرید."
+        >
+          <input
+            className="input ltr"
+            value={form.telegram_chat_ids ?? ''}
+            onChange={set('telegram_chat_ids')}
+            placeholder="123456789,-1001234567890"
+          />
+        </Field>
+
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <Field label="ارسال پیام آزمایشی">
+              <input
+                className="input ltr"
+                value={testChat}
+                onChange={(e) => setTestChat(e.target.value)}
+                placeholder="123456789"
+              />
+            </Field>
+          </div>
+          <button type="button" className="btn-ghost" onClick={sendTelegramTest} disabled={tgTesting || !testChat}>
+            {tgTesting ? 'در حال ارسال…' : 'ارسال'}
+          </button>
+        </div>
+      </section>
+
+      {/* ویژالیزور */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">ویژالیزور</h2>
+        <p className="text-xs text-muted">
+          کلید و رمز ای‌پی‌آی در <Mono>.env</Mono> است. این‌ها فقط تعیین می‌کنند روی کدام
+          وی‌پی‌اس کار انجام شود.
+        </p>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field
+            label="شناسه وی‌پی‌اس لنگر"
+            hint="یک وی‌پی‌اس خالی که فقط برای نگه‌داشتن آی‌پی‌های اکسس‌شده است. خالی یعنی هیچ تغییری روی ویژالیزور انجام نشود."
+          >
+            <input className="input ltr" value={form.vz_anchor_vpsid ?? ''} onChange={set('vz_anchor_vpsid')} placeholder="1234" />
+          </Field>
+          <Field label="شناسه مخزن آی‌پی" hint="خالی یعنی همه مخزن‌ها">
+            <input className="input ltr" value={form.vz_pool_id ?? ''} onChange={set('vz_pool_id')} placeholder="1" />
+          </Field>
+          <Field
+            label="سقف هر اجرا"
+            hint="تخصیص چند صد آدرس یکجا هم ویژالیزور را کند می‌کند هم پیکربندی شبکه مهمان را"
+          >
+            <input className="input ltr" value={form.vz_max_per_run ?? ''} onChange={set('vz_max_per_run')} placeholder="200" />
+          </Field>
         </div>
       </section>
 

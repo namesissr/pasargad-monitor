@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { fail, ok, readJson } from '@/lib/http';
-import { notifyAll } from '@/lib/sms';
+import { notify } from '@/lib/notify';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -300,12 +300,12 @@ async function announce(transitions: Transition[]): Promise<void> {
   };
 
   if (released.length) {
-    await notifyAll(
+    await notify(
       `پاسارگاد میزبان — ${released.length} آی‌پی از اکسس درآمد و قابل استفاده است:\n${list(released)}`,
     ).catch((e) => console.error('[probe] پیامک آزادشدن ناموفق:', e.message));
   }
   if (blocked.length) {
-    await notifyAll(`پاسارگاد میزبان — ${blocked.length} آی‌پی اکسس شد:\n${list(blocked)}`).catch((e) =>
+    await notify(`پاسارگاد میزبان — ${blocked.length} آی‌پی اکسس شد:\n${list(blocked)}`).catch((e) =>
       console.error('[probe] پیامک اکسس ناموفق:', e.message),
     );
   }
