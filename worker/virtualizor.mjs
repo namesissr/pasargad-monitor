@@ -111,6 +111,20 @@ function phpUnserialize(text) {
   return result;
 }
 
+/**
+ * آیا فیلد «error» پاسخ واقعاً خالی است؟
+ *
+ * ویژالیزور در پاسخ موفق هم این فیلد را می‌گذارد — به شکل آرایه یا شیء
+ * خالی. در جاوااسکریپت هر دو درست‌اند، پس «if (parsed.error)» پاسخ موفق
+ * را خطا می‌خواند و هر عملیات موفقی ناموفق گزارش می‌شد.
+ */
+function isEmptyError(value) {
+  if (value === null || value === undefined || value === '' || value === false) return true;
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0;
+  return false;
+}
+
 /** یک فراخوانی به یک نود */
 async function call(node, act, params = {}, body) {
   const base = String(node.url || '').replace(/\/+$/, '');
@@ -164,7 +178,11 @@ async function call(node, act, params = {}, body) {
       return { ok: false, error: hint + ' — پاسخ: ' + plain.slice(0, 160), raw: text.slice(0, 300) };
     }
 
-    if (parsed && parsed.error) {
+    // ویژالیزور در پاسخ موفق هم فیلد «error» می‌گذارد، ولی خالی. در
+    // جاوااسکریپت آرایه و شیء خالی درست‌اند، پس بررسی ساده درستی، پاسخ
+    // موفق را خطا می‌خواند. اس‌دی‌کی رسمی هم همین را با empty() مدیریت
+    // می‌کند.
+    if (parsed && !isEmptyError(parsed.error)) {
       const detail =
         typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error).slice(0, 300);
       return { ok: false, error: `ویژالیزور: ${detail}`, raw: text.slice(0, 300) };
@@ -417,6 +435,12 @@ export async function writeVpsIps(node, vpsid, ips, { dryRun = true } = {}) {
     flattenInto(v, k, sent);
   }
   sent.vpsid = String(vpsid);
+  // بدون این دو فلگ، ویژالیزور فقط داده صفحه را برمی‌گرداند و هیچ چیزی
+  // ذخیره نمی‌شود — پاسخ هم شبیه موفقیت است. از اس‌دی‌کی رسمی:
+  //   $post['theme_edit'] = 1;
+  //   $post['editvps']    = 1;
+  sent.theme_edit = '1';
+  sent.editvps = '1';
   ips.forEach((ip, i) => {
     sent[`ips[${i}]`] = ip;
   });

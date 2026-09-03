@@ -189,6 +189,29 @@ IPV4_CASES = [
 ]
 
 
+def is_empty_error(value):
+    """بازسازی isEmptyError"""
+    if value is None or value == "" or value is False:
+        return True
+    if isinstance(value, list):
+        return len(value) == 0
+    if isinstance(value, dict):
+        return len(value) == 0
+    return False
+
+
+EMPTY_ERROR_CASES = [
+    (None, True, "تهی"),
+    ("", True, "رشته خالی"),
+    ([], True, "آرایه خالی — پاسخ موفق ویژالیزور همین است"),
+    ({}, True, "شیء خالی"),
+    (False, True, "نادرست"),
+    ("مشکلی پیش آمد", False, "پیام خطای واقعی"),
+    (["خطا"], False, "آرایه با یک خطا"),
+    ({"vpsid": "نامعتبر"}, False, "شیء خطای کلیددار"),
+]
+
+
 KEY_CASES = [
     ("abcd1234", "secret", "کلید نمونه"),
     ("00000000", "", "رمز خالی"),
@@ -224,6 +247,16 @@ def main():
         else:
             failures += 1
             print("شکست  ورودی خراب: %s → بی‌صدا قبول شد" % name)
+
+    print("")
+
+    for value, expected, name in EMPTY_ERROR_CASES:
+        got = is_empty_error(value)
+        if got == expected:
+            print("گذشت  خطای خالی: %s → %s" % (name, got))
+        else:
+            failures += 1
+            print("شکست  خطای خالی: %s — انتظار %s، نتیجه %s" % (name, expected, got))
 
     print("")
 
@@ -273,6 +306,9 @@ def main():
         ("netmask: str(r.netmask).trim()", "ماسک از ردیف آی‌پی"),
         ("call(node, 'managevps'", "اکشن درست برای تغییر وی‌پی‌اس"),
         ("res.data.done ?? res.data.saved", "تأیید تغییر از پاسخ، نه فرض موفقیت"),
+        ("sent.theme_edit = '1'", "فلگ theme_edit"),
+        ("sent.editvps = '1'", "فلگ editvps"),
+        ("!isEmptyError(parsed.error)", "خطای خالی، خطا حساب نشود"),
     ]:
         if needle in src:
             print("گذشت  کد واقعی: %s" % why)
