@@ -36,7 +36,30 @@ export async function GET() {
   });
 }
 
-function clean(body: Record<string, unknown>) {
+/**
+ * یونیون تفکیک‌شده لازم است، نه استنتاج خودکار.
+ *
+ * بدون تایپ صریح، تایپ‌اسکریپت دو شاخه بازگشتی را طوری یکی می‌کند که
+ * «c.error» از نوع «string | undefined» درمی‌آید و «'error' in c» هم
+ * باریکش نمی‌کند. بیلد با «Type 'undefined' is not assignable» می‌شکند —
+ * خطایی که فقط هنگام کامپایل معلوم می‌شود، نه در بررسی‌های سریع.
+ */
+type CleanResult =
+  | { error: string; value?: undefined }
+  | {
+      error?: undefined;
+      value: {
+        name: string;
+        url: string;
+        anchor: string | null;
+        maxPerRun: number;
+        isActive: boolean;
+        bindServerId: number | null;
+        autoWatch: boolean;
+      };
+    };
+
+function clean(body: Record<string, unknown>): CleanResult {
   const name = String(body.name ?? '').trim();
   const url = String(body.url ?? '').trim().replace(/\/+$/, '');
   const anchor = String(body.anchor_vpsid ?? '').trim();
@@ -52,13 +75,15 @@ function clean(body: Record<string, unknown>) {
   }
 
   return {
-    name,
-    url,
-    anchor: anchor || null,
-    maxPerRun: Number.isInteger(maxPerRun) && maxPerRun > 0 ? Math.min(maxPerRun, 1000) : 200,
-    isActive: body.is_active !== false,
-    bindServerId,
-    autoWatch: body.auto_watch_free !== false,
+    value: {
+      name,
+      url,
+      anchor: anchor || null,
+      maxPerRun: Number.isInteger(maxPerRun) && maxPerRun > 0 ? Math.min(maxPerRun, 1000) : 200,
+      isActive: body.is_active !== false,
+      bindServerId,
+      autoWatch: body.auto_watch_free !== false,
+    },
   };
 }
 
@@ -66,8 +91,9 @@ export async function POST(req: Request) {
   return handle(async () => {
     await requireUser();
     const body = await readJson<Record<string, unknown>>(req);
-    const c = clean(body);
-    if ('error' in c) return fail(c.error, 400);
+    const parsed = clean(body);
+    if (parsed.error) return fail(parsed.error, 400);
+    const c = parsed.value;
 
     const key = String(body.api_key ?? '').trim();
     const pass = String(body.api_pass ?? '').trim();
@@ -96,8 +122,9 @@ export async function PATCH(req: Request) {
     const id = Number(body.id);
     if (!Number.isInteger(id)) return fail('شناسه نود نامعتبر است', 400);
 
-    const c = clean(body);
-    if ('error' in c) return fail(c.error, 400);
+    const parsed = clean(body);
+    if (parsed.error) return fail(parsed.error, 400);
+    const c = parsed.value;
 
     // خالی یعنی «عوض نکن» — وگرنه هر ذخیره‌ای که رمز را دوباره نمی‌نویسد،
     // اتصال را خراب می‌کرد
