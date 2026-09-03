@@ -80,6 +80,45 @@ DECISION_CASES = [
 ]
 
 
+# shares، گیت‌وی، پاسخ گیت‌وی به هر مبدأ، انتظار، توضیح
+ROUTING_CASES = [
+    (True,  "1.2.3.1", {}, True,  "هم‌ساب‌نت — خودش اثبات است، پینگ لازم نیست"),
+    (True,  None,      {}, True,  "هم‌ساب‌نت بدون گیت‌وی — باز هم اثبات"),
+    (False, None,      {}, None,  "رنج متفاوت، گیت‌وی ثبت نشده"),
+    (False, "1.2.3.1", {"9.9.9.9": True}, True, "رنج متفاوت، گیت‌وی جواب داد"),
+    # مهم‌ترین حالت: گیت‌وی ساکت است. بدون پینگ شاهد، این False می‌شد و
+    # ادمین دنبال مشکلی می‌رفت که وجود ندارد.
+    (False, "1.2.3.1", {"9.9.9.9": False, "1.2.3.5": False}, None,
+     "گیت‌وی به هیچ‌کس جواب نمی‌دهد — بی‌نتیجه، نه منفی"),
+    (False, "1.2.3.1", {"9.9.9.9": False, "1.2.3.5": True}, False,
+     "گیت‌وی به آدرس اصلی جواب می‌دهد ولی به این نه — واقعاً روت نشده"),
+]
+
+
+def check_routing(agent):
+    """تست روت با پینگ ساختگی — تفکیک None از False مهم‌ترین بخش است"""
+    failures = 0
+    answers = {}
+
+    def fake_ping(source, target):
+        return answers.get(source)
+
+    real = agent.ping_from
+    agent.ping_from = fake_ping
+    try:
+        for shares, gw, table, expected, name in ROUTING_CASES:
+            answers = table
+            got = agent.routing_test("9.9.9.9", gw, shares, "1.2.3.5")
+            if got == expected:
+                print("گذشت  روت: %s → %s" % (name, got))
+            else:
+                failures += 1
+                print("شکست  روت: %s — انتظار %s، نتیجه %s" % (name, expected, got))
+    finally:
+        agent.ping_from = real
+    return failures
+
+
 def main():
     agent = load_agent()
     failures = 0
@@ -92,6 +131,8 @@ def main():
             failures += 1
             print("شکست  ساب‌نت: %s — انتظار %s، نتیجه %s" % (name, expected, got))
 
+    print("")
+    failures += check_routing(agent)
     print("")
 
     for a, b, c, d, e, expected, name in DECISION_CASES:

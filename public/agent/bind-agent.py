@@ -157,29 +157,54 @@ def same_subnet(ip, base_ip, base_prefix):
     return (a & mask) == (b & mask)
 
 
-def routing_test(ip, gateway):
-    """
-    آیا این آدرس واقعاً روی شبکه شناخته شده است؟
-
-    یک پینگ به گیت‌وی می‌فرستیم که مبدأ آن، همان آدرس باشد. اگر گیت‌وی
-    جواب دهد یعنی روتر بالادست این آدرس را می‌شناسد و ترافیکش را به این
-    سرور می‌فرستد.
-
-    چرا پینگ‌زدن به خود آدرس کافی نیست: وقتی آدرس روی همین ماشین بایند
-    است، پینگ از لوپ‌بک رد می‌شود و همیشه موفق است — حتی اگر دیتاسنتر
-    بلوک را اصلاً روت نکرده باشد. آن تست هیچ چیزی را ثابت نمی‌کند.
-    """
-    if not gateway:
-        return None
+def ping_from(source, target):
+    """پینگ به مقصد با مبدأ مشخص؛ سه تلاش، چون یک بسته گمشده نتیجه را عوض نکند"""
     try:
         proc = subprocess.Popen(
-            ["ping", "-n", "-c", "1", "-W", "2", "-I", ip, gateway],
+            ["ping", "-n", "-c", "3", "-W", "2", "-I", source, target],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         proc.communicate()
         return proc.returncode == 0
     except Exception:
         return None
+
+
+def routing_test(ip, gateway, shares_subnet, base_ip):
+    """
+    آیا این آدرس واقعاً روی شبکه شناخته شده است؟
+
+    True یعنی روت شده، False یعنی نشده، None یعنی تست نتیجه نداد.
+    تفکیک None از False مهم است: گزارش «روت نشده» برای آدرسی که سالم
+    است، ادمین را دنبال مشکلی می‌فرستد که وجود ندارد.
+
+    سه حالت:
+
+    ۱. آدرس داخل همان ساب‌نت متصل کارت شبکه است. این خودش اثبات است —
+       دیتاسنتر آن بلوک را به این سرور روت کرده، وگرنه آدرس اصلی خود
+       سرور هم کار نمی‌کرد. پینگ لازم نیست.
+
+    ۲. رنج متفاوت است. پینگ به گیت‌وی با مبدأ همین آدرس می‌زنیم. ولی
+       جواب‌ندادن گیت‌وی دو معنی دارد: یا آدرس روت نشده، یا گیت‌وی اصلاً
+       به پینگ جواب نمی‌دهد — که در دیتاسنترها رایج است. پس یک پینگ
+       شاهد از آدرس اصلی سرور هم می‌زنیم. اگر آن هم جواب نگیرد، گیت‌وی
+       ساکت است و تست بی‌نتیجه است، نه منفی.
+
+    ۳. گیت‌وی ثبت نشده — تست انجام نمی‌شود.
+    """
+    if shares_subnet is True:
+        return True
+    if not gateway:
+        return None
+
+    if ping_from(ip, gateway):
+        return True
+
+    # پینگ شاهد: آیا این گیت‌وی اصلاً به کسی جواب می‌دهد؟
+    if base_ip and ping_from(base_ip, gateway) is False:
+        return None
+
+    return False
 
 
 def load_state():
@@ -277,7 +302,7 @@ def main():
                 shares = same_subnet(ip, base_ip, base_prefix)
                 if code == 0 or "File exists" in out:
                     state.add(ip)
-                    routed = routing_test(ip, gateways.get(ip))
+                    routed = routing_test(ip, gateways.get(ip), shares, base_ip)
                     if code == 0:
                         note = ""
                         if shares is False:
