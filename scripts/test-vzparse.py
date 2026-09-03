@@ -124,6 +124,38 @@ BROKEN_CASES = [
     ('', "خالی"),
 ]
 
+def is_ipv4(value):
+    """بازسازی isIpv4 از worker/virtualizor.mjs"""
+    parts = str(value or "").strip().split(".")
+    if len(parts) != 4:
+        return False
+    for part in parts:
+        if not re.match(r"^\d{1,3}$", part):
+            return False
+        if int(part) > 255:
+            return False
+    return True
+
+
+IPV4_CASES = [
+    ("95.38.101.131", True, "آدرس معمولی"),
+    ("0.0.0.0", True, "صفر"),
+    ("255.255.255.255", True, "بیشینه"),
+    ("  1.2.3.4  ", True, "با فاصله اضافه"),
+    ("2001:db8::1", False, "نسخه ۶"),
+    ("::1", False, "لوپ‌بک نسخه ۶"),
+    ("fe80::a00:27ff:fe4e:66a1", False, "لینک‌لوکال"),
+    # این یکی نقطه دارد و با بررسی ساده «نقطه دارد» رد نمی‌شد
+    ("::ffff:1.2.3.4", False, "نسخه ۴ نگاشته در نسخه ۶"),
+    ("1.2.3", False, "سه بخشی"),
+    ("1.2.3.4.5", False, "پنج بخشی"),
+    ("1.2.3.256", False, "بخش بزرگ‌تر از ۲۵۵"),
+    ("1.2.3.a", False, "بخش غیرعددی"),
+    ("", False, "خالی"),
+    (None, False, "تهی"),
+]
+
+
 KEY_CASES = [
     ("abcd1234", "secret", "کلید نمونه"),
     ("00000000", "", "رمز خالی"),
@@ -162,6 +194,16 @@ def main():
 
     print("")
 
+    for value, expected, name in IPV4_CASES:
+        got = is_ipv4(value)
+        if got == expected:
+            print("گذشت  نسخه۴: %s → %s" % (name, got))
+        else:
+            failures += 1
+            print("شکست  نسخه۴: %s — انتظار %s، نتیجه %s" % (name, expected, got))
+
+    print("")
+
     for rand, password, name in KEY_CASES:
         got = make_apikey(rand, password)
         expected = rand + hashlib.md5((password + rand).encode("utf-8")).hexdigest()
@@ -179,6 +221,8 @@ def main():
         ("adminapipass: node.api_pass", "پارامتر adminapipass"),
         ("api: 'serialize'", "قالب پاسخ"),
         ("buf.toString('utf8', at, at + len)", "برش رشته بر حسب بایت"),
+        (".filter((r) => isIpv4(r.ip))", "فیلتر نسخه ۴ در فهرست آی‌پی"),
+        ("isIpv4(r.firstip)", "فیلتر نسخه ۴ در فهرست مخزن"),
     ]:
         if needle in src:
             print("گذشت  کد واقعی: %s" % why)

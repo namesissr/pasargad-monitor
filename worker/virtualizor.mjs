@@ -189,6 +189,22 @@ function rows(bag) {
 
 const str = (v, fallback = '') => (v === null || v === undefined ? fallback : String(v));
 
+/**
+ * آیا یک آدرس آی‌پی‌وی۴ معتبر است؟
+ *
+ * ویژالیزور آدرس‌های نسخه ۶ را در همان فهرست برمی‌گرداند. اگر فیلتر نشوند،
+ * چون درج با version=4 ثابت انجام می‌شود، به‌عنوان نسخه ۴ ثبت می‌شوند —
+ * یعنی برچسبشان دروغ است، در پایش اکسس می‌آیند (که فقط برای نسخه ۴ معنی
+ * دارد)، و در حسابداری آی‌پی شمرده می‌شوند.
+ *
+ * بررسی سخت‌گیرانه است نه فقط «نقطه دارد»: «::ffff:1.2.3.4» هم نقطه دارد.
+ */
+function isIpv4(value) {
+  const parts = String(value || '').trim().split('.');
+  if (parts.length !== 4) return false;
+  return parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255);
+}
+
 /** صفحه‌بندی عمومی — بدون آن، نود با هزاران آدرس یا تایم‌اوت می‌دهد یا پاسخ چندمگابایتی */
 async function paged(node, act, key, extra = {}, maxPages = 60) {
   const out = [];
@@ -233,7 +249,8 @@ export async function listIps(node) {
         ippoolid: str(r.ippoolid),
         locked: str(r.locked) === '1',
       }))
-      .filter((r) => r.ip),
+      // فقط نسخه ۴. نسخه ۶ نه در پایش اکسس معنی دارد نه در لنگر.
+      .filter((r) => isIpv4(r.ip)),
   };
 }
 
@@ -250,7 +267,8 @@ export async function listPools(node) {
         netmask: str(r.netmask).trim(),
         firstip: str(r.firstip).trim(),
       }))
-      .filter((r) => r.poolid),
+      // مخزن نسخه ۶ یک ساب‌نت بی‌معنی در پنل می‌ساخت
+      .filter((r) => r.poolid && isIpv4(r.firstip)),
   };
 }
 

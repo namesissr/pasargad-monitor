@@ -173,6 +173,9 @@ export async function discoverNode(node) {
               CASE WHEN (NOT u.assigned) AND $8 THEN $9::int END
          FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::boolean[])
               AS u(ip, ipid, vpsid, hostname, customer, assigned)
+        -- محافظ دوم: اگر فیلتر بالادست روزی عوض شود، آدرس نسخه ۶ نباید
+        -- با برچسب «نسخه ۴» وارد شود
+        WHERE family(u.ip::inet) = 4
        ON CONFLICT (ip) DO UPDATE
          SET vz_ipid     = EXCLUDED.vz_ipid,
              vz_vpsid    = EXCLUDED.vz_vpsid,
