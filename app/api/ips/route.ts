@@ -70,7 +70,9 @@ export async function GET(req: Request) {
       `SELECT i.id, host(i.ip) AS ip, i.version, i.status, i.customer, i.ptr, i.mac,
               i.is_monitored, i.ping_ok, i.ping_ms, i.last_ping_at, i.notes,
               i.access_watch, i.iran_access_status, i.access_blocked_since, i.access_released_at,
-              i.bind_server_id, i.bind_ok, i.bind_error, i.bind_same_subnet,
+              i.bind_server_id, i.bind_ok, i.bind_error, i.bind_same_subnet, i.bind_routed,
+              (SELECT COUNT(*)::int FROM ip_probe_state ps
+                WHERE ps.ip_id = i.id AND ps.checked_at IS NOT NULL) AS probe_checks,
               i.server_id, s.name AS server_name,
               i.subnet_id, n.cidr::text AS subnet,
               masklen(n.cidr) AS subnet_prefix,

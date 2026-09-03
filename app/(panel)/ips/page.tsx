@@ -22,6 +22,8 @@ interface IpRow {
   access_watch: boolean;
   iran_access_status: string;
   access_blocked_since: string | null;
+  bind_routed: boolean | null;
+  probe_checks: number;
   access_released_at: string | null;
   bind_server_id: number | null;
   bind_ok: boolean | null;
@@ -249,6 +251,15 @@ export default function IpsPage() {
                   <td className="text-xs whitespace-nowrap">
                     {!ip.access_watch ? (
                       <span className="text-muted/60">—</span>
+                    ) : ip.probe_checks === 0 ? (
+                      // «در اکسس» هنگام افزودن به‌عنوان فرض اولیه ثبت می‌شود، نه اندازه‌گیری.
+                      // تا وقتی دیدبانی گزارش نداده، نشان‌دادنش به‌عنوان وضعیت قطعی دروغ است.
+                      <span
+                        className="badge bg-line text-muted"
+                        title="هنوز هیچ دیدبانی این آی‌پی را بررسی نکرده. اولین دور تا ۱۰ دقیقه بعد از نصب دیدبان انجام می‌شود."
+                      >
+                        در انتظار اولین بررسی
+                      </span>
                     ) : ip.iran_access_status === 'released' ? (
                       <span className="badge bg-ok/15 text-ok" title={formatJalali(ip.access_released_at)}>
                         {IRAN_ACCESS_LABEL.released} · {timeAgo(ip.access_released_at)}
