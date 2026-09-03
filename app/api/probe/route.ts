@@ -235,8 +235,14 @@ async function evaluate(ipIds: number[]): Promise<Transition[]> {
     }
 
     if (target === 'released') {
+      // پایش خاموش می‌شود تا لنگر آدرس را رها کند و برای سرور دیگری قابل
+      // استفاده شود. بدون این، آی‌پی آزادشده روی وی‌پی‌اس ایران می‌ماند —
+      // یعنی همان کاری که کل این بخش برایش ساخته شده ناتمام می‌ماند.
+      // ردیف در فیلتر «آزادشده‌ها» می‌ماند؛ آن فیلتر به access_watch وابسته نیست.
       await query(
-        `UPDATE ip_addresses SET iran_access_status = 'released', access_released_at = now(), updated_at = now()
+        `UPDATE ip_addresses
+            SET iran_access_status = 'released', access_released_at = now(),
+                access_watch = FALSE, updated_at = now()
           WHERE id = $1`,
         [ipId],
       );

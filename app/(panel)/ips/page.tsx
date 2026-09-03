@@ -24,6 +24,9 @@ interface IpRow {
   access_blocked_since: string | null;
   bind_routed: boolean | null;
   probe_checks: number;
+  outside_ok: boolean | null;
+  outside_ok_streak: number | null;
+  outside_fail_streak: number | null;
   access_released_at: string | null;
   bind_server_id: number | null;
   bind_ok: boolean | null;
@@ -271,7 +274,7 @@ export default function IpsPage() {
                     )}
                   </td>
                   <td className="text-xs whitespace-nowrap">
-                    {!ip.access_watch ? (
+                    {!ip.access_watch && ip.iran_access_status !== 'released' ? (
                       <span className="text-muted/60">—</span>
                     ) : ip.probe_checks === 0 ? (
                       // «در اکسس» هنگام افزودن به‌عنوان فرض اولیه ثبت می‌شود، نه اندازه‌گیری.
@@ -281,6 +284,23 @@ export default function IpsPage() {
                         title="هنوز هیچ دیدبانی این آی‌پی را بررسی نکرده. اولین دور تا ۱۰ دقیقه بعد از نصب دیدبان انجام می‌شود."
                       >
                         در انتظار اولین بررسی
+                      </span>
+                    ) : ip.iran_access_status !== 'released' && ip.outside_ok === true ? (
+                      // شواهد می‌گویند آزاد است ولی هنوز به حد نصاب سه بار
+                      // پیاپی نرسیده. نشان‌دادن «در اکسس» در این فاصله یعنی
+                      // پنل چیزی را می‌گوید که سنجش خلافش را نشان می‌دهد.
+                      <span
+                        className="badge bg-amber/15 text-amber"
+                        title="دیدبان خارج جواب می‌گیرد. برای جلوگیری از اعلام زودهنگام، سه بررسی پیاپی لازم است."
+                      >
+                        در حال تأیید آزادی · {faNum(ip.outside_ok_streak ?? 0)} از ۳
+                      </span>
+                    ) : ip.iran_access_status === 'released' && ip.outside_ok === false ? (
+                      <span
+                        className="badge bg-amber/15 text-amber"
+                        title="دیدبان خارج دیگر جواب نمی‌گیرد. برای تغییر وضعیت، سه بررسی پیاپی لازم است."
+                      >
+                        در حال تأیید اکسس · {faNum(ip.outside_fail_streak ?? 0)} از ۳
                       </span>
                     ) : ip.iran_access_status === 'released' ? (
                       <span className="badge bg-ok/15 text-ok" title={formatJalali(ip.access_released_at)}>

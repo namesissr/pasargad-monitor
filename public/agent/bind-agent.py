@@ -157,6 +157,33 @@ def same_subnet(ip, base_ip, base_prefix):
     return (a & mask) == (b & mask)
 
 
+def current_prefix(iface, ip):
+    """
+    پرفیکسی که این آدرس همین حالا با آن روی رابط نشسته، یا None اگر نیست.
+
+    برای حذف لازم است: «ip addr del» آدرس و پرفیکس را با هم تطبیق می‌دهد.
+    آدرسی که با /۲۴ بایند شده با «del ip/32» حذف نمی‌شود و خطای
+    «Cannot assign requested address» می‌دهد.
+    """
+    try:
+        proc = subprocess.Popen(["ip", "-4", "-o", "addr", "show", "dev", iface],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, _ = proc.communicate()
+        if proc.returncode != 0:
+            return None
+        for line in text(out).split(chr(10)):
+            parts = line.split()
+            for i, token in enumerate(parts):
+                if token == "inet" and i + 1 < len(parts):
+                    addr = parts[i + 1]
+                    if addr.split("/")[0] == ip:
+                        bits = addr.split("/")
+                        return int(bits[1]) if len(bits) > 1 else 32
+    except Exception:
+        pass
+    return None
+
+
 def ping_from(source, target):
     """پینگ به مقصد با مبدأ مشخص؛ سه تلاش، چون یک بسته گمشده نتیجه را عوض نکند"""
     try:
@@ -284,13 +311,24 @@ def main():
             # جداکردن آی‌پی‌هایی که ما بایند کردیم و دیگر خواسته نیستند.
             # فقط از روی فایل حالت — هرگز به آدرس‌های خود سرور دست نمی‌زنیم.
             for ip in sorted(state - wanted):
-                # پرفیکس هنگام حذف اهمیتی ندارد؛ کرنل با خود آدرس پیدایش می‌کند
-                code, out = run_ip(["addr", "del", ip + "/32", "dev", iface])
-                if code == 0 or "Cannot assign" in out:
+                # پرفیکس واقعی را از خود رابط می‌خوانیم. قبلاً «/32» ثابت
+                # فرستاده می‌شد با این فرض که کرنل آدرس را خودش پیدا می‌کند —
+                # ولی «ip addr del» آدرس و پرفیکس را با هم تطبیق می‌دهد. برای
+                # آدرسی که با /۲۴ بایند شده، حذف شکست می‌خورد و چون
+                # «Cannot assign» موفقیت حساب می‌شد، ایجنت آن را از حالت پاک
+                # می‌کرد و «جدا شد» می‌گفت — در حالی که آدرس روی کارت می‌ماند
+                # و هیچ‌وقت برای سرور دیگری آزاد نمی‌شد.
+                have = current_prefix(iface, ip)
+                if have is None:
+                    state.discard(ip)
+                    say("جدا شد: %s (از قبل روی رابط نبود)" % ip)
+                    continue
+                code, out = run_ip(["addr", "del", "%s/%d" % (ip, have), "dev", iface])
+                if code == 0 and current_prefix(iface, ip) is None:
                     state.discard(ip)
                     say("جدا شد: %s" % ip)
                 else:
-                    say("جداکردن %s ناموفق: %s" % (ip, out.strip()[:120]))
+                    say("جداکردن %s ناموفق: %s" % (ip, out.strip()[:120] or "هنوز روی رابط است"))
 
             # بایند خواسته‌ها
             for ip in sorted(wanted):

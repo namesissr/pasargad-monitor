@@ -44,7 +44,14 @@ export async function GET(req: Request) {
       where.push('i.access_watch');
     } else if (access === 'blocked' || access === 'released' || access === 'unreachable') {
       p.push(access);
-      where.push(`i.access_watch AND i.iran_access_status = $${p.length}`);
+      // «آزادشده» پس از آزادی تیک پایش را از دست می‌دهد، پس این فیلتر
+      // نباید به access_watch وابسته باشد وگرنه همان‌هایی که دنبالشانیم
+      // ناپدید می‌شوند
+      where.push(
+        access === 'released'
+          ? `i.iran_access_status = $${p.length}`
+          : `i.access_watch AND i.iran_access_status = $${p.length}`,
+      );
     }
     if (version === '4' || version === '6') {
       p.push(Number(version));
@@ -73,6 +80,12 @@ export async function GET(req: Request) {
               i.bind_server_id, i.bind_ok, i.bind_error, i.bind_same_subnet, i.bind_routed,
               (SELECT COUNT(*)::int FROM ip_probe_state ps
                 WHERE ps.ip_id = i.id AND ps.checked_at IS NOT NULL) AS probe_checks,
+              -- تازه‌ترین شواهد دیدبان خارج. وضعیت ثبت‌شده تا رسیدن به حد
+              -- نصاب پیاپی عوض نمی‌شود، ولی در همان فاصله باید معلوم باشد
+              -- که سنجش چه می‌گوید — وگرنه پنل فرض اولیه را مثل واقعیت
+              -- نشان می‌دهد، حتی وقتی شواهد خلافش را می‌گویند.
+              o.ok AS outside_ok, o.ok_streak AS outside_ok_streak,
+              o.fail_streak AS outside_fail_streak,
               i.server_id, s.name AS server_name,
               i.subnet_id, n.cidr::text AS subnet,
               masklen(n.cidr) AS subnet_prefix,
@@ -81,6 +94,14 @@ export async function GET(req: Request) {
          FROM ip_addresses i
          LEFT JOIN servers s   ON s.id = i.server_id
          LEFT JOIN ip_subnets n ON n.id = i.subnet_id
+         LEFT JOIN LATERAL (
+           SELECT s2.ok, s2.ok_streak, s2.fail_streak
+             FROM ip_probe_state s2
+             JOIN probes p2 ON p2.id = s2.probe_id AND p2.is_active AND p2.location = 'outside'
+            WHERE s2.ip_id = i.id AND s2.checked_at > now() - interval '2 hours'
+            ORDER BY s2.checked_at DESC
+            LIMIT 1
+         ) o ON TRUE
          ${clause}
         ORDER BY ${access === 'released' ? 'i.access_released_at DESC NULLS LAST,' : ''} i.ip
         LIMIT $${p.length - 1} OFFSET $${p.length}`,
@@ -95,7 +116,7 @@ export async function GET(req: Request) {
       `SELECT COUNT(*) FILTER (WHERE access_watch)::int AS watch,
               COUNT(*) FILTER (WHERE access_watch AND iran_access_status = 'blocked')::int AS blocked,
               COUNT(*) FILTER (WHERE access_watch AND iran_access_status = 'unreachable')::int AS unreachable,
-              COUNT(*) FILTER (WHERE access_watch AND iran_access_status = 'released'
+              COUNT(*) FILTER (WHERE iran_access_status = 'released'
                                AND access_released_at > now() - interval '7 days')::int AS released7
          FROM ip_addresses`,
     );
