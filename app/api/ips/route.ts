@@ -226,3 +226,73 @@ export async function POST(req: Request) {
     return ok({ added: added.length, failed }, { status: 201 });
   });
 }
+
+/**
+ * حذف دسته‌ای آی‌پی‌های یک بلوک.
+ *
+ * چرا با محافظ: یک بلوک ۲۴ یعنی ۲۵۶ ردیف و برگرداندنشان دستی نشدنی است.
+ * پس آدرسی که در حال استفاده است — تخصیص‌یافته به مشتری، یا تحت پایش
+ * اکسس — به‌طور پیش‌فرض حذف نمی‌شود و تعدادش گزارش می‌شود تا ادمین
+ * آگاهانه تصمیم بگیرد.
+ *
+ * ?dryRun=1 فقط می‌شمارد و چیزی حذف نمی‌کند.
+ * ?force=1 آدرس‌های در حال استفاده را هم حذف می‌کند.
+ * ?withSubnet=1 خود رکورد بلوک را هم پاک می‌کند.
+ */
+export async function DELETE(req: Request) {
+  return handle(async () => {
+    await requireUser();
+    const url = new URL(req.url);
+
+    const subnetId = Number(url.searchParams.get('subnetId'));
+    if (!Number.isInteger(subnetId)) return fail('بلوک را مشخص کنید', 400);
+
+    const dryRun = url.searchParams.get('dryRun') === '1';
+    const force = url.searchParams.get('force') === '1';
+    const withSubnet = url.searchParams.get('withSubnet') === '1';
+
+    const subnet = await queryOne<{ cidr: string }>(
+      `SELECT cidr::text AS cidr FROM ip_subnets WHERE id = $1`,
+      [subnetId],
+    );
+    if (!subnet) return fail('بلوک پیدا نشد', 404);
+
+    // «در حال استفاده» یعنی هر نشانه‌ای از اینکه کسی به آن وابسته است
+    const inUse = `(status = 'assigned' OR access_watch OR customer IS NOT NULL OR vz_vpsid IS NOT NULL)`;
+
+    const counts = await queryOne<{ total: number; used: number }>(
+      `SELECT COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE ${inUse})::int AS used
+         FROM ip_addresses WHERE ip << $1::cidr`,
+      [subnet.cidr],
+    );
+
+    const total = counts?.total ?? 0;
+    const used = counts?.used ?? 0;
+
+    if (dryRun) {
+      return ok({ cidr: subnet.cidr, total, used, deleted: 0, dryRun: true });
+    }
+
+    if (used > 0 && !force) {
+      return fail(
+        `${used} آدرس از این بلوک در حال استفاده است (تخصیص‌یافته، تحت پایش، یا دارای مشتری). ` +
+          'برای حذف همه، گزینه حذف اجباری را بزنید.',
+        409,
+      );
+    }
+
+    const deleted = await query<{ id: number }>(
+      `DELETE FROM ip_addresses
+        WHERE ip << $1::cidr ${force ? '' : `AND NOT ${inUse}`}
+        RETURNING id`,
+      [subnet.cidr],
+    );
+
+    if (withSubnet) {
+      await query('DELETE FROM ip_subnets WHERE id = $1', [subnetId]);
+    }
+
+    return ok({ cidr: subnet.cidr, total, used, deleted: deleted.length, dryRun: false });
+  });
+}

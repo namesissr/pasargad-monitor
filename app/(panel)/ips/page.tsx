@@ -97,6 +97,7 @@ export default function IpsPage() {
 
   const { data, loading, error, reload } = useLoad<IpData>(`/api/ips?${params}`);
   const subnets = useLoad<{ subnets: SubnetRow[] }>('/api/subnets');
+  const [purging, setPurging] = useState<SubnetRow | null>(null);
   const servers = useLoad<{ servers: { id: number; name: string }[] }>('/api/servers');
 
   const total = data?.total ?? 0;
@@ -407,6 +408,7 @@ export default function IpsPage() {
                   <th>تخصیص‌یافته</th>
                   <th>آزاد</th>
                   <th>مسدود</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -419,6 +421,15 @@ export default function IpsPage() {
                     <td className="text-xs text-cyan">{faNum(n.assigned)}</td>
                     <td className="text-xs text-ok">{faNum(n.free)}</td>
                     <td className="text-xs text-danger">{faNum(n.blocked)}</td>
+                    <td className="text-end">
+                      <button
+                        type="button"
+                        className="text-xs text-muted hover:text-danger"
+                        onClick={() => setPurging(n)}
+                      >
+                        حذف آی‌پی‌ها
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -426,6 +437,18 @@ export default function IpsPage() {
           </div>
         )}
       </section>
+
+      {purging && (
+        <PurgeBlockModal
+          subnet={purging}
+          onClose={() => setPurging(null)}
+          onDone={() => {
+            setPurging(null);
+            reload();
+            subnets.reload();
+          }}
+        />
+      )}
 
       <AddIpModal
         open={adding}
@@ -871,6 +894,131 @@ function EditIpModal({
           </div>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/**
+ * حذف دسته‌ای آی‌پی‌های یک بلوک.
+ *
+ * پیش از هر حذفی، شمارش واقعی از سرور گرفته و نشان داده می‌شود. یک بلوک
+ * ۲۴ یعنی ۲۵۶ ردیف؛ عددی که کاربر پیش از تأیید نبیند، بعداً هم نمی‌بیند.
+ */
+function PurgeBlockModal({
+  subnet,
+  onClose,
+  onDone,
+}: {
+  subnet: SubnetRow;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [counts, setCounts] = useState<{ total: number; used: number } | null>(null);
+  const [force, setForce] = useState(false);
+  const [withSubnet, setWithSubnet] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .del<{ total: number; used: number }>(`/api/ips?subnetId=${subnet.id}&dryRun=1`)
+      .then((r) => {
+        if (alive) setCounts({ total: r.total, used: r.used });
+      })
+      .catch((e) => {
+        if (alive) setErr(e instanceof ApiError ? e.message : 'شمارش آی‌پی‌های بلوک انجام نشد');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [subnet.id]);
+
+  async function purge() {
+    setErr(null);
+    setBusy(true);
+    try {
+      const params = new URLSearchParams({ subnetId: String(subnet.id) });
+      if (force) params.set('force', '1');
+      if (withSubnet) params.set('withSubnet', '1');
+      const r = await api.del<{ deleted: number }>(`/api/ips?${params.toString()}`);
+      setDone(r.deleted);
+      setTimeout(onDone, 1200);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'حذف انجام نشد');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const removable = counts ? (force ? counts.total : counts.total - counts.used) : 0;
+
+  return (
+    <Modal open title={`حذف آی‌پی‌های ${subnet.cidr}`} onClose={onClose}>
+      <div className="space-y-4">
+        {!counts && !err && <p className="text-xs text-muted">در حال شمارش…</p>}
+
+        {counts && (
+          <>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="card p-3">
+                <div className="text-xs text-muted">کل ثبت‌شده</div>
+                <div className="text-xl font-bold mt-1">{faNum(counts.total)}</div>
+              </div>
+              <div className="card p-3">
+                <div className="text-xs text-muted">در حال استفاده</div>
+                <div className="text-xl font-bold mt-1 text-amber">{faNum(counts.used)}</div>
+              </div>
+              <div className="card p-3">
+                <div className="text-xs text-muted">حذف می‌شود</div>
+                <div className="text-xl font-bold mt-1 text-danger">{faNum(removable)}</div>
+              </div>
+            </div>
+
+            {counts.used > 0 && (
+              <Notice type="warn">
+                {faNum(counts.used)} آدرس این بلوک در حال استفاده است — تخصیص‌یافته به مشتری،
+                تحت پایش اکسس، یا دارای نام مشتری. به‌طور پیش‌فرض دست نمی‌خورند.
+              </Notice>
+            )}
+
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
+              <span>آدرس‌های در حال استفاده هم حذف شوند</span>
+            </label>
+
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={withSubnet}
+                onChange={(e) => setWithSubnet(e.target.checked)}
+              />
+              <span>خود بلوک {subnet.cidr} هم از فهرست بلوک‌ها پاک شود</span>
+            </label>
+
+            <Notice type="error">
+              این کار برگشت‌پذیر نیست. اگر نودی در ویژالیزور تعریف شده باشد، کشف بعدی همان
+              آدرس‌ها را دوباره وارد می‌کند — ولی نام مشتری دستی و تنظیمات پایششان برنمی‌گردد.
+            </Notice>
+          </>
+        )}
+
+        {err && <Notice type="error">{err}</Notice>}
+        {done !== null && <Notice type="success">{faNum(done)} آدرس حذف شد.</Notice>}
+
+        <div className="flex gap-2 justify-end">
+          <button type="button" className="btn-ghost" onClick={onClose}>انصراف</button>
+          <button
+            type="button"
+            className="btn-danger"
+            onClick={purge}
+            disabled={busy || !counts || removable === 0 || done !== null}
+          >
+            {busy ? 'در حال حذف…' : `حذف ${faNum(removable)} آدرس`}
+          </button>
+        </div>
+      </div>
     </Modal>
   );
 }

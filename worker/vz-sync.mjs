@@ -150,14 +150,27 @@ export async function discoverNode(node) {
   }
 
   if (addr.length) {
+    // آی‌پی آزاد تازه خودکار تحت پایش می‌رود و به سرور لنگر گره می‌خورد.
+    // آن گره‌خوردن حیاتی است: ایجنت pasargad-bind روی همان وی‌پی‌اس فقط
+    // آدرس‌هایی را می‌بیند که bind_server_id‌شان خودش است. بدون آن، آدرس
+    // در ویژالیزور تخصیص می‌یابد ولی داخل مهمان روی کارت نمی‌نشیند و
+    // هیچ‌وقت جواب نمی‌دهد — برای همیشه «روت نشده».
+    //
+    // فقط برای رکورد تازه. آدرسی که از قبل در پنل هست وضعیت پایشش دست
+    // نمی‌خورد، چون ممکن است ادمین عمداً خاموشش کرده باشد.
     // host() اجباری است: مقایسه inet در پستگرس ماسک را هم حساب می‌کند و
     // «x/24» با «x» برابر نیست.
     await q(
       `INSERT INTO ip_addresses (ip, version, status, customer, vz_ipid, vz_vpsid,
-                                 vz_hostname, vz_node_id, vz_synced_at)
+                                 vz_hostname, vz_node_id, vz_synced_at,
+                                 access_watch, iran_access_status, access_blocked_since,
+                                 bind_server_id)
        SELECT host(u.ip::inet)::inet, 4,
               CASE WHEN u.assigned THEN 'assigned' ELSE 'free' END,
-              u.customer, u.ipid, u.vpsid, u.hostname, $7, now()
+              u.customer, u.ipid, u.vpsid, u.hostname, $7, now(),
+              (NOT u.assigned) AND $8, 'unknown',
+              CASE WHEN (NOT u.assigned) AND $8 THEN now() END,
+              CASE WHEN (NOT u.assigned) AND $8 THEN $9::int END
          FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::boolean[])
               AS u(ip, ipid, vpsid, hostname, customer, assigned)
        ON CONFLICT (ip) DO UPDATE
@@ -177,7 +190,11 @@ export async function discoverNode(node) {
              status      = CASE WHEN ip_addresses.access_watch
                                 THEN ip_addresses.status
                                 ELSE EXCLUDED.status END`,
-      [addr, ipid, vpsid, hostname, customer, assigned, node.id],
+      [
+        addr, ipid, vpsid, hostname, customer, assigned, node.id,
+        node.auto_watch_free !== false && Boolean(node.bind_server_id),
+        node.bind_server_id ?? null,
+      ],
     );
   }
 
@@ -275,14 +292,19 @@ export async function applyNode(node, { dryRun = true } = {}) {
   if (!dryRun) {
     if (attachSlice.length) {
       await q(
-        `UPDATE ip_addresses SET managed_by_panel = TRUE, vz_vpsid = $2, vz_synced_at = now()
+        `UPDATE ip_addresses
+            SET managed_by_panel = TRUE, vz_vpsid = $2, vz_synced_at = now(),
+                bind_server_id = COALESCE($3::int, bind_server_id)
           WHERE host(ip) = ANY($1::text[])`,
-        [attachSlice, anchor],
+        [attachSlice, anchor, node.bind_server_id ?? null],
       );
     }
     if (detach.length) {
+      // access_watch از قبل هنگام «آزاد شد» خاموش شده؛ اینجا پیوند لنگر
+      // هم پاک می‌شود تا ایجنت آدرس را از کارت شبکه بردارد
       await q(
-        `UPDATE ip_addresses SET managed_by_panel = FALSE, vz_vpsid = NULL, vz_synced_at = now()
+        `UPDATE ip_addresses
+            SET managed_by_panel = FALSE, vz_vpsid = NULL, bind_server_id = NULL, vz_synced_at = now()
           WHERE host(ip) = ANY($1::text[])`,
         [detach],
       );

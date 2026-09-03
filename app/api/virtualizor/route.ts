@@ -21,12 +21,15 @@ export async function GET() {
 
     const nodes = await query(
       `SELECT n.id, n.name, n.anchor_vpsid, n.is_active, n.last_sync_at, n.last_error,
+              n.bind_server_id, sv.name AS bind_server_name,
               (SELECT COUNT(*)::int FROM ip_addresses i WHERE i.vz_node_id = n.id) AS ip_count,
               (SELECT COUNT(*)::int FROM ip_addresses i
                 WHERE i.vz_node_id = n.id AND i.vz_vpsid IS NOT NULL) AS assigned_count,
               (SELECT COUNT(*)::int FROM ip_addresses i
                 WHERE i.vz_node_id = n.id AND i.access_watch) AS watched_count
-         FROM vz_nodes n ORDER BY n.name`,
+         FROM vz_nodes n
+         LEFT JOIN servers sv ON sv.id = n.bind_server_id
+        ORDER BY n.name`,
     );
 
     const runs = await query(

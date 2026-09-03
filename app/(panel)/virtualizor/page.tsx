@@ -14,6 +14,9 @@ interface NodeRow {
   max_per_run?: number;
   is_active: boolean;
   has_credentials?: boolean;
+  bind_server_id: number | null;
+  bind_server_name: string | null;
+  auto_watch_free?: boolean;
   last_sync_at: string | null;
   last_error: string | null;
   ip_count: number;
@@ -32,6 +35,11 @@ interface RunRow {
   detached: number;
   ok: boolean;
   detail: string | null;
+}
+
+interface ServerOption {
+  id: number;
+  name: string;
 }
 
 interface VzData {
@@ -175,6 +183,18 @@ export default function VirtualizorPage() {
                 نوشته نمی‌شود.
               </p>
             )}
+            {node.anchor_vpsid && !node.bind_server_id && (
+              <Notice type="warn">
+                سرور لنگر در پنل انتخاب نشده. تخصیص در ویژالیزور به‌تنهایی کافی نیست: آدرس باید
+                داخل خود وی‌پی‌اس هم روی کارت شبکه بنشیند تا جواب بدهد. بدون این، همه آی‌پی‌ها
+                برای همیشه «روت نشده» می‌مانند.
+              </Notice>
+            )}
+            {node.bind_server_name && (
+              <p className="text-xs text-muted">
+                لنگر: وی‌پی‌اس {node.anchor_vpsid} در ویژالیزور، سرور «{node.bind_server_name}» در پنل
+              </p>
+            )}
           </section>
         ))}
       </div>
@@ -255,7 +275,10 @@ function NodeForm({
     anchor_vpsid: node?.anchor_vpsid ?? '',
     max_per_run: String(node?.max_per_run ?? 200),
     is_active: node?.is_active ?? true,
+    bind_server_id: node?.bind_server_id ? String(node.bind_server_id) : '',
+    auto_watch_free: node?.auto_watch_free ?? true,
   });
+  const servers = useLoad<{ servers: ServerOption[] }>('/api/servers');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -268,7 +291,11 @@ function NodeForm({
     setErr(null);
     setBusy(true);
     try {
-      const payload = { ...form, max_per_run: Number(form.max_per_run) || 200 };
+      const payload = {
+        ...form,
+        max_per_run: Number(form.max_per_run) || 200,
+        bind_server_id: form.bind_server_id ? Number(form.bind_server_id) : null,
+      };
       if (node) await api.patch('/api/vz-nodes', { id: node.id, ...payload });
       else await api.post('/api/vz-nodes', payload);
       onDone();
@@ -321,6 +348,43 @@ function NodeForm({
             </select>
           </Field>
         </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field
+            label="سرور لنگر در پنل"
+            hint="همان وی‌پی‌اس لنگر که در بخش سرورها ثبت شده و ایجنت pasargad-bind رویش نصب است"
+          >
+            <select
+              className="input"
+              value={form.bind_server_id}
+              onChange={(e) => setForm((f) => ({ ...f, bind_server_id: e.target.value }))}
+            >
+              <option value="">— انتخاب نشده —</option>
+              {(servers.data?.servers ?? []).map((sv) => (
+                <option key={sv.id} value={sv.id}>{sv.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field
+            label="پایش خودکار آی‌پی آزاد"
+            hint="آدرس آزاد تازه‌کشف‌شده خودکار تحت پایش اکسس برود"
+          >
+            <select
+              className="input"
+              value={form.auto_watch_free ? 'true' : 'false'}
+              onChange={(e) => setForm((f) => ({ ...f, auto_watch_free: e.target.value === 'true' }))}
+            >
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+        </div>
+
+        <Notice type="warn">
+          تخصیص در ویژالیزور به‌تنهایی کافی نیست — آدرس باید داخل خود وی‌پی‌اس هم روی کارت شبکه
+          بنشیند. برای همین «سرور لنگر در پنل» لازم است: ایجنت pasargad-bind روی همان وی‌پی‌اس
+          فهرستش را از آنجا می‌گیرد.
+        </Notice>
 
         <Notice type="warn">
           وی‌پی‌اس لنگر تنها چیزی است که پنل روی این نود تغییرش می‌دهد. اگر شناسه یک وی‌پی‌اس

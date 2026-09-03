@@ -18,12 +18,15 @@ export const dynamic = 'force-dynamic';
 
 const SELECT = `
   SELECT n.id, n.name, n.url, n.anchor_vpsid, n.max_per_run, n.is_active,
+         n.bind_server_id, n.auto_watch_free, s.name AS bind_server_name,
          n.last_sync_at, n.last_error,
          (n.api_key <> '' AND n.api_pass <> '') AS has_credentials,
          (SELECT COUNT(*)::int FROM ip_addresses i WHERE i.vz_node_id = n.id) AS ip_count,
          (SELECT COUNT(*)::int FROM ip_addresses i
            WHERE i.vz_node_id = n.id AND i.vz_vpsid IS NOT NULL) AS assigned_count
-    FROM vz_nodes n ORDER BY n.name`;
+    FROM vz_nodes n
+    LEFT JOIN servers s ON s.id = n.bind_server_id
+   ORDER BY n.name`;
 
 export async function GET() {
   return handle(async () => {
@@ -43,12 +46,19 @@ function clean(body: Record<string, unknown>) {
   if (!/^https?:\/\/.+/i.test(url)) return { error: 'آدرس نود باید با http یا https شروع شود' };
   if (anchor && !/^\d+$/.test(anchor)) return { error: 'شناسه وی‌پی‌اس لنگر باید عدد باشد' };
 
+  const bindServerId = body.bind_server_id ? Number(body.bind_server_id) : null;
+  if (bindServerId !== null && !Number.isInteger(bindServerId)) {
+    return { error: 'سرور لنگر نامعتبر است' };
+  }
+
   return {
     name,
     url,
     anchor: anchor || null,
     maxPerRun: Number.isInteger(maxPerRun) && maxPerRun > 0 ? Math.min(maxPerRun, 1000) : 200,
     isActive: body.is_active !== false,
+    bindServerId,
+    autoWatch: body.auto_watch_free !== false,
   };
 }
 
@@ -64,9 +74,10 @@ export async function POST(req: Request) {
     if (!key || !pass) return fail('کلید و رمز ای‌پی‌آی را وارد کنید', 400);
 
     const row = await queryOne<{ id: number }>(
-      `INSERT INTO vz_nodes (name, url, api_key, api_pass, anchor_vpsid, max_per_run, is_active)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [c.name, c.url, key, pass, c.anchor, c.maxPerRun, c.isActive],
+      `INSERT INTO vz_nodes (name, url, api_key, api_pass, anchor_vpsid, max_per_run,
+                             is_active, bind_server_id, auto_watch_free)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [c.name, c.url, key, pass, c.anchor, c.maxPerRun, c.isActive, c.bindServerId, c.autoWatch],
     );
 
     // کشف بی‌درنگ صف می‌شود تا کاربر بلافاصله نتیجه اتصالش را ببیند
@@ -96,10 +107,11 @@ export async function PATCH(req: Request) {
     await query(
       `UPDATE vz_nodes
           SET name = $2, url = $3, anchor_vpsid = $4, max_per_run = $5, is_active = $6,
+              bind_server_id = $9, auto_watch_free = $10,
               api_key  = CASE WHEN $7 = '' THEN api_key  ELSE $7 END,
               api_pass = CASE WHEN $8 = '' THEN api_pass ELSE $8 END
         WHERE id = $1`,
-      [id, c.name, c.url, c.anchor, c.maxPerRun, c.isActive, key, pass],
+      [id, c.name, c.url, c.anchor, c.maxPerRun, c.isActive, key, pass, c.bindServerId, c.autoWatch],
     );
 
     return ok({ ok: true });
