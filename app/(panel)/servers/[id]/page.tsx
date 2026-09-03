@@ -440,7 +440,12 @@ export default function ServerDetailPage() {
       {/* تفکیک دانلود و آپلود */}
       <section className="card p-4">
         <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-          <h2 className="text-sm font-bold">تفکیک دانلود و آپلود</h2>
+          <h2 className="text-sm font-bold">
+            تفکیک دانلود و آپلود
+            <Link href={`/traffic?server_id=${s.id}`} className="ms-3 text-[11px] font-normal text-muted hover:text-cyan">
+              لاگ تاریخ‌دار ←
+            </Link>
+          </h2>
           <span className="text-[11px] text-muted">
             بازه {RANGES.find((r) => r.key === range)?.label}
             {d.billing && <> · مبنای صورتحساب: {DIRECTION_LABEL[d.billing.rates.billing_direction]}</>}

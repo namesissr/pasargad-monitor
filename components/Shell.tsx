@@ -18,6 +18,7 @@ const NAV = [
   ]},
   { group: 'گزارش', items: [
     { href: '/reports', label: 'گزارش مصرف', icon: '▨' },
+    { href: '/traffic', label: 'لاگ ترافیک', icon: '⇅' },
     { href: '/billing', label: 'حسابداری', icon: '₮' },
   ]},
   { group: 'سامانه', items: [
