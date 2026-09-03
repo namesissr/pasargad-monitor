@@ -137,12 +137,14 @@ export async function discoverNode(node) {
   const hostname = [];
   const customer = [];
   const assigned = [];
+  const poolid = [];
 
   for (const row of ips.items) {
     const free = row.vpsid === '0' || row.vpsid === '';
     const vps = free ? null : vpsById.get(row.vpsid);
     addr.push(row.ip);
     ipid.push(row.ipid);
+    poolid.push(row.ippoolid || null);
     vpsid.push(free ? null : row.vpsid);
     hostname.push(vps?.hostname || null);
     customer.push(free ? null : customerLabel(vps, userById.get(vps?.uid)));
@@ -164,15 +166,27 @@ export async function discoverNode(node) {
       `INSERT INTO ip_addresses (ip, version, status, customer, vz_ipid, vz_vpsid,
                                  vz_hostname, vz_node_id, vz_synced_at,
                                  access_watch, iran_access_status, access_blocked_since,
-                                 bind_server_id)
+                                 bind_server_id, subnet_id)
        SELECT host(u.ip::inet)::inet, 4,
               CASE WHEN u.assigned THEN 'assigned' ELSE 'free' END,
               u.customer, u.ipid, u.vpsid, u.hostname, $7, now(),
               (NOT u.assigned) AND $8, 'unknown',
               CASE WHEN (NOT u.assigned) AND $8 THEN now() END,
-              CASE WHEN (NOT u.assigned) AND $8 THEN $9::int END
-         FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::boolean[])
-              AS u(ip, ipid, vpsid, hostname, customer, assigned)
+              CASE WHEN (NOT u.assigned) AND $8 THEN $9::int END,
+              -- بدون این پیوند، پرفیکس بایند به ۳۲ برمی‌گشت و آدرس یک شبکه
+              -- مستقل می‌شد به‌جای عضوی از بلوک — روی کارت می‌نشست ولی
+              -- تجهیزات بالادست نمی‌دیدندش.
+              -- اول با شناسه مخزن ویژالیزور، وگرنه با دربرگیری.
+              COALESCE(
+                (SELECT sp.id FROM ip_subnets sp
+                  WHERE sp.vz_node_id = $7 AND sp.vz_poolid = u.poolid LIMIT 1),
+                (SELECT sc.id FROM ip_subnets sc
+                  WHERE host(u.ip::inet)::inet << sc.cidr
+                  ORDER BY masklen(sc.cidr) DESC LIMIT 1)
+              )
+         FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
+                     $6::boolean[], $10::text[])
+              AS u(ip, ipid, vpsid, hostname, customer, assigned, poolid)
         -- محافظ دوم: اگر فیلتر بالادست روزی عوض شود، آدرس نسخه ۶ نباید
         -- با برچسب «نسخه ۴» وارد شود
         WHERE family(u.ip::inet) = 4
@@ -192,11 +206,21 @@ export async function discoverNode(node) {
              -- لنگر است و «assigned» خواندنش گمراه‌کننده می‌شود
              status      = CASE WHEN ip_addresses.access_watch
                                 THEN ip_addresses.status
-                                ELSE EXCLUDED.status END`,
+                                ELSE EXCLUDED.status END,
+             -- ساب‌نت فقط وقتی پر می‌شود که خالی باشد؛ انتخاب دستی ادمین
+             -- نباید هر ساعت بازنویسی شود
+             subnet_id   = COALESCE(ip_addresses.subnet_id, EXCLUDED.subnet_id),
+             -- رکوردهایی که پیش از تعیین سرور لنگر وارد شده‌اند اینجا
+             -- گره می‌خورند، وگرنه تا ابد بدون لنگر می‌مانند و ایجنت
+             -- هرگز نمی‌بیندشان
+             bind_server_id = CASE
+               WHEN ip_addresses.access_watch AND ip_addresses.bind_server_id IS NULL
+               THEN $9::int ELSE ip_addresses.bind_server_id END`,
       [
         addr, ipid, vpsid, hostname, customer, assigned, node.id,
         node.auto_watch_free !== false && Boolean(node.bind_server_id),
         node.bind_server_id ?? null,
+        poolid,
       ],
     );
   }
