@@ -46,11 +46,16 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         value = raw === null || raw === '' ? null : Number(raw);
         if (value !== null && !Number.isFinite(value as number)) return fail(`مقدار «${key}» باید عدد باشد`, 400);
       } else if (kind === 'prefix') {
-        const n = Number(raw);
-        if (!Number.isInteger(n) || n < 8 || n > 32) {
-          return fail('پرفیکس بایند باید عددی بین ۸ و ۳۲ باشد', 400);
+        // خالی یعنی خودکار — ایجنت پرفیکس را از ساب‌نت می‌گیرد
+        if (raw === null || raw === '') {
+          value = null;
+        } else {
+          const n = Number(raw);
+          if (!Number.isInteger(n) || n < 8 || n > 32) {
+            return fail('پرفیکس بایند باید عددی بین ۸ و ۳۲ باشد، یا خالی برای خودکار', 400);
+          }
+          value = n;
         }
-        value = n;
       } else if (kind === 'bool') {
         value = Boolean(raw);
       } else {

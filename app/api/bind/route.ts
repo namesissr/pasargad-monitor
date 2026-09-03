@@ -33,7 +33,11 @@ export async function GET(req: Request) {
 
   // گیت‌وی هم می‌رود: ایجنت با آن تست می‌کند که آدرس واقعاً روت شده یا نه
   const ips = await query<{ ip: string; prefix: number; gateway: string | null }>(
-    `SELECT host(i.ip) AS ip, i.bind_prefix AS prefix,
+    `SELECT host(i.ip) AS ip,
+            -- خالی یعنی خودکار: پرفیکس ساب‌نت ثبت‌شده، وگرنه ۳۲.
+            -- ۳۲ ثابت باعث می‌شد آدرس یک شبکه مستقل شود نه secondary
+            -- از ساب‌نت متصل — و تجهیزات بالادست نمی‌دیدندش.
+            COALESCE(i.bind_prefix, masklen(n.cidr), 32) AS prefix,
             host(COALESCE(i.gateway, n.gateway)) AS gateway
        FROM ip_addresses i
        LEFT JOIN ip_subnets n ON n.id = i.subnet_id

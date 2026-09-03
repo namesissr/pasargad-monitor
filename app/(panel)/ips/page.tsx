@@ -35,7 +35,7 @@ interface IpRow {
   subnet: string | null;
   subnet_prefix: number | null;
   gateway: string | null;
-  bind_prefix: number;
+  bind_prefix: number | null;
 }
 
 interface IpData {
@@ -45,6 +45,7 @@ interface IpData {
   limit: number;
   stats: { status: string; cnt: number }[];
   accessStats: { watch: number; blocked: number; released7: number; unreachable: number } | null;
+  probeHealth: { outside: number; outside_live: number; inside: number; inside_live: number } | null;
 }
 
 interface SubnetRow {
@@ -136,6 +137,27 @@ export default function IpsPage() {
             );
           })}
         </div>
+      )}
+
+      {/* هشدار دیدبان — بدون این، «در انتظار اولین بررسی» تا ابد می‌ماند
+          و هیچ‌جا نمی‌گوید چرا */}
+      {(data?.accessStats?.watch ?? 0) > 0 && data?.probeHealth && (
+        data.probeHealth.outside === 0 ? (
+          <Notice type="warn">
+            هیچ دیدبان خارج از ایران ثبت نشده. بدون آن، آزادشدن آی‌پی قابل تشخیص نیست و وضعیت
+            همه در «در انتظار اولین بررسی» می‌ماند. از تنظیمات، بخش دیدبان‌ها، یکی بسازید.
+          </Notice>
+        ) : data.probeHealth.outside_live === 0 ? (
+          <Notice type="warn">
+            دیدبان خارج ثبت شده ولی بیش از یک ساعت است گزارشی نداده. سرویس را روی همان سرور
+            بررسی کنید: <Mono>systemctl status pasargad-probe</Mono>
+          </Notice>
+        ) : data.probeHealth.inside_live === 0 ? (
+          <Notice type="warn">
+            دیدبان داخل ایران گزارش نمی‌دهد. بدون آن، آی‌پی‌ای که از خارج جواب نمی‌دهد در حالت
+            «روت نشده» می‌ماند و «در اکسس» از آن تشخیص داده نمی‌شود.
+          </Notice>
+        ) : null
       )}
 
       {/* اکسس ایران */}
@@ -404,7 +426,7 @@ function AddIpModal({
   const [accessWatch, setAccessWatch] = useState(false);
   const [bindServerId, setBindServerId] = useState('');
   const [gateway, setGateway] = useState('');
-  const [bindPrefix, setBindPrefix] = useState('32');
+  const [bindPrefix, setBindPrefix] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{ added: number; failed: { ip: string; reason: string }[] } | null>(null);
@@ -424,7 +446,7 @@ function AddIpModal({
         access_watch: accessWatch,
         bind_server_id: accessWatch && bindServerId ? Number(bindServerId) : null,
         gateway,
-        bind_prefix: Number(bindPrefix) || 32,
+        bind_prefix: Number(bindPrefix) || null,
       });
       setResult(res);
       onDone();
@@ -503,13 +525,14 @@ function AddIpModal({
               </Field>
               <Field
                 label="پرفیکس بایند"
-                hint="۳۲ را عوض نکنید مگر دیتاسنتر صریح چیز دیگری بخواهد. ماسک واقعی یک مسیر متصل تکراری می‌سازد و می‌تواند با آی‌پی اصلی سرور تداخل کند."
+                hint="خودکار یعنی ماسک همان بلوک — تقریباً همیشه درست است. با ۳۲ آدرس یک شبکه مستقل می‌شود نه عضوی از بلوک، و تجهیزات دیتاسنتر آن را نمی‌بینند."
               >
                 <select className="input" value={bindPrefix} onChange={(e) => setBindPrefix(e.target.value)}>
-                  <option value="32">۳۲ — پیشنهادی</option>
-                  <option value="30">۳۰</option>
-                  <option value="29">۲۹</option>
+                  <option value="">خودکار — ماسک بلوک</option>
                   <option value="24">۲۴</option>
+                  <option value="29">۲۹</option>
+                  <option value="30">۳۰</option>
+                  <option value="32">۳۲ — فقط اگر دیتاسنتر بخواهد</option>
                 </select>
               </Field>
             </div>
@@ -647,7 +670,7 @@ function EditIpModal({
     access_watch: false,
     bind_server_id: '',
     gateway: '',
-    bind_prefix: '32',
+    bind_prefix: '',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);

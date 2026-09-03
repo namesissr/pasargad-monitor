@@ -100,7 +100,25 @@ export async function GET(req: Request) {
          FROM ip_addresses`,
     );
 
-    return ok({ ips: rows, total: total?.cnt ?? 0, page, limit, stats, accessStats });
+    // سلامت دیدبان‌ها. بدون این، «در انتظار اولین بررسی» دو معنی کاملاً
+    // متفاوت دارد: یا ۱۰ دقیقه صبر کن، یا هیچ‌وقت اتفاق نمی‌افتد چون
+    // دیدبانی نصب نشده. حالت دوم باید صریح گفته شود.
+    const probeHealth = await queryOne<{
+      outside: number;
+      outside_live: number;
+      inside: number;
+      inside_live: number;
+    }>(
+      `SELECT COUNT(*) FILTER (WHERE location = 'outside')::int AS outside,
+              COUNT(*) FILTER (WHERE location = 'outside'
+                               AND last_seen_at > now() - interval '1 hour')::int AS outside_live,
+              COUNT(*) FILTER (WHERE location = 'inside')::int AS inside,
+              COUNT(*) FILTER (WHERE location = 'inside'
+                               AND last_seen_at > now() - interval '1 hour')::int AS inside_live
+         FROM probes WHERE is_active`,
+    );
+
+    return ok({ ips: rows, total: total?.cnt ?? 0, page, limit, stats, accessStats, probeHealth });
   });
 }
 
@@ -121,8 +139,10 @@ export async function POST(req: Request) {
     const accessWatch = Boolean(b.access_watch);
     const bindServerId = b.bind_server_id ? Number(b.bind_server_id) : null;
     const gateway = String(b.gateway ?? '').trim() || null;
+    // خالی یا نامعتبر یعنی خودکار — ایجنت پرفیکس را از ساب‌نت می‌گیرد
     const bindPrefix = Number(b.bind_prefix);
-    const prefix = Number.isInteger(bindPrefix) && bindPrefix >= 8 && bindPrefix <= 32 ? bindPrefix : 32;
+    const prefix =
+      Number.isInteger(bindPrefix) && bindPrefix >= 8 && bindPrefix <= 32 ? bindPrefix : null;
 
     const list = raw
       .split(/[\s,،\n]+/)
