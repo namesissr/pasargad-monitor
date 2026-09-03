@@ -15,6 +15,8 @@ interface IpRow {
   customer_manual: boolean;
   vz_hostname: string | null;
   vz_node_name: string | null;
+  in_virtualizor: boolean;
+  vz_locked: boolean;
   ptr: string | null;
   mac: string | null;
   is_monitored: boolean;
@@ -298,6 +300,23 @@ export default function IpsPage() {
                   <td className="text-xs whitespace-nowrap">
                     {!ip.access_watch && ip.iran_access_status !== 'released' ? (
                       <span className="text-muted/60">—</span>
+                    ) : ip.vz_locked ? (
+                      <span
+                        className="badge bg-line text-muted"
+                        title="این آدرس در ویژالیزور قفل شده. تا قفلش برداشته نشود به هیچ وی‌پی‌اسی تخصیص نمی‌یابد، پس پایشش معنی ندارد."
+                      >
+                        قفل در ویژالیزور
+                      </span>
+                    ) : !ip.in_virtualizor && ip.vz_node_name === null ? (
+                      // آدرسی که در هیچ نودی نیست، هرگز نمی‌تواند به لنگر
+                      // تخصیص یابد — پس همیشه «روت نشده» می‌ماند و آن
+                      // برچسب گمراه‌کننده است. باید علت واقعی دیده شود.
+                      <span
+                        className="badge bg-amber/15 text-amber"
+                        title="این آدرس در هیچ نود ویژالیزوری پیدا نشد. یا دستی وارد پنل شده، یا از ویژالیزور حذف شده. تا در ویژالیزور نباشد به لنگر تخصیص نمی‌یابد و وضعیتش هیچ‌وقت مشخص نمی‌شود."
+                      >
+                        در ویژالیزور نیست
+                      </span>
                     ) : ip.probe_checks === 0 ? (
                       // «در اکسس» هنگام افزودن به‌عنوان فرض اولیه ثبت می‌شود، نه اندازه‌گیری.
                       // تا وقتی دیدبانی گزارش نداده، نشان‌دادنش به‌عنوان وضعیت قطعی دروغ است.

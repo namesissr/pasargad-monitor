@@ -91,6 +91,7 @@ export async function GET(req: Request) {
               masklen(n.cidr) AS subnet_prefix,
               host(COALESCE(i.gateway, n.gateway)) AS gateway,
               i.bind_prefix, i.vz_hostname, i.customer_manual,
+              (i.vz_ipid IS NOT NULL) AS in_virtualizor, i.vz_locked,
               vn.name AS vz_node_name
          FROM ip_addresses i
          LEFT JOIN servers s   ON s.id = i.server_id

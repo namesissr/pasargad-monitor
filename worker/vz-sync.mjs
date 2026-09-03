@@ -209,8 +209,19 @@ export async function discoverNode(node) {
   const customer = [];
   const assigned = [];
   const poolid = [];
+  // آدرس قفل‌شده در ویژالیزور وارد نمی‌شود. ادمین عمداً کنارش گذاشته و
+  // مسیر اعمال هم هرگز به لنگر نمی‌چسباندش — پس بودنش در فهرست پایش
+  // فقط یک «روت نشده» دائمی و بی‌دلیل می‌سازد.
+  const lockedAddr = [];
+  // فهرست کامل شامل قفل‌شده‌ها، برای تشخیص آدرس‌هایی که واقعا از نود
+  // حذف شده‌اند. بدون این، آدرس قفل‌شده «حذف‌شده از نود» حساب می‌شد.
+  const allAddr = ips.items.map((r) => r.ip);
 
   for (const row of ips.items) {
+    if (row.locked) {
+      lockedAddr.push(row.ip);
+      continue;
+    }
     const free = row.vpsid === '0' || row.vpsid === '';
     const vps = free ? null : vpsById.get(row.vpsid);
     addr.push(row.ip);
@@ -297,13 +308,51 @@ export async function discoverNode(node) {
   }
 
   // آدرس‌هایی که در این نود دیگر نیستند، پیوندشان پاک می‌شود تا داده کهنه
-  // به‌عنوان واقعیت نماند
-  await q(
+  // به‌عنوان واقعیت نماند.
+  //
+  // ردیفشان حذف نمی‌شود — ممکن است ادمین دستی واردش کرده باشد یا
+  // یادداشت و مشتری داشته باشد. ولی اگر تحت پایش باشد باید گفته شود:
+  // آدرسی که در ویژالیزور نیست هرگز به لنگر تخصیص نمی‌یابد، پس تا ابد
+  // «روت نشده» گزارش می‌شود بدون اینکه علتش معلوم باشد.
+  const orphans = await q(
     `UPDATE ip_addresses
         SET vz_ipid = NULL, vz_vpsid = NULL, vz_hostname = NULL, vz_node_id = NULL, updated_at = now()
-      WHERE vz_node_id = $1 AND NOT (host(ip) = ANY($2::text[]))`,
-    [node.id, addr],
+      WHERE vz_node_id = $1 AND NOT (host(ip) = ANY($2::text[]))
+      RETURNING host(ip) AS ip, access_watch`,
+    [node.id, allAddr],
   );
+  const watchedOrphans = orphans.filter((r) => r.access_watch);
+  if (watchedOrphans.length) {
+    logErr(
+      `نود ${node.name}: ${watchedOrphans.length} آدرس تحت پایش دیگر در این نود نیست —`,
+      'تا در ویژالیزور نباشند به لنگر تخصیص نمی‌یابند و همیشه «روت نشده» می‌مانند:',
+      watchedOrphans.slice(0, 10).map((r) => r.ip).join('، '),
+    );
+  }
+
+  // آدرس‌های قفل‌شده: علامت می‌خورند و از پایش خارج می‌شوند. حذف خودکار
+  // نمی‌شوند چون ممکن است یادداشت یا نام مشتری داشته باشند.
+  if (lockedAddr.length) {
+    const unwatched = await q(
+      `UPDATE ip_addresses
+          SET vz_locked = TRUE, vz_node_id = $2, vz_synced_at = now(),
+              access_watch = FALSE, updated_at = now()
+        WHERE host(ip) = ANY($1::text[]) AND (access_watch OR NOT vz_locked)
+        RETURNING host(ip) AS ip`,
+      [lockedAddr, node.id],
+    );
+    if (unwatched.length) {
+      log(`نود ${node.name}: ${unwatched.length} آدرس قفل‌شده از پایش خارج شد`);
+    }
+  }
+  // آدرسی که قفلش برداشته شده باید علامتش هم برداشته شود
+  if (addr.length) {
+    await q(
+      `UPDATE ip_addresses SET vz_locked = FALSE
+        WHERE vz_node_id = $2 AND vz_locked AND host(ip) = ANY($1::text[])`,
+      [addr, node.id],
+    );
+  }
 
   await q(`UPDATE vz_nodes SET last_error = NULL, last_sync_at = now() WHERE id = $1`, [node.id]);
   await q(
@@ -318,7 +367,11 @@ export async function discoverNode(node) {
     ],
   );
 
-  log(`نود ${node.name}: ${addr.length} آدرس کشف شد در ${Math.round((Date.now() - started) / 1000)} ثانیه`);
+  log(
+    `نود ${node.name}: ${addr.length} آدرس کشف شد` +
+      (lockedAddr.length ? `، ${lockedAddr.length} قفل‌شده نادیده گرفته شد` : '') +
+      ` در ${Math.round((Date.now() - started) / 1000)} ثانیه`,
+  );
   return { ok: true, discovered: addr.length };
 }
 

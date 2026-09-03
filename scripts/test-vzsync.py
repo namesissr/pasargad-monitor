@@ -200,6 +200,8 @@ def main():
         ("if (free && panel.access_watch) attach.push(row.ip);", "شرط چسباندن"),
         ("const cidr = networkOf(gateway, prefix);", "شبکه از گیت‌وی حساب می‌شود"),
         ("for (const row of ips.items) {", "بلوک‌ها از ردیف‌های آی‌پی ساخته می‌شوند"),
+        ("if (row.locked) {", "آدرس قفل‌شده در کشف وارد نمی‌شود"),
+        ("[node.id, allAddr],", "تشخیص حذف از نود با فهرست کامل، نه فهرست واردشده"),
     ]:
         if needle in src:
             print("گذشت  کد واقعی: %s" % why)
