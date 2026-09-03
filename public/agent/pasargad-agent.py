@@ -39,7 +39,7 @@ try:
 except ImportError:                                       # پایتون ۲
     from urllib2 import Request, urlopen, HTTPError
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 
 
 def say(message):
@@ -60,7 +60,15 @@ SYS_NET = "/sys/class/net"
 
 # رابط‌های مهمان روی نود مجازی‌ساز. اگر اینها شمرده شوند، ترافیک هر وی‌پی‌اس
 # دو بار حساب می‌شود: یک بار روی tap خودش و یک بار روی کارت شبکه فیزیکی.
-GUEST_PREFIXES = ("vnet", "tap", "vif", "vps", "macvtap", "veth", "vmtab", "vb-")
+#
+# این فهرست فقط شبکه ایمنی است، نه راه اصلی. هر پنل مجازی‌سازی نام‌گذاری
+# خودش را دارد — libvirt از vnet، ویرچوالایزر از viifv، پروکسموکس از tap و
+# fwbr، زن از vif — و چنین فهرستی هیچ‌وقت کامل نمی‌شود. تشخیص اصلی با
+# is_physical انجام می‌شود که به نام تکیه نمی‌کند.
+GUEST_PREFIXES = (
+    "vnet", "tap", "vif", "viif", "vps", "macvtap", "veth", "vmtab", "vb-",
+    "venet", "fwbr", "fwpr", "fwln", "vmtap",
+)
 
 # رابط‌هایی که در حالت واپسین (بدون مسیر پیش‌فرض) شمرده نمی‌شوند
 SKIP_PREFIXES = GUEST_PREFIXES + (
@@ -152,6 +160,21 @@ def disk_info(path):
     return {"total": total, "used": max(0, total - available)}
 
 
+def is_physical(name):
+    """
+    کارت فیزیکی است یا مجازی؟
+
+    در sysfs فقط دستگاه‌های واقعی پیوند device دارند که به دستگاه PCI یا USB
+    اشاره می‌کند. بریج، باند، ولن و تپ مهمان‌ها ندارند.
+
+    این نشانه از تطبیق نام قابل اعتمادتر است و به همین دلیل مبنای انتخاب
+    است: فهرست پیشوندها با هر پنل مجازی‌سازی تازه‌ای ناقص می‌شود، ولی این
+    قاعده روی همه‌شان یکسان کار می‌کند. (روی وی‌پی‌اس هم درست است: کارت
+    مجازی virtio خودش یک دستگاه است و پیوند device دارد.)
+    """
+    return os.path.exists(os.path.join(SYS_NET, name, "device"))
+
+
 def lower_ifaces(name):
     """رابط‌های زیرین: عضوهای بریج، اسلیوهای باند، والد ولن"""
     try:
@@ -197,10 +220,23 @@ def detect_uplink(max_depth=4):
         expanded = []
         descended = False
         for name in frontier:
-            lowers = [x for x in lower_ifaces(name) if not x.startswith(GUEST_PREFIXES)]
-            if lowers:
+            lowers = lower_ifaces(name)
+            if not lowers:
+                expanded.append(name)
+                continue
+
+            # اگر بین زیرین‌ها کارت فیزیکی هست، فقط همان‌ها. بریج نود
+            # مجازی‌ساز دقیقاً همین شکل است: یک کارت فیزیکی به‌علاوه ده‌ها
+            # تپ مهمان.
+            picked = [x for x in lowers if is_physical(x)]
+            if not picked:
+                # کارت فیزیکی مستقیم نیست؛ شاید یک لایه پایین‌تر است
+                # (بریج روی باند). اینجا فهرست پیشوند کار را راه می‌اندازد.
+                picked = [x for x in lowers if not x.startswith(GUEST_PREFIXES)]
+
+            if picked:
                 descended = True
-                expanded.extend(lowers)
+                expanded.extend(picked)
             else:
                 expanded.append(name)
         # حذف تکراری با حفظ ترتیب. dict در پایتون ۲ ترتیب درج را نگه
@@ -372,40 +408,77 @@ def post(url, token, payload, insecure=False, timeout=15):
 
 # ─────────────────────────────── ابزار تشخیص ───────────────────────────────
 
+def human(n):
+    """بایت به شکل خوانا با واحد لاتین تا ستون‌ها به هم نریزد"""
+    value = float(n)
+    for unit in ("B", "K", "M", "G", "T", "P"):
+        if value < 1024 or unit == "P":
+            return "%.1f%s" % (value, unit)
+        value /= 1024.0
+
+
 def list_ifaces(manual=""):
     """
     نمایش رابط‌های شبکه و اینکه کدام‌ها شمرده می‌شوند.
 
     روی نود مجازی‌ساز اول این را اجرا کنید. اگر رابط انتخاب‌شده کارت فیزیکی
     نبود، هنگام نصب با --iface صریح مشخصش کنید.
+
+    رابط‌های مهمان جمع می‌شوند نه فهرست: روی نودی با چهل وی‌پی‌اس، چهل ردیف
+    اضافه فقط جدول را ناخوانا می‌کند و چیزی به تصمیم اضافه نمی‌کند.
     """
     chosen = [x.strip() for x in manual.split(",") if x.strip()] if manual else detect_uplink()
+    chosen = chosen or []
     default_if = default_route_iface()
     counters = read_net_dev()
 
     say("مسیر پیش‌فرض از روی: %s" % (default_if or "پیدا نشد"))
     say("شمرده می‌شود:        %s" % (", ".join(chosen) if chosen else "همه رابط‌های غیرمجازی"))
     say("")
-    say("%-16s %-10s %14s %14s  %s" % ("رابط", "وضعیت", "دریافت", "ارسال", "زیرین"))
-    say("-" * 78)
+    say("%-14s %18s %18s  %s" % ("iface", "rx", "tx", "وضعیت"))
+    say("-" * 72)
+
+    hidden = []
+    hidden_rx = hidden_tx = 0
 
     for name in sorted(counters):
         rx, tx = counters[name]
-        if chosen is not None and name in chosen:
-            state = "شمرده"
-        elif name.startswith(GUEST_PREFIXES):
-            state = "مهمان"
+        lowers = lower_ifaces(name)
+        physical = is_physical(name)
+
+        if name in chosen:
+            state = "شمرده" + ("" if physical else "  ← مجازی است، اشتباه به نظر می‌رسد")
         elif name == "lo":
             state = "لوپ‌بک"
+        elif lowers:
+            members = [x for x in lowers if is_physical(x)]
+            state = "بریج روی %s و %s رابط دیگر" % (
+                ", ".join(members) or "؟", len(lowers) - len(members))
+        elif physical:
+            state = "کارت فیزیکی، شمرده نمی‌شود"
         else:
-            state = "-"
-        lowers = ",".join(lower_ifaces(name))
-        say("%-16s %-10s %14d %14d  %s" % (name, state, rx, tx, lowers))
+            hidden.append(name)
+            hidden_rx += rx
+            hidden_tx += tx
+            continue
+
+        say("%-14s %18s %18s  %s" % (name, human(rx), human(tx), state))
+
+    if hidden:
+        say("")
+        say("%s رابط مهمان نشان داده نشد (مجموع: دریافت %s، ارسال %s)."
+            % (len(hidden), human(hidden_rx), human(hidden_tx)))
+        say("اینها عمداً شمرده نمی‌شوند؛ ترافیکشان از قبل روی کارت فیزیکی هست.")
 
     say("")
-    if chosen and len(chosen) == 1 and chosen[0] == default_if and lower_ifaces(default_if):
-        say("هشدار: رابط انتخاب‌شده خودش رابط مجازی است و زیرینی پیدا نشد.")
-        say("روی نود مجازی‌ساز، کارت فیزیکی را با --iface دستی بدهید.")
+    bad = [x for x in chosen if not is_physical(x)]
+    if bad:
+        say("هشدار: %s رابط فیزیکی نیست." % ", ".join(bad))
+        say("نصب را با «--iface <نام کارت فیزیکی>» تکرار کنید، وگرنه ترافیک و")
+        say("هزینه چند برابر واقعی ثبت می‌شود.")
+    elif not chosen:
+        say("هشدار: هیچ رابطی انتخاب نشد و روش واپسین استفاده می‌شود.")
+        say("روی نود مجازی‌ساز حتماً --iface را دستی بدهید.")
     return 0
 
 
