@@ -69,7 +69,9 @@ bash scripts/setup.sh panel.example.com
 اسکریپت `.env` را با کلیدهای تصادفی می‌سازد، گواهی موقت درست می‌کند، بیلد می‌گیرد و سرویس‌ها را بالا می‌آورد.
 **گذرواژه مدیری که چاپ می‌شود را همان لحظه ذخیره کنید** — دوباره نشان داده نمی‌شود.
 
-برای گواهی واقعی: `docs/deploy.md`
+**راهنمای قدم‌به‌قدم کامل — از نصب داکر تا اولین ایجنت:** [docs/install.md](docs/install.md)
+
+برای گواهی واقعی: [docs/deploy.md](docs/deploy.md)
 
 ### نصب دستی
 
@@ -112,7 +114,7 @@ journalctl -u pasargad-agent -f
 
 ```bash
 # پیش از اعتماد به عدد ترافیک، روی هر نود بررسی کنید کدام رابط شمرده می‌شود
-python3 /usr/local/bin/pasargad-agent.py --list-ifaces
+$(command -v python3 || command -v python2) /usr/local/bin/pasargad-agent.py --list-ifaces
 ```
 
 ---
@@ -360,5 +362,5 @@ pasargad-monitor/
 ├── db/migrations/     ترتیبی؛ فقط بار اول خودکار
 ├── nginx/             panel.conf
 ├── scripts/           setup.sh، selfsigned-cert.sh
-└── docs/           deploy.md، hypervisor.md، billing.md
+└── docs/           install.md، deploy.md، hypervisor.md، billing.md
 ```

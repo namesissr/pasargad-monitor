@@ -4,10 +4,12 @@
 ایجنت پایش پاسارگاد میزبان.
 
 فقط از کتابخانه استاندارد پایتون استفاده می‌کند — هیچ pip install لازم نیست.
-روی هر لینوکسی با پایتون ۳٫۶ به بعد کار می‌کند.
+روی پایتون ۲٫۷ به بعد و ۳٫۶ به بعد کار می‌کند، چون خیلی از نودهای
+مجازی‌ساز هنوز سنت‌اواس ۷ اند و آن فقط پایتون ۲٫۷ دارد.
 
 اجرا:
     python3 pasargad-agent.py --url https://panel.example.com --token XXXX
+    python2 pasargad-agent.py --url https://panel.example.com --token XXXX
 
 نکته مهم درباره ترافیک: شمارنده‌های /proc/net/dev تجمعی‌اند و با ریبوت صفر
 می‌شوند. ایجنت خودش دلتا می‌گیرد و اگر مقدار جدید از قبلی کمتر بود (ریبوت یا
@@ -19,6 +21,8 @@
 مداوم روی دیسک برای یک ابزار پایش هزینه بیهوده‌ای است.)
 """
 
+from __future__ import print_function, division
+
 import argparse
 import json
 import os
@@ -26,10 +30,31 @@ import socket
 import ssl
 import sys
 import time
-import urllib.error
-import urllib.request
 
-VERSION = "1.0.0"
+# سنت‌اواس ۷ و سرورهای قدیمی فقط پایتون ۲٫۷ دارند و از ژوئن ۲۰۲۴ که به پایان
+# پشتیبانی رسیده، نصب پایتون ۳ روی آن‌ها دردسر دارد. ایجنت با هر دو کار می‌کند.
+try:
+    from urllib.request import Request, urlopen          # پایتون ۳
+    from urllib.error import HTTPError
+except ImportError:                                       # پایتون ۲
+    from urllib2 import Request, urlopen, HTTPError
+
+VERSION = "1.1.0"
+
+
+def say(message):
+    """
+    چاپ با تخلیه فوری بافر.
+
+    گزینه flush در print پایتون ۳ اضافه شده و در ۲٫۷ وجود ندارد؛ بدون تخلیه،
+    لاگ ایجنت در journald تا پر شدن بافر دیده نمی‌شود و عیب‌یابی سخت می‌شود.
+    """
+    print(message)
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+
 
 SYS_NET = "/sys/class/net"
 
@@ -178,7 +203,14 @@ def detect_uplink(max_depth=4):
                 expanded.extend(lowers)
             else:
                 expanded.append(name)
-        frontier = list(dict.fromkeys(expanded))  # حذف تکراری با حفظ ترتیب
+        # حذف تکراری با حفظ ترتیب. dict در پایتون ۲ ترتیب درج را نگه
+        # نمی‌دارد، پس نمی‌شود به dict.fromkeys تکیه کرد.
+        seen = set()
+        frontier = []
+        for name in expanded:
+            if name not in seen:
+                seen.add(name)
+                frontier.append(name)
         if not descended:
             break
 
@@ -294,7 +326,9 @@ def cpu_details():
         if line.startswith("processor"):
             cores += 1
     if not cores:
-        cores = os.cpu_count() or 1
+        # os.cpu_count فقط در پایتون ۳ هست
+        counter = getattr(os, "cpu_count", None)
+        cores = (counter() if counter else None) or 1
     return model, cores
 
 
@@ -309,7 +343,7 @@ def os_name():
 
 def post(url, token, payload, insecure=False, timeout=15):
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
+    req = Request(
         url,
         data=body,
         headers={
@@ -324,7 +358,12 @@ def post(url, token, payload, insecure=False, timeout=15):
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
 
-    response = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    # آرگومان context در پایتون ۲٫۷ قدیمی وجود ندارد، پس فقط وقتی لازم است
+    # پاس داده می‌شود
+    if ctx is not None:
+        response = urlopen(req, timeout=timeout, context=ctx)
+    else:
+        response = urlopen(req, timeout=timeout)
     try:
         return json.loads(response.read().decode("utf-8"))
     finally:
@@ -344,11 +383,11 @@ def list_ifaces(manual=""):
     default_if = default_route_iface()
     counters = read_net_dev()
 
-    print("مسیر پیش‌فرض از روی: %s" % (default_if or "پیدا نشد"))
-    print("شمرده می‌شود:        %s" % (", ".join(chosen) if chosen else "همه رابط‌های غیرمجازی"))
-    print("")
-    print("%-16s %-10s %14s %14s  %s" % ("رابط", "وضعیت", "دریافت", "ارسال", "زیرین"))
-    print("-" * 78)
+    say("مسیر پیش‌فرض از روی: %s" % (default_if or "پیدا نشد"))
+    say("شمرده می‌شود:        %s" % (", ".join(chosen) if chosen else "همه رابط‌های غیرمجازی"))
+    say("")
+    say("%-16s %-10s %14s %14s  %s" % ("رابط", "وضعیت", "دریافت", "ارسال", "زیرین"))
+    say("-" * 78)
 
     for name in sorted(counters):
         rx, tx = counters[name]
@@ -361,12 +400,12 @@ def list_ifaces(manual=""):
         else:
             state = "-"
         lowers = ",".join(lower_ifaces(name))
-        print("%-16s %-10s %14d %14d  %s" % (name, state, rx, tx, lowers))
+        say("%-16s %-10s %14d %14d  %s" % (name, state, rx, tx, lowers))
 
-    print("")
+    say("")
     if chosen and len(chosen) == 1 and chosen[0] == default_if and lower_ifaces(default_if):
-        print("هشدار: رابط انتخاب‌شده خودش رابط مجازی است و زیرینی پیدا نشد.")
-        print("روی نود مجازی‌ساز، کارت فیزیکی را با --iface دستی بدهید.")
+        say("هشدار: رابط انتخاب‌شده خودش رابط مجازی است و زیرینی پیدا نشد.")
+        say("روی نود مجازی‌ساز، کارت فیزیکی را با --iface دستی بدهید.")
     return 0
 
 
@@ -405,8 +444,8 @@ def main():
         if not iface:
             source = "واپسین — همه رابط‌های غیرمجازی"
 
-    print("رابط شبکه شمرده‌شده (%s): %s"
-          % (source, ", ".join(iface) if iface else "همه"), flush=True)
+    say("رابط شبکه شمرده‌شده (%s): %s"
+          % (source, ", ".join(iface) if iface else "همه"))
 
     hostname = socket.gethostname()
     cpu_model, cpu_cores = cpu_details()
@@ -422,7 +461,7 @@ def main():
     pending_tx = 0
     fail_streak = 0
 
-    print("ایجنت پاسارگاد میزبان نسخه %s شروع شد. مقصد: %s" % (VERSION, endpoint), flush=True)
+    say("ایجنت پاسارگاد میزبان نسخه %s شروع شد. مقصد: %s" % (VERSION, endpoint))
 
     # اولین بازه فقط مبنای دلتا را می‌سازد و چیزی نمی‌فرستد
     time.sleep(interval)
@@ -496,7 +535,7 @@ def main():
             if isinstance(server_interval, int) and 5 <= server_interval <= 300:
                 interval = server_interval
 
-        except urllib.error.HTTPError as err:
+        except HTTPError as err:
             detail = ""
             try:
                 detail = err.read().decode("utf-8")[:200]
@@ -504,21 +543,21 @@ def main():
                 pass
             fail_streak += 1
             if err.code in (401, 403):
-                print("توکن پذیرفته نشد (کد %s): %s" % (err.code, detail), flush=True)
+                say("توکن پذیرفته نشد (کد %s): %s" % (err.code, detail))
                 time.sleep(60)  # با توکن غلط، تلاش سریع فایده‌ای ندارد
             else:
-                print("خطای پنل (کد %s): %s" % (err.code, detail), flush=True)
+                say("خطای پنل (کد %s): %s" % (err.code, detail))
 
         except Exception as err:  # noqa: BLE001 — ایجنت هرگز نباید بمیرد
             fail_streak += 1
             if fail_streak in (1, 5, 30) or fail_streak % 60 == 0:
-                print("ارسال ناموفق (%s بار پیاپی): %s" % (fail_streak, err), flush=True)
+                say("ارسال ناموفق (%s بار پیاپی): %s" % (fail_streak, err))
 
         if sent:
             pending_rx = 0
             pending_tx = 0
             if fail_streak:
-                print("ارتباط با پنل دوباره برقرار شد", flush=True)
+                say("ارتباط با پنل دوباره برقرار شد")
                 fail_streak = 0
         else:
             # حجم این بازه به دفعه بعد منتقل می‌شود تا از آمار ماهانه کم نشود
@@ -534,4 +573,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("ایجنت متوقف شد", flush=True)
+        say("ایجنت متوقف شد")

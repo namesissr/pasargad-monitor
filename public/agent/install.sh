@@ -36,8 +36,25 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # ── پایتون ───────────────────────────────────────────────────────────────
-if ! command -v python3 >/dev/null 2>&1; then
-  info "پایتون ۳ نصب نیست؛ در حال نصب…"
+# ایجنت با پایتون ۲٫۷ و ۳ هر دو کار می‌کند. این عمدی است: خیلی از نودهای
+# مجازی‌ساز هنوز سنت‌اواس ۷ اند و آن از ژوئن ۲۰۲۴ به پایان پشتیبانی رسیده،
+# پس مخزن‌هایش ۴۰۴ می‌دهند و نصب پایتون ۳ رویش دردسر دارد. اگر پایتونی که
+# از قبل هست کافی باشد، هیچ بسته‌ای نصب نمی‌کنیم.
+find_python() {
+  for candidate in python3 python2.7 python2 python; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    if "$candidate" -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (2, 7) else 1)' 2>/dev/null; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+PY="$(find_python || true)"
+
+if [ -z "$PY" ]; then
+  info "پایتون مناسبی پیدا نشد؛ در حال نصب…"
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -qq && apt-get install -y -qq python3
   elif command -v dnf >/dev/null 2>&1; then
@@ -45,15 +62,37 @@ if ! command -v python3 >/dev/null 2>&1; then
   elif command -v yum >/dev/null 2>&1; then
     yum install -y -q python3
   else
-    red "مدیر بسته شناخته نشد. پایتون ۳ را دستی نصب کنید و دوباره اجرا کنید."
-    exit 1
+    red "مدیر بسته شناخته نشد."
   fi
+  PY="$(find_python || true)"
 fi
+
+if [ -z "$PY" ]; then
+  red "پایتون نصب نشد."
+  echo
+  echo "اگر این سرور سنت‌اواس ۷ است، مخزن‌هایش ۴۰۴ می‌دهند چون از ژوئن ۲۰۲۴"
+  echo "به پایان پشتیبانی رسیده و محتوایش به آرشیو منتقل شده. راه‌حل:"
+  echo
+  echo "  mkdir -p /root/yum-backup && mv /etc/yum.repos.d/*.repo /root/yum-backup/"
+  echo "  cat > /etc/yum.repos.d/CentOS-Vault.repo <<'REPO'"
+  echo "  [base]"
+  echo "  name=CentOS-7 Base (vault)"
+  echo "  baseurl=https://vault.centos.org/7.9.2009/os/\$basearch/"
+  echo "  gpgcheck=0"
+  echo "  enabled=1"
+  echo "  REPO"
+  echo "  yum clean all && yum makecache && yum install -y python3"
+  echo
+  echo "بعد همین دستور نصب ایجنت را دوباره اجرا کنید."
+  exit 1
+fi
+
+info "پایتون: $PY ($("$PY" -c 'import sys; print(".".join(map(str, sys.version_info[:3])))'))"
 
 # ── systemd ──────────────────────────────────────────────────────────────
 if ! command -v systemctl >/dev/null 2>&1; then
   red "systemd روی این سیستم نیست. ایجنت را دستی اجرا کنید:"
-  echo "  python3 $AGENT_PATH --url $PANEL_URL --token $AGENT_TOKEN"
+  echo "  $PY $AGENT_PATH --url $PANEL_URL --token $AGENT_TOKEN"
   exit 1
 fi
 
@@ -69,7 +108,7 @@ if ! curl $CURL_OPTS "$PANEL_URL/agent/pasargad-agent.py" -o "$AGENT_PATH.tmp"; 
 fi
 
 # بررسی سلامت فایل پیش از جایگزینی — نسخه ناقص بدتر از نسخه قدیمی است
-if ! python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$AGENT_PATH.tmp" 2>/dev/null; then
+if ! "$PY" -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$AGENT_PATH.tmp" 2>/dev/null; then
   red "فایل دریافتی پایتون معتبر نیست. احتمالاً به‌جای ایجنت، صفحه خطا دریافت شده."
   rm -f "$AGENT_PATH.tmp"
   exit 1
@@ -91,7 +130,7 @@ if [ -n "$IS_HYPERVISOR" ]; then
   echo
   info "نود مجازی‌ساز تشخیص داده شد. رابط‌های شبکه:"
   echo
-  python3 "$AGENT_PATH" --list-ifaces ${EXTRA_ARGS} || true
+  "$PY" "$AGENT_PATH" --list-ifaces ${EXTRA_ARGS} || true
   echo
   case "$EXTRA_ARGS" in
     *--iface*) ;;
@@ -120,7 +159,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 $AGENT_PATH --url $PANEL_URL --token $AGENT_TOKEN $EXTRA_ARGS
+ExecStart=$PY $AGENT_PATH --url $PANEL_URL --token $AGENT_TOKEN $EXTRA_ARGS
 Restart=always
 RestartSec=15
 User=root
@@ -147,6 +186,7 @@ sleep 3
 if systemctl is-active --quiet pasargad-agent; then
   green "ایجنت نصب شد و در حال اجراست."
   echo
+  echo "بررسی رابط شبکه: $PY $AGENT_PATH --list-ifaces"
   echo "وضعیت:    systemctl status pasargad-agent"
   echo "لاگ زنده: journalctl -u pasargad-agent -f"
   echo
