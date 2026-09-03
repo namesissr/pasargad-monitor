@@ -83,6 +83,7 @@ export async function POST(req: Request) {
     if (results.length > 20_000) return fail('تعداد نتیجه‌ها بیش از حد است', 400);
 
     const touched: number[] = [];
+    const skipped: string[] = [];
 
     for (const r of results) {
       const ipText = String(r.ip ?? '').trim();
@@ -92,11 +93,18 @@ export async function POST(req: Request) {
       const isLocal = r.local === true;
       const isOk = !isLocal && r.ok === true;
 
+      // این جست‌وجو قبلاً «catch(() => null)» داشت. نتیجه‌اش این بود که
+      // پست با کد ۲۰۰ برمی‌گشت و هیچ ردیفی ثبت نمی‌شد، بدون هیچ سرنخی —
+      // نه در لاگ دیدبان، نه در لاگ پنل، نه در پنل. آدرسی که پیدا نشود
+      // حالا شمرده و در پاسخ گزارش می‌شود.
       const row = await queryOne<{ id: number }>(
         `SELECT id FROM ip_addresses WHERE ip = $1::inet AND access_watch`,
         [ipText],
-      ).catch(() => null);
-      if (!row) continue;
+      );
+      if (!row) {
+        skipped.push(ipText);
+        continue;
+      }
 
       await query(
         `INSERT INTO ip_probe_state (ip_id, probe_id, ok, ms, ok_streak, fail_streak, checked_at)
@@ -125,7 +133,16 @@ export async function POST(req: Request) {
     const transitions = await evaluate(Array.from(new Set(touched)));
     await announce(transitions);
 
-    return ok({ ok: true, evaluated: touched.length, transitions: transitions.length });
+    if (skipped.length) {
+      console.error('[probe] آدرس‌های ثبت‌نشده یا بدون تیک پایش:', skipped.join(', '));
+    }
+
+    return ok({
+      ok: true,
+      evaluated: touched.length,
+      skipped: skipped.length,
+      transitions: transitions.length,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'خطای ناشناخته';
     console.error('[probe]', message);

@@ -165,13 +165,21 @@ def main():
                     if item["ip"] in local:
                         item["local"] = True
 
-                http_json(base + "/api/probe", args.token, payload={"results": results},
-                          insecure=args.insecure)
+                reply = http_json(base + "/api/probe", args.token,
+                                   payload={"results": results}, insecure=args.insecure)
                 up = sum(1 for r in results if r["ok"] and not r.get("local"))
-                skipped = sum(1 for r in results if r.get("local"))
+                local_n = sum(1 for r in results if r.get("local"))
                 say("دور کامل شد: %d آی‌پی، %d پاسخ داد%s"
                     % (len(results), up,
-                       "، %d روی همین سرور بایند است" % skipped if skipped else ""))
+                       "، %d روی همین سرور بایند است" % local_n if local_n else ""))
+
+                # پنل می‌گوید چند نتیجه را نتوانست به آی‌پی ثبت‌شده وصل کند.
+                # بدون این، پست با کد ۲۰۰ برمی‌گشت و هیچ‌چیز ثبت نمی‌شد،
+                # ولی لاگ دیدبان «دور کامل شد» می‌گفت — یعنی موفقیت دروغین.
+                dropped = (reply or {}).get("skipped") or 0
+                if dropped:
+                    say("هشدار: پنل %d نتیجه را ثبت نکرد — آن آی‌پی‌ها در پنل "
+                        "نیستند یا تیک پایش ندارند" % dropped)
             else:
                 say("فهرست پایش خالی است")
 
