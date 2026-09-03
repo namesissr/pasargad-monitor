@@ -17,6 +17,7 @@ export async function GET(req: Request) {
     const serverId = url.searchParams.get('server_id') || '';
     const subnetId = url.searchParams.get('subnet_id') || '';
     const version = url.searchParams.get('version') || '';
+    const access = url.searchParams.get('access') || '';
     const search = (url.searchParams.get('q') || '').trim();
     const limit = Math.min(500, Math.max(10, num(url.searchParams.get('limit'), 100)));
     const page = Math.max(1, num(url.searchParams.get('page'), 1));
@@ -37,6 +38,13 @@ export async function GET(req: Request) {
     if (subnetId) {
       p.push(Number(subnetId));
       where.push(`i.subnet_id = $${p.length}`);
+    }
+    // فیلتر اکسس ایران: watch یعنی همه تحت پایش، blocked و released وضعیت مشخص
+    if (access === 'watch') {
+      where.push('i.access_watch');
+    } else if (access === 'blocked' || access === 'released') {
+      p.push(access);
+      where.push(`i.access_watch AND i.iran_access_status = $${p.length}`);
     }
     if (version === '4' || version === '6') {
       p.push(Number(version));
@@ -61,13 +69,15 @@ export async function GET(req: Request) {
     const rows = await query(
       `SELECT i.id, host(i.ip) AS ip, i.version, i.status, i.customer, i.ptr, i.mac,
               i.is_monitored, i.ping_ok, i.ping_ms, i.last_ping_at, i.notes,
+              i.access_watch, i.iran_access_status, i.access_blocked_since, i.access_released_at,
+              i.bind_server_id, i.bind_ok, i.bind_error,
               i.server_id, s.name AS server_name,
               i.subnet_id, n.cidr::text AS subnet
          FROM ip_addresses i
          LEFT JOIN servers s   ON s.id = i.server_id
          LEFT JOIN ip_subnets n ON n.id = i.subnet_id
          ${clause}
-        ORDER BY i.ip
+        ORDER BY ${access === 'released' ? 'i.access_released_at DESC NULLS LAST,' : ''} i.ip
         LIMIT $${p.length - 1} OFFSET $${p.length}`,
       p,
     );
@@ -76,7 +86,15 @@ export async function GET(req: Request) {
       `SELECT status, COUNT(*)::int AS cnt FROM ip_addresses GROUP BY status`,
     );
 
-    return ok({ ips: rows, total: total?.cnt ?? 0, page, limit, stats });
+    const accessStats = await queryOne<{ watch: number; blocked: number; released7: number }>(
+      `SELECT COUNT(*) FILTER (WHERE access_watch)::int AS watch,
+              COUNT(*) FILTER (WHERE access_watch AND iran_access_status = 'blocked')::int AS blocked,
+              COUNT(*) FILTER (WHERE access_watch AND iran_access_status = 'released'
+                               AND access_released_at > now() - interval '7 days')::int AS released7
+         FROM ip_addresses`,
+    );
+
+    return ok({ ips: rows, total: total?.cnt ?? 0, page, limit, stats, accessStats });
   });
 }
 
@@ -94,6 +112,8 @@ export async function POST(req: Request) {
     const subnetId = b.subnet_id ? Number(b.subnet_id) : null;
     const customer = String(b.customer ?? '').trim() || null;
     const monitored = Boolean(b.is_monitored);
+    const accessWatch = Boolean(b.access_watch);
+    const bindServerId = b.bind_server_id ? Number(b.bind_server_id) : null;
 
     const list = raw
       .split(/[\s,،\n]+/)
@@ -118,6 +138,22 @@ export async function POST(req: Request) {
                  updated_at = now()`,
           [ip, subnetId, serverId, status, customer, monitored],
         );
+
+        // آی‌پی اکسس‌شده که تازه به پایش اضافه می‌شود، «در اکسس» فرض می‌شود —
+        // کل سناریو همین است: فهرست بسته‌شده‌ها وارد و منتظر آزادشدن می‌مانیم
+        if (accessWatch) {
+          await query(
+            `UPDATE ip_addresses
+                SET access_watch = TRUE,
+                    bind_server_id = COALESCE($2, bind_server_id),
+                    iran_access_status = CASE WHEN iran_access_status = 'unknown' THEN 'blocked'
+                                              ELSE iran_access_status END,
+                    access_blocked_since = COALESCE(access_blocked_since, now()),
+                    updated_at = now()
+              WHERE ip = $1::inet`,
+            [ip, bindServerId],
+          );
+        }
         added.push(ip);
       } catch (err) {
         failed.push({ ip, reason: err instanceof Error ? err.message : 'خطای ناشناخته' });

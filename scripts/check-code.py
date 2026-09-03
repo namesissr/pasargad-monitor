@@ -334,8 +334,10 @@ def check_union_props():
 
 # ── ۸) هر مسیر API پنل باید requireUser داشته باشد ───────────────────────
 # مسیرهای باز عمدی: ingest با توکن ایجنت، ورود، خروج، سلامت
+# probe و bind با توکن خودشان احراز می‌شوند، مثل ingest
 OPEN_ROUTES = {"app/api/ingest/route.ts", "app/api/auth/login/route.ts",
-               "app/api/auth/logout/route.ts", "app/api/health/route.ts"}
+               "app/api/auth/logout/route.ts", "app/api/health/route.ts",
+               "app/api/probe/route.ts", "app/api/bind/route.ts"}
 
 
 def check_route_auth():

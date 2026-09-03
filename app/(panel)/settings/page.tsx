@@ -21,6 +21,15 @@ interface SettingsData {
   recentSms: { id: number; recipient: string; body: string; ok: boolean; error: string | null; created_at: string }[];
 }
 
+interface ProbeRow {
+  id: number;
+  name: string;
+  location: string;
+  token: string;
+  last_seen_at: string | null;
+  is_active: boolean;
+}
+
 interface RuleRow {
   id: number;
   server_id: number | null;
@@ -44,6 +53,11 @@ const KIND_UNIT: Record<string, string> = {
 export default function SettingsPage() {
   const { data, loading, error, reload } = useLoad<SettingsData>('/api/settings');
   const rules = useLoad<{ rules: RuleRow[] }>('/api/alerts');
+  const probes = useLoad<{ probes: ProbeRow[] }>('/api/probes');
+
+  const [probeName, setProbeName] = useState('');
+  const [probeLocation, setProbeLocation] = useState('outside');
+  const [probeBusy, setProbeBusy] = useState(false);
 
   const [form, setForm] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -96,6 +110,31 @@ export default function SettingsPage() {
       rules.reload();
     } catch (e) {
       setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'تغییر قانون انجام نشد' });
+    }
+  }
+
+  async function addProbe() {
+    if (!probeName.trim()) return;
+    setMsg(null);
+    setProbeBusy(true);
+    try {
+      await api.post('/api/probes', { name: probeName.trim(), location: probeLocation });
+      setProbeName('');
+      probes.reload();
+    } catch (e) {
+      setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'ساخت دیدبان انجام نشد' });
+    } finally {
+      setProbeBusy(false);
+    }
+  }
+
+  async function removeProbe(probe: ProbeRow) {
+    if (!confirm(`دیدبان «${probe.name}» حذف شود؟ نتیجه‌های قبلی‌اش هم پاک می‌شوند.`)) return;
+    try {
+      await api.del(`/api/probes?id=${probe.id}`);
+      probes.reload();
+    } catch (e) {
+      setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'حذف انجام نشد' });
     }
   }
 
@@ -177,6 +216,81 @@ export default function SettingsPage() {
             {saving ? 'در حال ذخیره…' : 'ذخیره تنظیمات'}
           </button>
         </div>
+      </section>
+
+      {/* دیدبان‌های اکسس ایران */}
+      <section className="card p-5 space-y-4">
+        <div>
+          <h2 className="text-sm font-bold">دیدبان‌های اکسس ایران</h2>
+          <p className="text-[11px] text-muted mt-0.5">
+            آی‌پی اکسس‌شده از داخل ایران پینگ می‌دهد ولی از خارج نه — پس تشخیص آزادشدن،
+            حداقل یک دیدبان <strong>خارج از ایران</strong> می‌خواهد. دیدبان داخل اختیاری است و فقط
+            زنده‌بودن آی‌پی را ثابت می‌کند.
+          </p>
+        </div>
+
+        {(probes.data?.probes ?? []).length > 0 && (
+          <ul className="divide-y divide-line/60 border border-line rounded-lg">
+            {(probes.data?.probes ?? []).map((probe) => {
+              const stale =
+                !probe.last_seen_at ||
+                Date.now() - new Date(probe.last_seen_at).getTime() > 3600_000;
+              return (
+                <li key={probe.id} className="px-3 py-2.5 space-y-1.5 text-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`w-1.5 h-1.5 rounded-full ${stale ? 'bg-danger' : 'bg-ok animate-pulse'}`} />
+                    <span className="font-bold">{probe.name}</span>
+                    <span className="badge bg-line text-muted">
+                      {probe.location === 'inside' ? 'داخل ایران' : 'خارج ایران'}
+                    </span>
+                    <span className="text-muted">
+                      {probe.last_seen_at ? `آخرین گزارش ${timeAgo(probe.last_seen_at)}` : 'هنوز گزارشی نداده'}
+                    </span>
+                    <button
+                      type="button"
+                      className="ms-auto text-muted hover:text-danger"
+                      onClick={() => removeProbe(probe)}
+                    >
+                      حذف
+                    </button>
+                  </div>
+                  <div className="bg-rack border border-line rounded-md p-2 ltr font-mono text-[10px] break-all text-muted">
+                    curl -fsSL {typeof window !== 'undefined' ? window.location.origin : ''}/agent/watch-install.sh | bash -s -- {typeof window !== 'undefined' ? window.location.origin : ''} {probe.token} probe
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        <div className="flex items-end gap-2 flex-wrap">
+          <div className="flex-1 min-w-[160px]">
+            <Field label="نام دیدبان تازه">
+              <input
+                className="input"
+                value={probeName}
+                onChange={(e) => setProbeName(e.target.value)}
+                placeholder="مثلا: تهران — مخابرات"
+              />
+            </Field>
+          </div>
+          <div className="min-w-[140px]">
+            <Field label="موقعیت">
+              <select className="input" value={probeLocation} onChange={(e) => setProbeLocation(e.target.value)}>
+                <option value="outside">خارج ایران</option>
+                <option value="inside">داخل ایران</option>
+              </select>
+            </Field>
+          </div>
+          <button type="button" className="btn-primary" onClick={addProbe} disabled={probeBusy || !probeName.trim()}>
+            {probeBusy ? 'در حال ساخت…' : 'ساخت دیدبان'}
+          </button>
+        </div>
+
+        <p className="text-[11px] text-muted/70">
+          بعد از ساخت، دستور نصب هر دیدبان همین‌جا نمایش داده می‌شود — روی همان سرور اجرایش کنید.
+          اگر دیدبانی بیش از یک ساعت گزارش ندهد، رویداد و پیامک هشدار می‌آید.
+        </p>
       </section>
 
       {/* قوانین هشدار */}

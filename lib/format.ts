@@ -193,4 +193,14 @@ export const INCIDENT_KIND_LABEL: Record<string, string> = {
   traffic: 'عبور از سهمیه ترافیک',
   load: 'بار سیستم بالا',
   ip_down: 'قطعی آی‌پی',
+  ip_access_released: 'آزادشدن از اکسس',
+  ip_access_blocked: 'اکسس شدن آی‌پی',
+  probe_lost: 'قطع ارتباط دیدبان',
+};
+
+/** برچسب فارسی وضعیت اکسس ایران */
+export const IRAN_ACCESS_LABEL: Record<string, string> = {
+  blocked: 'در اکسس',
+  released: 'آزاد شد',
+  unknown: 'نامشخص',
 };

@@ -1,5 +1,5 @@
 import { q, q1, settingNum, log, logErr } from './db.mjs';
-import { checkServers, checkIps } from './checks.mjs';
+import { checkServers, checkIps, checkProbes } from './checks.mjs';
 import { dispatchNotifications } from './incidents.mjs';
 import { evaluateThresholds } from './alerts.mjs';
 import { rollupHourly, rollupDaily, purgeOld } from './rollup.mjs';
@@ -96,6 +96,7 @@ async function main() {
     async () => {
       await checkServers();
       await checkIps();
+      await checkProbes();
       await dispatchNotifications();
     },
     async () => Math.max(10, await settingNum('check_interval_sec', 30)) * 1000,

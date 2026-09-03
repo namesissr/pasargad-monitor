@@ -14,6 +14,8 @@ const EDITABLE: Record<string, 'text' | 'int' | 'bool' | 'status'> = {
   mac: 'text',
   notes: 'text',
   is_monitored: 'bool',
+  access_watch: 'bool',
+  bind_server_id: 'int',
 };
 
 const VALID_STATUS = ['free', 'assigned', 'reserved', 'blocked', 'abuse'];
@@ -60,6 +62,25 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       values,
     );
     if (!row) return fail('آی‌پی پیدا نشد', 404);
+
+    // با روشن‌شدن پایش، وضعیت اولیه «در اکسس» است — سناریو همین است
+    if (body.access_watch === true) {
+      await query(
+        `UPDATE ip_addresses
+            SET iran_access_status = CASE WHEN iran_access_status = 'unknown' THEN 'blocked'
+                                          ELSE iran_access_status END,
+                access_blocked_since = COALESCE(access_blocked_since, now())
+          WHERE id = $1`,
+        [id],
+      );
+    }
+    // با خاموش‌شدن پایش، ایجنت لنگر در دور بعدی خودش آی‌پی را جدا می‌کند
+    if (body.access_watch === false) {
+      await query(
+        `UPDATE ip_addresses SET bind_ok = NULL, bind_error = NULL WHERE id = $1`,
+        [id],
+      );
+    }
 
     return ok({ ok: true });
   });

@@ -10,7 +10,8 @@ import { SESSION_COOKIE, verifySessionToken } from './lib/session';
 
 // مسیر /agent فایل‌های نصب ایجنت است. باز بودنش لازم است، چون سرور تازه
 // هیچ کوکی نشستی ندارد. توکن در آن فایل‌ها نیست؛ هنگام نصب آرگومان داده می‌شود.
-const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/ingest', '/api/health', '/agent'];
+// «probe» و «bind» هم مثل ingest با توکن خودشان احراز می‌شوند نه کوکی نشست
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/ingest', '/api/probe', '/api/bind', '/api/health', '/agent'];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

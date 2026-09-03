@@ -199,3 +199,33 @@ export async function checkIps() {
     }
   }
 }
+
+/**
+ * سلامت دیدبان‌های اکسس.
+ *
+ * اگر دیدبان بمیرد، تشخیص آزادشدن آی‌پی‌ها بی‌صدا می‌ایستد — دقیقاً همان
+ * الگوی شکست خاموشی که همه‌جای این پروژه با آن جنگیده‌ایم. دیدبانی که یک
+ * ساعت خبری ازش نیست، رویداد و پیامک می‌سازد.
+ */
+export async function checkProbes() {
+  const stale = await q(
+    `SELECT name, location FROM probes
+      WHERE is_active
+        AND COALESCE(last_seen_at, created_at) < now() - interval '1 hour'
+      ORDER BY name`,
+  );
+
+  if (stale.length) {
+    const names = stale.map((p) => `${p.name} (${p.location === 'inside' ? 'داخل' : 'خارج'})`).join('، ');
+    await openIncident({
+      kind: 'probe_lost',
+      severity: 'critical',
+      message: `${stale.length} دیدبان اکسس بیش از یک ساعت است گزارش نداده: ${names}. تا برنگردد، آزادشدن آی‌پی‌ها تشخیص داده نمی‌شود.`,
+    });
+  } else {
+    await resolveIncident({
+      kind: 'probe_lost',
+      recoveryMessage: 'پاسارگاد میزبان — همه دیدبان‌های اکسس دوباره گزارش می‌دهند.',
+    });
+  }
+}

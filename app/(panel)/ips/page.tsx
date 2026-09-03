@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useLoad, LoadState } from '@/components/useLoad';
 import { Field, IpBadge, Modal, Mono, Notice } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
-import { faNum, formatPercent, timeAgo, IP_STATUS_LABEL } from '@/lib/format';
+import { faNum, formatJalali, formatPercent, timeAgo, IP_STATUS_LABEL, IRAN_ACCESS_LABEL } from '@/lib/format';
 
 interface IpRow {
   id: number;
@@ -19,6 +19,13 @@ interface IpRow {
   ping_ms: number | null;
   last_ping_at: string | null;
   notes: string | null;
+  access_watch: boolean;
+  iran_access_status: string;
+  access_blocked_since: string | null;
+  access_released_at: string | null;
+  bind_server_id: number | null;
+  bind_ok: boolean | null;
+  bind_error: string | null;
   server_id: number | null;
   server_name: string | null;
   subnet_id: number | null;
@@ -31,6 +38,7 @@ interface IpData {
   page: number;
   limit: number;
   stats: { status: string; cnt: number }[];
+  accessStats: { watch: number; blocked: number; released7: number } | null;
 }
 
 interface SubnetRow {
@@ -54,6 +62,7 @@ export default function IpsPage() {
   const [status, setStatus] = useState('');
   const [serverId, setServerId] = useState('');
   const [version, setVersion] = useState('');
+  const [access, setAccess] = useState('');
   const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -71,6 +80,7 @@ export default function IpsPage() {
   if (status) params.set('status', status);
   if (serverId) params.set('server_id', serverId);
   if (version) params.set('version', version);
+  if (access) params.set('access', access);
 
   const { data, loading, error, reload } = useLoad<IpData>(`/api/ips?${params}`);
   const subnets = useLoad<{ subnets: SubnetRow[] }>('/api/subnets');
@@ -122,6 +132,34 @@ export default function IpsPage() {
         </div>
       )}
 
+      {/* اکسس ایران */}
+      {(data?.accessStats?.watch ?? 0) > 0 && (
+        <div className="card p-3 flex items-center gap-2 flex-wrap text-xs">
+          <span className="font-bold">اکسس ایران:</span>
+          {([
+            ['blocked', `${faNum(data?.accessStats?.blocked ?? 0)} در اکسس`],
+            ['released', 'آزادشده‌ها'],
+            ['watch', `همه تحت پایش (${faNum(data?.accessStats?.watch ?? 0)})`],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => { setAccess(access === key ? '' : key); setPage(1); }}
+              className={`px-2.5 py-1 rounded-md border transition-colors ${
+                access === key ? 'bg-cyan/10 text-cyan border-cyan/30' : 'border-line text-muted hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+          {(data?.accessStats?.released7 ?? 0) > 0 && (
+            <span className="badge bg-ok/15 text-ok ms-auto">
+              {faNum(data?.accessStats?.released7 ?? 0)} آی‌پی در ۷ روز اخیر آزاد شد
+            </span>
+          )}
+        </div>
+      )}
+
       {/* فیلترها */}
       <div className="flex items-center gap-2 flex-wrap">
         <input
@@ -145,11 +183,11 @@ export default function IpsPage() {
           <option value="4">نسخه ۴</option>
           <option value="6">نسخه ۶</option>
         </select>
-        {(q || status || serverId || version) && (
+        {(q || status || serverId || version || access) && (
           <button
             type="button"
             className="text-xs text-muted hover:text-cyan"
-            onClick={() => { setQ(''); setStatus(''); setServerId(''); setVersion(''); setPage(1); }}
+            onClick={() => { setQ(''); setStatus(''); setServerId(''); setVersion(''); setAccess(''); setPage(1); }}
           >
             پاک‌کردن فیلترها
           </button>
@@ -173,6 +211,7 @@ export default function IpsPage() {
                 <th>مشتری</th>
                 <th>رکورد معکوس</th>
                 <th>بلوک</th>
+                <th>اکسس ایران</th>
                 <th>پینگ</th>
                 <th></th>
               </tr>
@@ -188,6 +227,27 @@ export default function IpsPage() {
                   <td className="text-xs truncate max-w-[140px]">{ip.customer || <span className="text-muted">—</span>}</td>
                   <td className="text-xs text-muted truncate max-w-[180px]">{ip.ptr || '—'}</td>
                   <td><Mono className="text-muted">{ip.subnet || '—'}</Mono></td>
+                  <td className="text-xs whitespace-nowrap">
+                    {!ip.access_watch ? (
+                      <span className="text-muted/60">—</span>
+                    ) : ip.iran_access_status === 'released' ? (
+                      <span className="badge bg-ok/15 text-ok" title={formatJalali(ip.access_released_at)}>
+                        {IRAN_ACCESS_LABEL.released} · {timeAgo(ip.access_released_at)}
+                      </span>
+                    ) : ip.iran_access_status === 'blocked' ? (
+                      <span className="badge bg-danger/15 text-danger" title={formatJalali(ip.access_blocked_since)}>
+                        {IRAN_ACCESS_LABEL.blocked} · {timeAgo(ip.access_blocked_since)}
+                      </span>
+                    ) : (
+                      <span
+                        className="badge bg-line text-muted"
+                        title={ip.bind_error || 'هنوز دیدبان یا لنگر تأییدش نکرده'}
+                      >
+                        {IRAN_ACCESS_LABEL.unknown}
+                        {ip.bind_server_id && ip.bind_ok === false && ' · لنگر ناموفق'}
+                      </span>
+                    )}
+                  </td>
                   <td className="text-xs whitespace-nowrap">
                     {!ip.is_monitored ? (
                       <span className="text-muted/60">خاموش</span>
@@ -299,6 +359,8 @@ function AddIpModal({
   const [serverId, setServerId] = useState('');
   const [customer, setCustomer] = useState('');
   const [monitored, setMonitored] = useState(true);
+  const [accessWatch, setAccessWatch] = useState(false);
+  const [bindServerId, setBindServerId] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{ added: number; failed: { ip: string; reason: string }[] } | null>(null);
@@ -315,6 +377,8 @@ function AddIpModal({
         server_id: serverId || null,
         customer,
         is_monitored: monitored,
+        access_watch: accessWatch,
+        bind_server_id: accessWatch && bindServerId ? Number(bindServerId) : null,
       });
       setResult(res);
       onDone();
@@ -363,6 +427,28 @@ function AddIpModal({
               پینگ دوره‌ای انجام شود
             </label>
           </div>
+        </div>
+
+        <div className="border-t border-line pt-3 space-y-3">
+          <label className="flex items-center gap-2 text-xs cursor-pointer">
+            <input type="checkbox" checked={accessWatch} onChange={(e) => setAccessWatch(e.target.checked)} />
+            <span className="font-bold">پایش اکسس ایران</span>
+            <span className="text-muted">— این آی‌پی‌ها الان اکسس‌اند؛ آزاد که شدند خبر بده</span>
+          </label>
+
+          {accessWatch && (
+            <Field
+              label="سرور لنگر"
+              hint="آی‌پی بیکار به پینگ جواب نمی‌دهد. روی این سرور خودکار بایند می‌شود تا قابل سنجش شود. فقط سروری که ایجنت لنگر رویش نصب است."
+            >
+              <select className="input" value={bindServerId} onChange={(e) => setBindServerId(e.target.value)}>
+                <option value="">بدون لنگر — فقط اگر آی‌پی از قبل به ماشینی وصل است</option>
+                {servers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </Field>
+          )}
         </div>
 
         {err && <Notice type="error">{err}</Notice>}
@@ -493,6 +579,8 @@ function EditIpModal({
     mac: '',
     notes: '',
     is_monitored: false,
+    access_watch: false,
+    bind_server_id: '',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -507,6 +595,8 @@ function EditIpModal({
       mac: ip.mac ?? '',
       notes: ip.notes ?? '',
       is_monitored: ip.is_monitored,
+      access_watch: ip.access_watch,
+      bind_server_id: ip.bind_server_id ? String(ip.bind_server_id) : '',
     });
     setErr(null);
   }, [ip]);
@@ -519,7 +609,11 @@ function EditIpModal({
     setErr(null);
     setBusy(true);
     try {
-      await api.patch(`/api/ips/${ip.id}`, { ...form, server_id: form.server_id || null });
+      await api.patch(`/api/ips/${ip.id}`, {
+        ...form,
+        server_id: form.server_id || null,
+        bind_server_id: form.bind_server_id || null,
+      });
       onDone();
       onClose();
     } catch (e2) {
@@ -579,6 +673,31 @@ function EditIpModal({
               پینگ دوره‌ای
             </label>
           </div>
+        </div>
+
+        <div className="border-t border-line pt-3 space-y-3">
+          <label className="flex items-center gap-2 text-xs cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.access_watch}
+              onChange={(e) => setForm((f) => ({ ...f, access_watch: e.target.checked }))}
+            />
+            <span className="font-bold">پایش اکسس ایران</span>
+          </label>
+          {form.access_watch && (
+            <Field label="سرور لنگر" hint="خالی یعنی بدون بایند خودکار">
+              <select
+                className="input"
+                value={form.bind_server_id}
+                onChange={(e) => setForm((f) => ({ ...f, bind_server_id: e.target.value }))}
+              >
+                <option value="">بدون لنگر</option>
+                {servers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </Field>
+          )}
         </div>
 
         <Field label="یادداشت">
