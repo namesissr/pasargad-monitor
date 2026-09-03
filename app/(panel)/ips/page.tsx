@@ -26,6 +26,7 @@ interface IpRow {
   bind_server_id: number | null;
   bind_ok: boolean | null;
   bind_error: string | null;
+  bind_same_subnet: boolean | null;
   server_id: number | null;
   server_name: string | null;
   subnet_id: number | null;
@@ -41,7 +42,7 @@ interface IpData {
   page: number;
   limit: number;
   stats: { status: string; cnt: number }[];
-  accessStats: { watch: number; blocked: number; released7: number } | null;
+  accessStats: { watch: number; blocked: number; released7: number; unreachable: number } | null;
 }
 
 interface SubnetRow {
@@ -142,6 +143,7 @@ export default function IpsPage() {
           {([
             ['blocked', `${faNum(data?.accessStats?.blocked ?? 0)} در اکسس`],
             ['released', 'آزادشده‌ها'],
+            ['unreachable', `${faNum(data?.accessStats?.unreachable ?? 0)} روت نشده`],
             ['watch', `همه تحت پایش (${faNum(data?.accessStats?.watch ?? 0)})`],
           ] as const).map(([key, label]) => (
             <button
@@ -254,6 +256,18 @@ export default function IpsPage() {
                     ) : ip.iran_access_status === 'blocked' ? (
                       <span className="badge bg-danger/15 text-danger" title={formatJalali(ip.access_blocked_since)}>
                         {IRAN_ACCESS_LABEL.blocked} · {timeAgo(ip.access_blocked_since)}
+                      </span>
+                    ) : ip.iran_access_status === 'unreachable' ? (
+                      <span
+                        className="badge bg-amber/15 text-amber"
+                        title={
+                          ip.bind_same_subnet === false
+                            ? 'این آی‌پی از رنج سرور لنگر نیست. دیتاسنتر باید بلوک را به آن سرور روت کند.'
+                            : 'از هیچ دیدباتی در دسترس نیست. اگر دیدبان داخل ایران ندارید، اکسس‌بودن قابل تشخیص نیست.'
+                        }
+                      >
+                        {IRAN_ACCESS_LABEL.unreachable}
+                        {ip.bind_same_subnet === false && ' · رنج متفاوت'}
                       </span>
                     ) : (
                       <span

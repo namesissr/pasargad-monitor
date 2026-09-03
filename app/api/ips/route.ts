@@ -42,7 +42,7 @@ export async function GET(req: Request) {
     // فیلتر اکسس ایران: watch یعنی همه تحت پایش، blocked و released وضعیت مشخص
     if (access === 'watch') {
       where.push('i.access_watch');
-    } else if (access === 'blocked' || access === 'released') {
+    } else if (access === 'blocked' || access === 'released' || access === 'unreachable') {
       p.push(access);
       where.push(`i.access_watch AND i.iran_access_status = $${p.length}`);
     }
@@ -70,7 +70,7 @@ export async function GET(req: Request) {
       `SELECT i.id, host(i.ip) AS ip, i.version, i.status, i.customer, i.ptr, i.mac,
               i.is_monitored, i.ping_ok, i.ping_ms, i.last_ping_at, i.notes,
               i.access_watch, i.iran_access_status, i.access_blocked_since, i.access_released_at,
-              i.bind_server_id, i.bind_ok, i.bind_error,
+              i.bind_server_id, i.bind_ok, i.bind_error, i.bind_same_subnet,
               i.server_id, s.name AS server_name,
               i.subnet_id, n.cidr::text AS subnet,
               masklen(n.cidr) AS subnet_prefix,
@@ -92,6 +92,7 @@ export async function GET(req: Request) {
     const accessStats = await queryOne<{ watch: number; blocked: number; released7: number }>(
       `SELECT COUNT(*) FILTER (WHERE access_watch)::int AS watch,
               COUNT(*) FILTER (WHERE access_watch AND iran_access_status = 'blocked')::int AS blocked,
+              COUNT(*) FILTER (WHERE access_watch AND iran_access_status = 'unreachable')::int AS unreachable,
               COUNT(*) FILTER (WHERE access_watch AND iran_access_status = 'released'
                                AND access_released_at > now() - interval '7 days')::int AS released7
          FROM ip_addresses`,

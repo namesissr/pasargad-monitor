@@ -242,6 +242,7 @@ python3 scripts/check-code.py
 ```bash
 python3 scripts/test-jalali.py    # تبدیل تاریخ شمسی
 python3 scripts/test-uplink.py    # تشخیص کارت شبکه ایجنت
+python3 scripts/test-access.py    # منطق پایش اکسس ایران
 ```
 
 اولی هفت دسته خطا را در چند ثانیه می‌گیرد: ایمپورت شکسته، نام صادرنشده، نام

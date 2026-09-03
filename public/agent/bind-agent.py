@@ -104,6 +104,59 @@ def run_ip(args_list):
     return proc.returncode, text(out) + text(err)
 
 
+def ip_to_int(ip):
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return None
+    try:
+        nums = [int(x) for x in parts]
+    except ValueError:
+        return None
+    if any(n < 0 or n > 255 for n in nums):
+        return None
+    return (nums[0] << 24) | (nums[1] << 16) | (nums[2] << 8) | nums[3]
+
+
+def primary_address(iface, ours):
+    """
+    آدرس اصلی رابط و پرفیکسش.
+
+    آدرس‌هایی که خودمان بایند کرده‌ایم و هر /32 دیگری کنار گذاشته می‌شوند:
+    آدرس اصلی همیشه پرفیکس واقعی ساب‌نت را دارد.
+    """
+    code, out = run_ip(["-4", "addr", "show", "dev", iface])
+    if code != 0:
+        return None, None
+    for line in out.split("\n"):
+        line = line.strip()
+        if not line.startswith("inet "):
+            continue
+        cidr = line.split()[1]
+        if "/" not in cidr:
+            continue
+        addr, prefix = cidr.split("/", 1)
+        try:
+            prefix = int(prefix)
+        except ValueError:
+            continue
+        if prefix >= 32 or addr in ours:
+            continue
+        return addr, prefix
+    return None, None
+
+
+def same_subnet(ip, base_ip, base_prefix):
+    """آیا این آی‌پی با آدرس اصلی سرور در یک ساب‌نت است؟"""
+    if not base_ip or not base_prefix:
+        return None
+    a = ip_to_int(ip)
+    b = ip_to_int(base_ip)
+    if a is None or b is None:
+        return None
+    mask = (0xFFFFFFFF << (32 - base_prefix)) & 0xFFFFFFFF
+    return (a & mask) == (b & mask)
+
+
 def load_state():
     try:
         with open(STATE_FILE) as f:
@@ -174,6 +227,11 @@ def main():
             state = load_state()
             results = []
 
+            # آدرس اصلی رابط، برای تشخیص اینکه آی‌پی از رنج دیگری است یا نه.
+            # اگر رنج فرق کند و آی‌پی از هیچ‌جا در دسترس نباشد، تقریباً همیشه
+            # یعنی دیتاسنتر بلوک را به این سرور روت نکرده.
+            base_ip, base_prefix = primary_address(iface, state)
+
             # جداکردن آی‌پی‌هایی که ما بایند کردیم و دیگر خواسته نیستند.
             # فقط از روی فایل حالت — هرگز به آدرس‌های خود سرور دست نمی‌زنیم.
             for ip in sorted(state - wanted):
@@ -189,16 +247,17 @@ def main():
             for ip in sorted(wanted):
                 cidr = "%s/%d" % (ip, addresses.get(ip, 32))
                 code, out = run_ip(["addr", "add", cidr, "dev", iface])
-                if code == 0:
+                shares = same_subnet(ip, base_ip, base_prefix)
+                if code == 0 or "File exists" in out:
                     state.add(ip)
-                    say("بایند شد: %s" % ip)
-                    results.append({"ip": ip, "bound": True})
-                elif "File exists" in out:
-                    # از قبل هست — چه توسط ما چه خود سرور؛ زنده است
-                    state.add(ip)
-                    results.append({"ip": ip, "bound": True})
+                    if code == 0:
+                        say("بایند شد: %s%s" % (ip, "" if shares is not False else "  (رنج متفاوت)"))
+                    results.append({"ip": ip, "bound": True, "same_subnet": shares})
                 else:
-                    results.append({"ip": ip, "bound": False, "error": out.strip()[:200]})
+                    results.append({
+                        "ip": ip, "bound": False, "same_subnet": shares,
+                        "error": out.strip()[:200],
+                    })
                     say("بایند %s ناموفق: %s" % (ip, out.strip()[:120]))
 
             save_state(state)

@@ -14,8 +14,18 @@ export const dynamic = 'force-dynamic';
  * پس قاعده تصمیم:
  *   دیدبان خارج جواب گرفت (۳ بار پیاپی)          → آزاد شد
  *   همه دیدبان‌های خارج ۳ بار پیاپی جواب نگرفتند
- *     و آی‌پی زنده است (دیدبان داخل یا بایند)     → اکسس
- *     و زنده‌بودنش معلوم نیست                     → نامشخص، قضاوت نمی‌کنیم
+ *     و دیدبان داخل ایران جواب گرفت              → در اکسس
+ *     و داخل هم جواب نگرفت ولی بایند شده         → روت نشده
+ *     و بایند هم نشده                            → نامشخص
+ *
+ * تفکیک «در اکسس» از «روت نشده» حیاتی است. موفقیت «ip addr add» هیچ
+ * اثباتی نیست: تقریباً همیشه موفق می‌شود، حتی وقتی دیتاسنتر بلوک را به آن
+ * سرور روت نکرده. اگر آن را نشانه زنده‌بودن بگیریم، آی‌پی روت‌نشده تا ابد
+ * «در اکسس» گزارش می‌شود و آزادشدنش هرگز دیده نمی‌شود — چون از اول هم از
+ * هیچ‌جا در دسترس نبود.
+ *
+ * پیامد: دیدبان داخل ایران اختیاری نیست. بدون آن، «در اکسس» و «روت نشده»
+ * از هم قابل تشخیص نیستند و همه در حالت «روت نشده» می‌مانند.
  *
  * این مسیر مثل ingest بیرون از نگهبان نشست است و با توکن دیدبان احراز
  * می‌شود. تشخیص تغییر وضعیت همین‌جا انجام می‌شود، نه در ورکر — تا فاصله‌ای
@@ -149,13 +159,27 @@ async function evaluate(ipIds: number[]): Promise<Transition[]> {
     const releasedNow = outside.some((s) => s.ok_streak >= STREAK);
     const allOutsideDown = outside.every((s) => s.fail_streak >= STREAK);
     const aliveInside = states.some((s) => s.location === 'inside' && s.ok === true);
-    const alive = aliveInside || ip.bind_ok === true;
 
     let target = ip.iran_access_status;
-    if (releasedNow) target = 'released';
-    else if (allOutsideDown) target = alive ? 'blocked' : 'unknown';
+    if (releasedNow) {
+      target = 'released';
+    } else if (allOutsideDown) {
+      // فقط دیدبان داخل ایران می‌تواند اکسس‌بودن را اثبات کند. بایند
+      // موفق چیزی را ثابت نمی‌کند جز اینکه آدرس روی کارت نشسته.
+      if (aliveInside) target = 'blocked';
+      else if (ip.bind_ok === true) target = 'unreachable';
+      else target = 'unknown';
+    }
 
     if (target === ip.iran_access_status) continue;
+
+    if (target === 'unreachable') {
+      await query(
+        `UPDATE ip_addresses SET iran_access_status = 'unreachable', updated_at = now() WHERE id = $1`,
+        [ipId],
+      );
+      continue;
+    }
 
     if (target === 'released') {
       await query(
@@ -165,11 +189,16 @@ async function evaluate(ipIds: number[]): Promise<Transition[]> {
       );
       out.push({ ipId, ip: ip.ip, from: ip.iran_access_status, to: 'released', blockedDays: ip.blocked_days });
     } else if (target === 'blocked') {
+      // ساعت اکسس فقط وقتی از نو شروع می‌شود که آی‌پی قبلاً آزاد شده بود.
+      // گذر از «روت نشده» به «در اکسس» یعنی تازه توانستیم بسنجیمش، نه
+      // اینکه تازه اکسس شده باشد — ریست کردن تاریخ، مدت اکسس را دروغ می‌کرد.
       await query(
         `UPDATE ip_addresses SET iran_access_status = 'blocked',
-                access_blocked_since = now(), access_released_at = NULL, updated_at = now()
+                access_blocked_since = CASE WHEN $2 = 'released' OR access_blocked_since IS NULL
+                                            THEN now() ELSE access_blocked_since END,
+                access_released_at = NULL, updated_at = now()
           WHERE id = $1`,
-        [ipId],
+        [ipId, ip.iran_access_status],
       );
       out.push({ ipId, ip: ip.ip, from: ip.iran_access_status, to: 'blocked', blockedDays: null });
     } else {

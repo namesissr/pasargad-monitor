@@ -202,5 +202,6 @@ export const INCIDENT_KIND_LABEL: Record<string, string> = {
 export const IRAN_ACCESS_LABEL: Record<string, string> = {
   blocked: 'در اکسس',
   released: 'آزاد شد',
+  unreachable: 'روت نشده',
   unknown: 'نامشخص',
 };

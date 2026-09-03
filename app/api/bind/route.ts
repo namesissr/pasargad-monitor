@@ -51,6 +51,8 @@ export async function GET(req: Request) {
 interface BindResult {
   ip?: string;
   bound?: boolean;
+  /** آیا با آدرس اصلی سرور هم‌ساب‌نت است — برای تشخیص بلوک روت‌نشده */
+  same_subnet?: boolean | null;
   error?: string;
 }
 
@@ -68,9 +70,16 @@ export async function POST(req: Request) {
       if (!ipText) continue;
       await query(
         `UPDATE ip_addresses
-            SET bind_ok = $2, bind_at = now(), bind_error = $3
+            SET bind_ok = $2, bind_at = now(), bind_error = $3,
+                bind_same_subnet = $5
           WHERE ip = $1::inet AND bind_server_id = $4`,
-        [ipText, r.bound === true, String(r.error ?? '').trim() || null, server.id],
+        [
+          ipText,
+          r.bound === true,
+          String(r.error ?? '').trim() || null,
+          server.id,
+          typeof r.same_subnet === 'boolean' ? r.same_subnet : null,
+        ],
       ).catch((e) => console.error('[bind] به‌روزرسانی آی‌پی ناموفق:', e.message));
     }
 
