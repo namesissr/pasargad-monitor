@@ -315,8 +315,19 @@ function TrafficTable({ data }: { data: TrafficData }) {
                 {!hourly && (
                   <td className="text-xs">
                     {p.source && p.source !== 'agent' ? (
-                      <span className="badge bg-amber/15 text-amber">
-                        {p.source === 'vnstat' ? 'vnstat' : 'دستی'}
+                      <span
+                        className="badge bg-amber/15 text-amber"
+                        title={
+                          p.source === 'manual_range'
+                            ? 'از مجموع یک بازه پخش شده — عدد این روز تخمین است'
+                            : undefined
+                        }
+                      >
+                        {p.source === 'vnstat'
+                          ? 'vnstat'
+                          : p.source === 'manual_range'
+                            ? 'پخش‌شده'
+                            : 'دستی'}
                       </span>
                     ) : (
                       <span className="text-muted">ایجنت</span>

@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import { Field, Modal, Notice } from './ui';
+import { JalaliDatePicker } from './JalaliDatePicker';
 import { api, ApiError } from '@/lib/api';
 import { toGregorian } from '@/lib/jalali';
-import { faNum, formatBytes } from '@/lib/format';
+import { faNum, formatBytes, formatJalaliDay } from '@/lib/format';
 
 /**
  * وارد کردن دستی مصرف روزهای گذشته.
@@ -116,7 +117,17 @@ export function BackfillModal({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const [mode, setMode] = useState<'days' | 'range'>('days');
   const [text, setText] = useState('');
+
+  // حالت بازه
+  const isoToday = new Date();
+  const todayIso = `${isoToday.getFullYear()}-${pad(isoToday.getMonth() + 1)}-${pad(isoToday.getDate())}`;
+  const [rangeFrom, setRangeFrom] = useState(todayIso);
+  const [rangeTo, setRangeTo] = useState(todayIso);
+  const [rangeRx, setRangeRx] = useState('');
+  const [rangeTx, setRangeTx] = useState('');
+
   const [unit, setUnit] = useState('gb1024');
   const [source, setSource] = useState('manual');
   const [note, setNote] = useState('');
@@ -124,9 +135,13 @@ export function BackfillModal({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{
-    added: number;
-    updated: number;
-    skipped: { day: string; reason: string }[];
+    added?: number;
+    updated?: number;
+    skipped?: { day: string; reason: string }[];
+    mode?: string;
+    days?: number;
+    skippedAgentDays?: number;
+    perDay?: { rx: number; tx: number };
   } | null>(null);
 
   const unitBytes = UNITS.find((u) => u.key === unit)?.bytes ?? 1;
@@ -136,22 +151,44 @@ export function BackfillModal({
   const totalRx = valid.reduce((a, r) => a + r.rx, 0);
   const totalTx = valid.reduce((a, r) => a + r.tx, 0);
 
+  // پیش‌نمایش حالت بازه
+  const rangeDays = Math.max(
+    0,
+    Math.round(
+      (new Date(`${rangeTo}T00:00:00`).getTime() - new Date(`${rangeFrom}T00:00:00`).getTime()) / 86_400_000,
+    ) + 1,
+  );
+  const rangeRxBytes = Math.round((Number(rangeRx) || 0) * unitBytes);
+  const rangeTxBytes = Math.round((Number(rangeTx) || 0) * unitBytes);
+  const rangeValid = rangeDays > 0 && rangeFrom <= rangeTo && (rangeRxBytes > 0 || rangeTxBytes > 0);
+
   async function submit() {
     setErr(null);
     setResult(null);
     setBusy(true);
     try {
-      const res = await api.post<{
-        added: number;
-        updated: number;
-        skipped: { day: string; reason: string }[];
-      }>('/api/traffic/backfill', {
-        server_id: Number(serverId),
-        source,
-        note,
-        overwrite,
-        days: valid.map((r) => ({ day: r.day, rx: r.rx, tx: r.tx })),
-      });
+      const payload =
+        mode === 'range'
+          ? {
+              server_id: Number(serverId),
+              mode: 'range',
+              from: rangeFrom,
+              to: rangeTo,
+              rx: rangeRxBytes,
+              tx: rangeTxBytes,
+              note,
+              overwrite,
+            }
+          : {
+              server_id: Number(serverId),
+              mode: 'days',
+              source,
+              note,
+              overwrite,
+              days: valid.map((r) => ({ day: r.day, rx: r.rx, tx: r.tx })),
+            };
+
+      const res = await api.post<NonNullable<typeof result>>('/api/traffic/backfill', payload);
       setResult(res);
       onDone();
     } catch (e) {
@@ -170,25 +207,46 @@ export function BackfillModal({
           فاکتور می‌دهد — یا از <strong>vnstat</strong> خود نود بردارید.
         </Notice>
 
+        <div className="flex gap-1">
+          {([['days', 'روز به روز'], ['range', 'مجموع یک بازه']] as const).map(([k, lbl]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => { setMode(k); setResult(null); setErr(null); }}
+              className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+                mode === k ? 'bg-cyan/10 text-cyan border-cyan/30' : 'border-line text-muted hover:text-white'
+              }`}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+
         <div className="grid sm:grid-cols-3 gap-4">
-          <Field label="واحد ستون‌های حجم">
+          <Field label="واحد اعداد حجم">
             <select className="input" value={unit} onChange={(e) => setUnit(e.target.value)}>
               {UNITS.map((u) => (
                 <option key={u.key} value={u.key}>{u.label}</option>
               ))}
             </select>
           </Field>
-          <Field label="منبع">
-            <select className="input" value={source} onChange={(e) => setSource(e.target.value)}>
-              <option value="manual">پنل دیتاسنتر (دستی)</option>
-              <option value="vnstat">vnstat خود نود</option>
-            </select>
-          </Field>
+          {mode === 'days' ? (
+            <Field label="منبع">
+              <select className="input" value={source} onChange={(e) => setSource(e.target.value)}>
+                <option value="manual">پنل دیتاسنتر (دستی)</option>
+                <option value="vnstat">vnstat خود نود</option>
+              </select>
+            </Field>
+          ) : (
+            <span />
+          )}
           <Field label="یادداشت" hint="مثلا: از فاکتور شهریور">
             <input className="input" value={note} onChange={(e) => setNote(e.target.value)} />
           </Field>
         </div>
 
+        {mode === 'days' ? (
+          <>
         <Field
           label="داده‌ها"
           hint="هر خط: تاریخ، دانلود، آپلود. تاریخ شمسی یا میلادی هر دو قبول است. جداکننده کاما، تب یا فاصله."
@@ -241,6 +299,64 @@ export function BackfillModal({
           </div>
         )}
 
+          </>
+        ) : (
+          <>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <JalaliDatePicker label="از تاریخ" value={rangeFrom} onChange={setRangeFrom} max={rangeTo} />
+              <JalaliDatePicker label="تا تاریخ" value={rangeTo} onChange={setRangeTo} min={rangeFrom} max={todayIso} />
+              <Field label="کل دانلود بازه">
+                <input
+                  className="input ltr"
+                  value={rangeRx}
+                  onChange={(e) => setRangeRx(e.target.value)}
+                  placeholder="مثلا 8420"
+                />
+              </Field>
+              <Field label="کل آپلود بازه">
+                <input
+                  className="input ltr"
+                  value={rangeTx}
+                  onChange={(e) => setRangeTx(e.target.value)}
+                  placeholder="مثلا 2510"
+                />
+              </Field>
+            </div>
+
+            {rangeValid && (
+              <div className="bg-panel2 rounded-lg p-3 text-xs space-y-1.5">
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted">بازه</span>
+                  <span>
+                    {formatJalaliDay(rangeFrom)} تا {formatJalaliDay(rangeTo)} — {faNum(rangeDays)} روز
+                  </span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted">کل دانلود</span>
+                  <span className="text-cyan">{formatBytes(rangeRxBytes)}</span>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <span className="text-muted">کل آپلود</span>
+                  <span className="text-amber">{formatBytes(rangeTxBytes)}</span>
+                </div>
+                <div className="flex justify-between gap-2 pt-1.5 border-t border-line/60">
+                  <span className="text-muted">سهم هر روز</span>
+                  <span>
+                    {formatBytes(rangeRxBytes / rangeDays)} + {formatBytes(rangeTxBytes / rangeDays)}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <Notice type="warn">
+              مجموع بازه <strong>دقیق</strong> ثبت می‌شود، ولی توزیعش بین روزها یکنواخت است — یعنی
+              عدد هر روز تخمین است نه اندازه‌گیری. برای حسابداری ماهانه فرقی نمی‌کند چون جمع درست
+              است؛ ولی در نمودار روزانه، آن روزها ستون‌های هم‌قد می‌سازند. این ردیف‌ها با برچسب
+              «پخش‌شده» علامت می‌خورند تا با داده واقعی اشتباه نشوند.
+            </Notice>
+          </>
+        )}
+
         <label className="flex items-center gap-2 text-xs text-muted cursor-pointer">
           <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
           روزهایی که داده ایجنت دارند هم بازنویسی شوند
@@ -253,16 +369,27 @@ export function BackfillModal({
         )}
 
         {err && <Notice type="error">{err}</Notice>}
-        {result && (
-          <Notice type={result.skipped.length ? 'info' : 'success'}>
-            {faNum(result.added)} روز اضافه و {faNum(result.updated)} روز به‌روزرسانی شد.
-            {result.skipped.length > 0 && (
+        {result && result.mode === 'range' && (
+          <Notice type="success">
+            مجموع بازه روی {faNum(result.days ?? 0)} روز پخش شد.
+            {(result.skippedAgentDays ?? 0) > 0 && (
+              <p className="mt-1">
+                {faNum(result.skippedAgentDays ?? 0)} روز دست‌نخورده ماند چون داده ایجنت داشت —
+                مجموع فقط روی روزهای خالی پخش شد.
+              </p>
+            )}
+          </Notice>
+        )}
+        {result && result.mode !== 'range' && (
+          <Notice type={(result.skipped?.length ?? 0) ? 'info' : 'success'}>
+            {faNum(result.added ?? 0)} روز اضافه و {faNum(result.updated ?? 0)} روز به‌روزرسانی شد.
+            {(result.skipped?.length ?? 0) > 0 && (
               <>
-                <p className="mt-1.5">{faNum(result.skipped.length)} روز رد شد:</p>
+                <p className="mt-1.5">{faNum(result.skipped?.length ?? 0)} روز رد شد:</p>
                 <ul className="mt-1 space-y-0.5">
-                  {result.skipped.slice(0, 5).map((s, i) => (
+                  {(result.skipped ?? []).slice(0, 5).map((row, i) => (
                     <li key={i}>
-                      <span className="ltr font-mono">{s.day}</span> — {s.reason}
+                      <span className="ltr font-mono">{row.day}</span> — {row.reason}
                     </li>
                   ))}
                 </ul>
@@ -273,8 +400,17 @@ export function BackfillModal({
 
         <div className="flex gap-2 justify-end">
           <button type="button" className="btn-ghost" onClick={onClose}>بستن</button>
-          <button type="button" className="btn-primary" onClick={submit} disabled={busy || !valid.length}>
-            {busy ? 'در حال ثبت…' : `ثبت ${faNum(valid.length)} روز`}
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={submit}
+            disabled={busy || (mode === 'days' ? !valid.length : !rangeValid)}
+          >
+            {busy
+              ? 'در حال ثبت…'
+              : mode === 'days'
+                ? `ثبت ${faNum(valid.length)} روز`
+                : `پخش روی ${faNum(rangeDays)} روز`}
           </button>
         </div>
       </div>

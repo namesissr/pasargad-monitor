@@ -57,7 +57,13 @@ export async function rollupHourly(hoursBack = 3) {
   );
 }
 
-/** تجمیع روزانه از تجمیع ساعتی — میانگین‌ها وزنی‌اند تا با تعداد نمونه بخوانند */
+/**
+ * تجمیع روزانه از تجمیع ساعتی — میانگین‌ها وزنی‌اند تا با تعداد نمونه بخوانند.
+ *
+ * شرط source = 'agent' در بند تعارض حیاتی است: این تابع هر پنج دقیقه سه روز
+ * اخیر را دوباره می‌نویسد. بدون آن شرط، روزی که ادمین دستی از پنل دیتاسنتر
+ * وارد کرده ظرف پنج دقیقه پاک می‌شد — بی‌صدا و بدون هیچ خطایی.
+ */
 export async function rollupDaily(daysBack = 3) {
   await q(
     `INSERT INTO server_metrics_daily (
@@ -91,7 +97,8 @@ export async function rollupDaily(daysBack = 3) {
        tx_bytes     = EXCLUDED.tx_bytes,
        rx_bps_max   = EXCLUDED.rx_bps_max,
        tx_bps_max   = EXCLUDED.tx_bps_max,
-       samples      = EXCLUDED.samples`,
+       samples      = EXCLUDED.samples
+     WHERE server_metrics_daily.source = 'agent'`,
     [String(daysBack)],
   );
 

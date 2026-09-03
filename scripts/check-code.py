@@ -282,7 +282,57 @@ def check_undefined_names():
             )
 
 
-# ── ۷) هر مسیر API پنل باید requireUser داشته باشد ───────────────────────
+# ── ۷) مقدار نامعتبر برای پراپ با نوع اتحاد رشته‌ای ──────────────────────
+# مثلا Notice که type فقط 'error' | 'success' | 'info' می‌پذیرد. اگر
+# type="warn" بنویسید، بیلد می‌شکند ولی هیچ بررسی متنی دیگری نمی‌گیردش.
+# این یک بار واقعاً اتفاق افتاد.
+#
+# فقط مقادیر لیترال بررسی می‌شوند. اگر مقدار عبارت باشد (آکولاد) رد می‌شود،
+# چون نمی‌شود بدون تایپ‌چکر واقعی درباره‌اش قضاوت کرد.
+
+COMPONENT_RE = re.compile(
+    r"export\s+function\s+(\w+)\s*\(\s*\{(?P<names>[^}]*)\}\s*:\s*\{(?P<types>.*?)\}\s*\)",
+    re.S,
+)
+UNION_PROP_RE = re.compile(r"(\w+)\??:\s*((?:'[^']*'\s*\|\s*)+'[^']*')\s*;")
+
+
+def union_props():
+    """پراپ‌هایی که نوعشان اتحاد چند لیترال رشته‌ای است"""
+    table = {}
+    for path in walk({".tsx"}):
+        src = read(path)
+        for m in COMPONENT_RE.finditer(src):
+            component = m.group(1)
+            for prop, union in UNION_PROP_RE.findall(m.group("types")):
+                allowed = set(re.findall(r"'([^']*)'", union))
+                if len(allowed) > 1:
+                    table.setdefault(component, {})[prop] = allowed
+    return table
+
+
+def check_union_props():
+    table = union_props()
+    if not table:
+        return
+
+    for path in walk({".tsx"}):
+        src = read(path)
+        body = strip_comments(src)
+        for component, props in table.items():
+            for m in re.finditer(r"<%s\b([^>]*)>" % re.escape(component), body, re.S):
+                attrs = m.group(1)
+                for prop, allowed in props.items():
+                    found = re.search(r'\b%s="([^"]*)"' % re.escape(prop), attrs)
+                    if found and found.group(1) not in allowed:
+                        problems.append(
+                            "%s:%d — «%s» با %s=%s استفاده شده؛ مقادیر مجاز: %s"
+                            % (rel(path), line_of(src, m.start()), component, prop,
+                               found.group(1), "، ".join(sorted(allowed)))
+                        )
+
+
+# ── ۸) هر مسیر API پنل باید requireUser داشته باشد ───────────────────────
 # مسیرهای باز عمدی: ingest با توکن ایجنت، ورود، خروج، سلامت
 OPEN_ROUTES = {"app/api/ingest/route.ts", "app/api/auth/login/route.ts",
                "app/api/auth/logout/route.ts", "app/api/health/route.ts"}
@@ -306,6 +356,7 @@ def main():
     check_imports()
     check_query_generics()
     check_undefined_names()
+    check_union_props()
     check_route_auth()
 
     if not problems:

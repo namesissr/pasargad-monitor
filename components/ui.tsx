@@ -131,11 +131,19 @@ export function Field({
 }
 
 /** پیام خطا یا موفقیت درون فرم */
-export function Notice({ type, children }: { type: 'error' | 'success' | 'info'; children: ReactNode }) {
+export function Notice({
+  type,
+  children,
+}: {
+  type: 'error' | 'success' | 'info' | 'warn';
+  children: ReactNode;
+}) {
   const map = {
     error: 'bg-danger/10 border-danger/30 text-danger',
     success: 'bg-ok/10 border-ok/30 text-ok',
     info: 'bg-cyan/10 border-cyan/30 text-cyan',
+    // هشدار: کاری که انجام می‌شود درست است ولی محدودیتی دارد که باید بدانید
+    warn: 'bg-amber/10 border-amber/30 text-amber',
   };
   return <div className={`border rounded-lg px-3 py-2 text-xs ${map[type]}`}>{children}</div>;
 }
