@@ -31,11 +31,14 @@ export async function GET(req: Request) {
   const server = await authServer(req);
   if (!server) return fail('توکن نامعتبر است', 403);
 
-  const ips = await query<{ ip: string; prefix: number }>(
-    `SELECT host(ip) AS ip, bind_prefix AS prefix
-       FROM ip_addresses
-      WHERE bind_server_id = $1 AND access_watch AND version = 4
-      ORDER BY ip`,
+  // گیت‌وی هم می‌رود: ایجنت با آن تست می‌کند که آدرس واقعاً روت شده یا نه
+  const ips = await query<{ ip: string; prefix: number; gateway: string | null }>(
+    `SELECT host(i.ip) AS ip, i.bind_prefix AS prefix,
+            host(COALESCE(i.gateway, n.gateway)) AS gateway
+       FROM ip_addresses i
+       LEFT JOIN ip_subnets n ON n.id = i.subnet_id
+      WHERE i.bind_server_id = $1 AND i.access_watch AND i.version = 4
+      ORDER BY i.ip`,
     [server.id],
   );
 
@@ -43,7 +46,11 @@ export async function GET(req: Request) {
   // فهرست جدا می‌آید و ایجنت تازه از آن استفاده می‌کند
   return ok({
     ips: ips.map((r) => r.ip),
-    addresses: ips.map((r) => ({ ip: r.ip, prefix: Number(r.prefix) || 32 })),
+    addresses: ips.map((r) => ({
+      ip: r.ip,
+      prefix: Number(r.prefix) || 32,
+      gateway: r.gateway || null,
+    })),
     interval: 300,
   });
 }
@@ -53,6 +60,8 @@ interface BindResult {
   bound?: boolean;
   /** آیا با آدرس اصلی سرور هم‌ساب‌نت است — برای تشخیص بلوک روت‌نشده */
   same_subnet?: boolean | null;
+  /** پینگ به گیت‌وی با مبدأ همین آدرس جواب گرفت؟ اثبات واقعی روت‌بودن */
+  routed?: boolean | null;
   error?: string;
 }
 
@@ -71,7 +80,7 @@ export async function POST(req: Request) {
       await query(
         `UPDATE ip_addresses
             SET bind_ok = $2, bind_at = now(), bind_error = $3,
-                bind_same_subnet = $5
+                bind_same_subnet = $5, bind_routed = $6
           WHERE ip = $1::inet AND bind_server_id = $4`,
         [
           ipText,
@@ -79,6 +88,7 @@ export async function POST(req: Request) {
           String(r.error ?? '').trim() || null,
           server.id,
           typeof r.same_subnet === 'boolean' ? r.same_subnet : null,
+          typeof r.routed === 'boolean' ? r.routed : null,
         ],
       ).catch((e) => console.error('[bind] به‌روزرسانی آی‌پی ناموفق:', e.message));
     }

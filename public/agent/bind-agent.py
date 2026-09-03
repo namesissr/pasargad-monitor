@@ -157,6 +157,31 @@ def same_subnet(ip, base_ip, base_prefix):
     return (a & mask) == (b & mask)
 
 
+def routing_test(ip, gateway):
+    """
+    آیا این آدرس واقعاً روی شبکه شناخته شده است؟
+
+    یک پینگ به گیت‌وی می‌فرستیم که مبدأ آن، همان آدرس باشد. اگر گیت‌وی
+    جواب دهد یعنی روتر بالادست این آدرس را می‌شناسد و ترافیکش را به این
+    سرور می‌فرستد.
+
+    چرا پینگ‌زدن به خود آدرس کافی نیست: وقتی آدرس روی همین ماشین بایند
+    است، پینگ از لوپ‌بک رد می‌شود و همیشه موفق است — حتی اگر دیتاسنتر
+    بلوک را اصلاً روت نکرده باشد. آن تست هیچ چیزی را ثابت نمی‌کند.
+    """
+    if not gateway:
+        return None
+    try:
+        proc = subprocess.Popen(
+            ["ping", "-n", "-c", "1", "-W", "2", "-I", ip, gateway],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        proc.communicate()
+        return proc.returncode == 0
+    except Exception:
+        return None
+
+
 def load_state():
     try:
         with open(STATE_FILE) as f:
@@ -209,6 +234,7 @@ def main():
             # نگاشت آی‌پی به پرفیکس. «addresses» شکل تازه است؛ اگر پنل
             # قدیمی بود، «ips» با پرفیکس ۳۲ استفاده می‌شود.
             addresses = {}
+            gateways = {}
             for row in (listing.get("addresses") or []):
                 ip_text = str(row.get("ip") or "").strip()
                 if ip_text:
@@ -216,6 +242,7 @@ def main():
                         addresses[ip_text] = int(row.get("prefix") or 32)
                     except (TypeError, ValueError):
                         addresses[ip_text] = 32
+                    gateways[ip_text] = str(row.get("gateway") or "").strip() or None
             if not addresses:
                 for ip_text in (listing.get("ips") or []):
                     addresses[str(ip_text).strip()] = 32
@@ -250,9 +277,17 @@ def main():
                 shares = same_subnet(ip, base_ip, base_prefix)
                 if code == 0 or "File exists" in out:
                     state.add(ip)
+                    routed = routing_test(ip, gateways.get(ip))
                     if code == 0:
-                        say("بایند شد: %s%s" % (ip, "" if shares is not False else "  (رنج متفاوت)"))
-                    results.append({"ip": ip, "bound": True, "same_subnet": shares})
+                        note = ""
+                        if shares is False:
+                            note = "  (رنج متفاوت)"
+                        if routed is False:
+                            note += "  (روت نشده)"
+                        say("بایند شد: %s%s" % (ip, note))
+                    results.append({
+                        "ip": ip, "bound": True, "same_subnet": shares, "routed": routed,
+                    })
                 else:
                     results.append({
                         "ip": ip, "bound": False, "same_subnet": shares,

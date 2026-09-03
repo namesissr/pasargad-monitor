@@ -67,6 +67,8 @@ interface ResultRow {
   ip?: string;
   ok?: boolean;
   ms?: number | null;
+  /** آدرس روی خود دیدبان بایند است — نتیجه‌اش اثبات چیزی نیست */
+  local?: boolean;
 }
 
 /** دریافت نتیجه‌ها و ارزیابی تغییر وضعیت */
@@ -85,7 +87,10 @@ export async function POST(req: Request) {
     for (const r of results) {
       const ipText = String(r.ip ?? '').trim();
       if (!ipText) continue;
-      const isOk = r.ok === true;
+      // پینگ به آدرسی که روی خود دیدبان بایند است از لوپ‌بک رد می‌شود و
+      // همیشه موفق است؛ به‌عنوان نتیجه ثبت می‌شود ولی در تصمیم نمی‌آید
+      const isLocal = r.local === true;
+      const isOk = !isLocal && r.ok === true;
 
       const row = await queryOne<{ id: number }>(
         `SELECT id FROM ip_addresses WHERE ip = $1::inet AND access_watch`,
@@ -100,9 +105,19 @@ export async function POST(req: Request) {
            ok          = EXCLUDED.ok,
            ms          = EXCLUDED.ms,
            checked_at  = now(),
-           ok_streak   = CASE WHEN EXCLUDED.ok THEN ip_probe_state.ok_streak + 1 ELSE 0 END,
-           fail_streak = CASE WHEN EXCLUDED.ok THEN 0 ELSE ip_probe_state.fail_streak + 1 END`,
-        [row.id, probe.id, isOk, Number.isFinite(Number(r.ms)) ? Number(r.ms) : null, isOk ? 1 : 0, isOk ? 0 : 1],
+           ok_streak   = CASE WHEN $7 THEN 0
+                              WHEN EXCLUDED.ok THEN ip_probe_state.ok_streak + 1 ELSE 0 END,
+           fail_streak = CASE WHEN $7 THEN 0
+                              WHEN EXCLUDED.ok THEN 0 ELSE ip_probe_state.fail_streak + 1 END`,
+        [
+          row.id,
+          probe.id,
+          isLocal ? null : isOk,
+          Number.isFinite(Number(r.ms)) ? Number(r.ms) : null,
+          isOk ? 1 : 0,
+          isLocal ? 0 : isOk ? 0 : 1,
+          isLocal,
+        ],
       );
       touched.push(row.id);
     }
@@ -136,9 +151,10 @@ async function evaluate(ipIds: number[]): Promise<Transition[]> {
       ip: string;
       iran_access_status: string;
       bind_ok: boolean | null;
+      bind_routed: boolean | null;
       blocked_days: number | null;
     }>(
-      `SELECT id, host(ip) AS ip, iran_access_status, bind_ok,
+      `SELECT id, host(ip) AS ip, iran_access_status, bind_ok, bind_routed,
               EXTRACT(EPOCH FROM (now() - access_blocked_since))::float8 / 86400 AS blocked_days
          FROM ip_addresses WHERE id = $1`,
       [ipId],
@@ -164,9 +180,11 @@ async function evaluate(ipIds: number[]): Promise<Transition[]> {
     if (releasedNow) {
       target = 'released';
     } else if (allOutsideDown) {
-      // فقط دیدبان داخل ایران می‌تواند اکسس‌بودن را اثبات کند. بایند
-      // موفق چیزی را ثابت نمی‌کند جز اینکه آدرس روی کارت نشسته.
-      if (aliveInside) target = 'blocked';
+      // دو نشانه معتبر برای زنده و روت بودن:
+      //   ۱. دیدبان داخل ایران از یک ماشین دیگر جواب گرفته باشد
+      //   ۲. تست روت لنگر موفق باشد — پینگ به گیت‌وی با مبدأ همین آدرس
+      // موفقیت خود «ip addr add» نشانه نیست؛ تقریباً همیشه موفق می‌شود.
+      if (aliveInside || ip.bind_routed === true) target = 'blocked';
       else if (ip.bind_ok === true) target = 'unreachable';
       else target = 'unknown';
     }

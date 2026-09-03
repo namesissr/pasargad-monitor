@@ -74,6 +74,32 @@ def http_json(url, token, payload=None, insecure=False, timeout=30):
         res.close()
 
 
+def local_addresses():
+    """
+    آدرس‌هایی که روی همین ماشین بایند شده‌اند.
+
+    چرا لازم است: در چیدمان دو سروری، همان وی‌پی‌اس ایران هم لنگر است هم
+    دیدبان. پینگ‌زدن به آدرسی که روی خودش نشسته از لوپ‌بک رد می‌شود و
+    همیشه موفق است — اگر به‌عنوان نتیجه واقعی گزارش شود، پنل فکر می‌کند
+    آی‌پی زنده و در دسترس است، حتی وقتی اصلاً روت نشده.
+    """
+    found = set()
+    try:
+        proc = subprocess.Popen(["ip", "-4", "-o", "addr", "show"],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, _ = proc.communicate()
+        if proc.returncode != 0:
+            return found
+        for line in text(out).split(chr(10)):
+            parts = line.split()
+            for i, token in enumerate(parts):
+                if token == "inet" and i + 1 < len(parts):
+                    found.add(parts[i + 1].split("/")[0])
+    except Exception:
+        pass
+    return found
+
+
 def ping(ip, timeout_s):
     """یک پینگ؛ خروجی زمان به میلی‌ثانیه یا None"""
     try:
@@ -125,6 +151,7 @@ def main():
                 interval = server_interval
 
             if ips:
+                local = local_addresses()
                 pool = Pool(min(args.concurrency, max(1, len(ips))))
                 try:
                     results = pool.map(lambda ip: ping(ip, args.timeout), ips)
@@ -132,10 +159,19 @@ def main():
                     pool.close()
                     pool.join()
 
+                # آدرس‌های محلی علامت می‌خورند تا پنل نتیجه‌شان را به‌عنوان
+                # اثبات در دسترس بودن حساب نکند
+                for item in results:
+                    if item["ip"] in local:
+                        item["local"] = True
+
                 http_json(base + "/api/probe", args.token, payload={"results": results},
                           insecure=args.insecure)
-                up = sum(1 for r in results if r["ok"])
-                say("دور کامل شد: %d آی‌پی، %d پاسخ داد" % (len(results), up))
+                up = sum(1 for r in results if r["ok"] and not r.get("local"))
+                skipped = sum(1 for r in results if r.get("local"))
+                say("دور کامل شد: %d آی‌پی، %d پاسخ داد%s"
+                    % (len(results), up,
+                       "، %d روی همین سرور بایند است" % skipped if skipped else ""))
             else:
                 say("فهرست پایش خالی است")
 

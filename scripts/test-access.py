@@ -49,7 +49,7 @@ SUBNET_CASES = [
 ]
 
 
-def decide(outside_ok, outside_all_fail, inside_ok, bound):
+def decide(outside_ok, outside_all_fail, inside_ok, bound, routed=False):
     """
     بازسازی منطق app/api/probe/route.ts.
     اگر آنجا عوض شد، اینجا هم باید عوض شود و آزمون بگذرد.
@@ -57,7 +57,7 @@ def decide(outside_ok, outside_all_fail, inside_ok, bound):
     if outside_ok:
         return "released"
     if outside_all_fail:
-        if inside_ok:
+        if inside_ok or routed:
             return "blocked"
         if bound:
             return "unreachable"
@@ -65,15 +65,18 @@ def decide(outside_ok, outside_all_fail, inside_ok, bound):
     return "no-change"
 
 
-# خارج جواب داد، خارج همه ناموفق، داخل جواب داد، بایند شده، انتظار، توضیح
+# خارج جواب داد، خارج همه ناموفق، داخل جواب داد، بایند شده، تست روت، انتظار، توضیح
 DECISION_CASES = [
-    (True, False, True, True, "released", "از خارج جواب می‌دهد"),
-    (True, False, False, False, "released", "از خارج جواب می‌دهد، بقیه مهم نیست"),
-    (False, True, True, True, "blocked", "فقط از داخل جواب می‌دهد"),
-    (False, True, True, False, "blocked", "از داخل جواب می‌دهد، بدون بایند"),
-    (False, True, False, True, "unreachable", "از هیچ‌جا جواب نمی‌دهد ولی بایند شده"),
-    (False, True, False, False, "unknown", "نه بایند نه جواب"),
-    (False, False, False, True, "no-change", "هنوز به حد نصاب پیاپی نرسیده"),
+    (True, False, True, True, False, "released", "از خارج جواب می‌دهد"),
+    (True, False, False, False, False, "released", "از خارج جواب می‌دهد، بقیه مهم نیست"),
+    (False, True, True, True, False, "blocked", "فقط از داخل جواب می‌دهد"),
+    (False, True, True, False, False, "blocked", "از داخل جواب می‌دهد، بدون بایند"),
+    # چیدمان دو سروری: لنگر و دیدبان داخل یک ماشین‌اند، پس نتیجه داخل محلی
+    # است و کنار گذاشته می‌شود؛ تست روت لنگر جایش را می‌گیرد
+    (False, True, False, True, True, "blocked", "تست روت لنگر موفق، بدون دیدبان داخل مستقل"),
+    (False, True, False, True, False, "unreachable", "بایند شده ولی تست روت ناموفق"),
+    (False, True, False, False, False, "unknown", "نه بایند نه جواب"),
+    (False, False, False, True, False, "no-change", "هنوز به حد نصاب پیاپی نرسیده"),
 ]
 
 
@@ -91,8 +94,8 @@ def main():
 
     print("")
 
-    for a, b, c, d, expected, name in DECISION_CASES:
-        got = decide(a, b, c, d)
+    for a, b, c, d, e, expected, name in DECISION_CASES:
+        got = decide(a, b, c, d, e)
         if got == expected:
             print("گذشت  تصمیم: %s → %s" % (name, got))
         else:
@@ -102,7 +105,7 @@ def main():
     # منطق واقعی مسیر probe باید با جدول بالا بخواند
     src = io.open(os.path.join(ROOT, "app", "api", "probe", "route.ts"), encoding="utf-8").read()
     for needle, why in [
-        ("if (aliveInside) target = 'blocked';", "شرط «در اکسس»"),
+        ("if (aliveInside || ip.bind_routed === true) target = 'blocked';", "شرط «در اکسس»"),
         ("else if (ip.bind_ok === true) target = 'unreachable';", "شرط «روت نشده»"),
         ("else target = 'unknown';", "شرط «نامشخص»"),
     ]:
