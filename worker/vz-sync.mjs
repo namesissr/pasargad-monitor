@@ -409,6 +409,16 @@ export async function applyNode(node, { dryRun = true } = {}) {
     }
   }
 
+  // در حالت آزمایشی، خلاصه بدنه‌ای که فرستاده می‌شد هم ثبت می‌شود.
+  // بدون آن، «آزمون ایمنی» ممکن نبود: کاربر باید پیش از نوشتن روی پنل
+  // واقعی ببیند که دیسک‌ها در درخواست هستند، چون دیسک نفرستاده حذف
+  // می‌شود.
+  const sentKeys = Object.keys(write.sent || {});
+  const hasDisks = sentKeys.some((k) => k.startsWith('disks'));
+  const payloadNote = dryRun
+    ? ` — بدنه: ${sentKeys.length} فیلد، دیسک ${hasDisks ? 'هست' : 'نیست ⚠'}`
+    : '';
+
   await q(
     `INSERT INTO vz_sync_runs (node_id, kind, dry_run, attached, detached, ok, detail)
      VALUES ($1, 'apply', $2, $3, $4, TRUE, $5)`,
@@ -417,9 +427,18 @@ export async function applyNode(node, { dryRun = true } = {}) {
       dryRun,
       attachSlice.length,
       detach.length,
-      `${dryRun ? 'آزمایشی — ' : ''}لنگر ${anchor}: ${finalList.length} آدرس، ${skipped.length} دست‌نخورده`,
+      `${dryRun ? 'آزمایشی — ' : ''}لنگر ${anchor}: ${finalList.length} آدرس، ` +
+        `${skipped.length} دست‌نخورده${payloadNote}`,
     ],
   );
+
+  if (dryRun && !hasDisks) {
+    logErr(
+      `نود ${node.name}: بدنه آزمایشی هیچ فیلد دیسکی ندارد.`,
+      'اگر وی‌پی‌اس لنگر دیسک دارد، اعمال واقعی ممکن است حذفشان کند.',
+      `فیلدهای موجود: ${sentKeys.slice(0, 20).join(', ')}`,
+    );
+  }
 
   return { ok: true, dryRun, attached: attachSlice, detached: detach, skipped };
 }
