@@ -23,6 +23,8 @@ type Row = {
   tx: number;
   rx_peak: number;
   tx_peak: number;
+  /** فقط در دانه‌بندی روزانه: agent | manual | vnstat */
+  source?: string;
 };
 
 const DAY_MS = 86_400_000;
@@ -86,7 +88,8 @@ export async function GET(req: Request) {
                 rx_bytes::float8   AS rx,
                 tx_bytes::float8   AS tx,
                 rx_bps_max::float8 AS rx_peak,
-                tx_bps_max::float8 AS tx_peak
+                tx_bps_max::float8 AS tx_peak,
+                source
            FROM server_metrics_daily
           WHERE server_id = $1 AND day BETWEEN $2::date AND $3::date
           ORDER BY day`,

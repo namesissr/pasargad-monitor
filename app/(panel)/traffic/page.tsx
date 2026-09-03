@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useLoad, LoadState } from '@/components/useLoad';
 import { Chart } from '@/components/Chart';
 import { JalaliDatePicker } from '@/components/JalaliDatePicker';
+import { BackfillModal } from '@/components/BackfillModal';
 import { Mono, Notice, StatCard } from '@/components/ui';
 import {
   faFloat,
@@ -21,6 +22,7 @@ interface Point {
   tx: number;
   rx_peak: number;
   tx_peak: number;
+  source?: string;
 }
 
 interface TrafficData {
@@ -46,6 +48,7 @@ export default function TrafficLogPage() {
   const [serverId, setServerId] = useState('');
   const [from, setFrom] = useState(isoOf(new Date()));
   const [to, setTo] = useState(isoOf(new Date()));
+  const [backfilling, setBackfilling] = useState(false);
 
   const servers = useLoad<{ servers: { id: number; name: string; main_ip: string }[] }>('/api/servers');
 
@@ -83,11 +86,21 @@ export default function TrafficLogPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-lg font-bold">لاگ ترافیک</h1>
-        <p className="text-xs text-muted mt-0.5">
-          مصرف دقیق هر سرور در هر بازه‌ای، به تفکیک دانلود و آپلود
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-lg font-bold">لاگ ترافیک</h1>
+          <p className="text-xs text-muted mt-0.5">
+            مصرف دقیق هر سرور در هر بازه‌ای، به تفکیک دانلود و آپلود
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={() => setBackfilling(true)}
+          disabled={!serverId}
+        >
+          وارد کردن مصرف گذشته
+        </button>
       </div>
 
       {/* انتخابگرها */}
@@ -190,6 +203,14 @@ export default function TrafficLogPage() {
         )}
       </LoadState>
 
+      <BackfillModal
+        open={backfilling}
+        serverId={serverId}
+        serverName={data?.server.name ?? ''}
+        onClose={() => setBackfilling(false)}
+        onDone={reload}
+      />
+
       {data && (
         <p className="text-[11px] text-muted/70">
           سرور: {data.server.name} · <Mono>{data.server.main_ip}</Mono> ·{' '}
@@ -270,6 +291,7 @@ function TrafficTable({ data }: { data: TrafficData }) {
               <th>مجموع</th>
               <th>اوج دانلود</th>
               <th>اوج آپلود</th>
+              {!hourly && <th>منشأ</th>}
             </tr>
           </thead>
           <tbody>
@@ -290,6 +312,17 @@ function TrafficTable({ data }: { data: TrafficData }) {
                 <td className="text-xs font-medium">{formatBytes(Number(p.rx) + Number(p.tx), 2)}</td>
                 <td className="text-xs text-muted">{formatBps(p.rx_peak, 0)}</td>
                 <td className="text-xs text-muted">{formatBps(p.tx_peak, 0)}</td>
+                {!hourly && (
+                  <td className="text-xs">
+                    {p.source && p.source !== 'agent' ? (
+                      <span className="badge bg-amber/15 text-amber">
+                        {p.source === 'vnstat' ? 'vnstat' : 'دستی'}
+                      </span>
+                    ) : (
+                      <span className="text-muted">ایجنت</span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -301,6 +334,7 @@ function TrafficTable({ data }: { data: TrafficData }) {
               <td className="text-xs font-bold">{formatBytes(data.totals.rx + data.totals.tx, 2)}</td>
               <td className="text-xs font-bold text-muted">{formatBps(data.totals.rx_peak, 0)}</td>
               <td className="text-xs font-bold text-muted">{formatBps(data.totals.tx_peak, 0)}</td>
+              {!hourly && <td />}
             </tr>
           </tfoot>
         </table>
