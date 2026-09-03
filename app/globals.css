@@ -19,22 +19,41 @@
   --muted: #7c8aa0;
 }
 
+/*
+  قلم یکان‌بخ. مرورگر فقط وزن‌هایی را دانلود می‌کند که واقعاً روی صفحه
+  استفاده شده‌اند، پس اعلام هر چهار وزن هزینه‌ای ندارد.
+*/
 @font-face {
-  font-family: 'Vazirmatn';
-  src: url('/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-family: 'YekanBakh';
+  src: url('/fonts/YekanBakh-Light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'YekanBakh';
+  src: url('/fonts/YekanBakh-Regular.ttf') format('truetype');
   font-weight: 400;
+  font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: 'Vazirmatn';
-  src: url('/fonts/Vazirmatn-Medium.woff2') format('woff2');
-  font-weight: 500;
+  font-family: 'YekanBakh';
+  src: url('/fonts/YekanBakh-SemiBold.ttf') format('truetype');
+  /*
+    بازه ۵۰۰ تا ۶۰۰ عمدی است. کلاس font-medium تیلویند وزن ۵۰۰ می‌خواهد و
+    اگر این فایل فقط ۶۰۰ اعلام شود، مرورگر طبق قاعده تطبیق قلم به ۴۰۰
+    برمی‌گردد و تأکید برچسب‌ها و سرستون‌ها کاملاً از بین می‌رود.
+  */
+  font-weight: 500 600;
+  font-style: normal;
   font-display: swap;
 }
 @font-face {
-  font-family: 'Vazirmatn';
-  src: url('/fonts/Vazirmatn-Bold.woff2') format('woff2');
-  font-weight: 700;
+  font-family: 'YekanBakh';
+  src: url('/fonts/YekanBakh-Bold.ttf') format('truetype');
+  font-weight: 700 900;
+  font-style: normal;
   font-display: swap;
 }
 
@@ -45,7 +64,7 @@ body {
 }
 
 body {
-  font-family: 'Vazirmatn', Tahoma, system-ui, sans-serif;
+  font-family: 'YekanBakh', Tahoma, 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 

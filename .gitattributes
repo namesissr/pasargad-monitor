@@ -11,6 +11,11 @@
 Dockerfile*     text eol=lf
 docker-compose*.yml text eol=lf
 
+# فایل‌های قلم باینری‌اند. بدون این خطوط، قاعده «* text=auto eol=lf»
+# بالا ممکن است آن‌ها را متن تشخیص دهد و با تبدیل پایان خط خرابشان کند.
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
 *.png binary
 *.jpg binary
-*.woff2 binary

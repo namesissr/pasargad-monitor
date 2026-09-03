@@ -17,7 +17,7 @@ const config: Config = {
         muted: '#7C8AA0',  // متن کم‌رنگ
       },
       fontFamily: {
-        sans: ['Vazirmatn', 'Tahoma', 'system-ui', 'sans-serif'],
+        sans: ['YekanBakh', 'Tahoma', 'Segoe UI', 'system-ui', 'sans-serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
     },
