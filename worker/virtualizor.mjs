@@ -348,49 +348,101 @@ export async function listUsers(node) {
 }
 
 /**
+ * تخت‌کردن یک ساختار تودرتو به قالبی که پی‌اچ‌پی دوباره می‌سازدش.
+ *
+ * «disks[0][disk_path]=...» همان چیزی است که http_build_query تولید
+ * می‌کند و پی‌اچ‌پی از آن آرایه اصلی را بازمی‌سازد.
+ *
+ * چرا لازم است: مستندات managevps هشدار می‌دهد که دیسک‌های نفرستاده حذف
+ * می‌شوند. پس هرچه خواندیم را عیناً پس می‌فرستیم، بدون اینکه لازم باشد
+ * شکل دقیق هر فیلد را بدانیم.
+ */
+function flattenInto(value, prefix, out) {
+  if (value === null || value === undefined) return;
+  if (typeof value === 'boolean') {
+    out[prefix] = value ? '1' : '0';
+    return;
+  }
+  if (typeof value !== 'object') {
+    out[prefix] = String(value);
+    return;
+  }
+  for (const [k, v] of Object.entries(value)) flattenInto(v, `${prefix}[${k}]`, out);
+}
+
+/** پیکربندی فعلی یک وی‌پی‌اس */
+async function readVps(node, vpsid) {
+  const res = await call(node, 'managevps', { vpsid: String(vpsid) });
+  if (!res.ok) return res;
+  // ویژالیزور پیکربندی را زیر کلیدهای مختلفی می‌گذارد؛ هرکدام بود
+  const d = res.data || {};
+  const vps = d.vps || d.vpsinfo || d.info || null;
+  if (!vps || typeof vps !== 'object') {
+    return {
+      ok: false,
+      error: `پیکربندی وی‌پی‌اس ${vpsid} خوانده نشد — کلیدهای پاسخ: ${Object.keys(d).join(', ') || 'ندارد'}`,
+      raw: res.raw,
+    };
+  }
+  return { ok: true, vps, raw: res.raw };
+}
+
+/**
  * تغییر فهرست آی‌پی‌های یک وی‌پی‌اس.
  *
- * چرا اینقدر محتاط: «editvs» کل پیکربندی را می‌گیرد نه فقط آی‌پی‌ها. اگر
- * فیلدی جا بیفتد ممکن است به پیش‌فرض برگردد — یعنی یک اشتباه اینجا
- * می‌تواند رم یا دیسک یک وی‌پی‌اس واقعی را عوض کند.
+ * اکشن «managevps» است نه «editvs». یک بار «editvs» فرستاده شد که اکشن
+ * ای‌پی‌آی نیست؛ پاسخ موفق برمی‌گشت ولی هیچ تغییری اعمال نمی‌شد.
  *
- * پس پیکربندی فعلی خوانده می‌شود، فقط «ips» جایگزین می‌شود، و بقیه
- * دست‌نخورده پس فرستاده می‌شود. در حالت آزمایشی چیزی فرستاده نمی‌شود.
+ * چرا اینقدر محتاط: managevps کل پیکربندی را می‌گیرد، نه فقط آی‌پی‌ها.
+ * مستندات صریح می‌گوید دیسکی که در درخواست نباشد حذف می‌شود. پس
+ * پیکربندی فعلی خوانده می‌شود، عیناً تخت و پس فرستاده می‌شود، و فقط
+ * «ips» جایگزین می‌گردد.
+ *
+ * https://www.virtualizor.com/docs/admin-api/api-manage-vps/
  */
 export async function writeVpsIps(node, vpsid, ips, { dryRun = true } = {}) {
   if (!/^\d+$/.test(String(vpsid))) return { ok: false, error: 'شناسه وی‌پی‌اس نامعتبر است' };
 
-  const current = await call(node, 'editvs', { vpsid: String(vpsid) });
+  const current = await readVps(node, vpsid);
   if (!current.ok) return current;
 
-  const vps = current.data?.vps ?? current.data;
-  if (!vps || typeof vps !== 'object') {
-    return {
-      ok: false,
-      error: 'پیکربندی وی‌پی‌اس خوانده نشد — ساختار پاسخ با انتظار نمی‌خواند',
-      raw: current.raw,
-    };
-  }
+  const vps = current.vps;
+  const before = rows(vps.ips).length
+    ? rows(vps.ips).map(str)
+    : Object.values(vps.ips || {}).map(str);
 
-  const before = rows(vps.ips).length ? rows(vps.ips).map(str) : Object.values(vps.ips || {}).map(str);
-
-  const sent = { editvs: '1', vpsid: String(vpsid) };
+  const sent = {};
   for (const [k, v] of Object.entries(vps)) {
     if (k === 'ips') continue;
-    if (v === null || v === undefined) continue;
-    if (typeof v === 'object') continue;
-    sent[k] = String(v);
+    flattenInto(v, k, sent);
   }
+  sent.vpsid = String(vpsid);
   ips.forEach((ip, i) => {
     sent[`ips[${i}]`] = ip;
   });
 
-  if (dryRun) return { ok: true, dryRun: true, sent, before, after: ips };
+  if (dryRun) {
+    return { ok: true, dryRun: true, sent, before, after: ips, fieldCount: Object.keys(sent).length };
+  }
 
-  const res = await call(node, 'editvs', { vpsid: String(vpsid) }, sent);
+  const res = await call(node, 'managevps', { vpsid: String(vpsid) }, sent);
   if (!res.ok) {
     logErr('نوشتن آی‌پی روی وی‌پی‌اس ناموفق:', vpsid, res.error);
     return res;
   }
+
+  // پاسخ باید «done» داشته باشد. بدون این بررسی، پاسخی که فقط صفحه را
+  // برمی‌گرداند موفقیت حساب می‌شد — همان چیزی که با editvs اتفاق افتاد و
+  // تشخیصش چند دور طول کشید.
+  const done = res.data && (res.data.done ?? res.data.saved);
+  if (!done) {
+    const keys = res.data && typeof res.data === 'object' ? Object.keys(res.data).join(', ') : '';
+    return {
+      ok: false,
+      error: `ویژالیزور تغییر را تأیید نکرد (بدون «done»). کلیدهای پاسخ: ${keys || 'ندارد'}`,
+      raw: res.raw,
+    };
+  }
+
   return { ok: true, dryRun: false, sent, before, after: ips };
 }

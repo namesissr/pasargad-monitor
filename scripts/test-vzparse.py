@@ -87,6 +87,39 @@ def php_unserialize(text):
     return value()
 
 
+def flatten_into(value, prefix, out):
+    """بازسازی flattenInto — قالبی که پی‌اچ‌پی دوباره آرایه را از آن می‌سازد"""
+    if value is None:
+        return
+    if isinstance(value, bool):
+        out[prefix] = "1" if value else "0"
+        return
+    if not isinstance(value, (dict, list)):
+        out[prefix] = str(value)
+        return
+    items = value.items() if isinstance(value, dict) else enumerate(value)
+    for k, v in items:
+        flatten_into(v, "%s[%s]" % (prefix, k), out)
+
+
+FLATTEN_CASES = [
+    ({"ram": 1024}, {"ram": "1024"}, "عدد ساده"),
+    ({"acpi": True, "apic": False}, {"acpi": "1", "apic": "0"}, "بولی به یک و صفر"),
+    ({"note": None}, {}, "تهی نادیده گرفته می‌شود"),
+    # مهم‌ترین حالت: دیسک‌ها باید عیناً پس فرستاده شوند وگرنه حذف می‌شوند
+    (
+        {"disks": [{"disk_path": "/dev/vg/x", "size": 20}]},
+        {"disks[0][disk_path]": "/dev/vg/x", "disks[0][size]": "20"},
+        "آرایه دیسک تودرتو",
+    ),
+    (
+        {"disks": {"1": {"size": 20}, "2": {"size": 30}}},
+        {"disks[1][size]": "20", "disks[2][size]": "30"},
+        "دیسک‌ها به شکل شیء کلیددار",
+    ),
+]
+
+
 def make_apikey(rand, password):
     """بازسازی makeApiKey با رشته تصادفی داده‌شده — تا قابل آزمون باشد"""
     return rand + hashlib.md5((password + rand).encode("utf-8")).hexdigest()
@@ -194,6 +227,18 @@ def main():
 
     print("")
 
+    for source, expected, name in FLATTEN_CASES:
+        out = {}
+        for k, v in source.items():
+            flatten_into(v, k, out)
+        if out == expected:
+            print("گذشت  تخت‌کردن: %s" % name)
+        else:
+            failures += 1
+            print("شکست  تخت‌کردن: %s — انتظار %r، نتیجه %r" % (name, expected, out))
+
+    print("")
+
     for value, expected, name in IPV4_CASES:
         got = is_ipv4(value)
         if got == expected:
@@ -226,6 +271,8 @@ def main():
         ("ippoolid: str(r.ippid ?? r.ippoolid)", "نام درست فیلد شناسه مخزن در ردیف آی‌پی"),
         ("gateway: str(r.gateway).trim()", "گیت‌وی از ردیف آی‌پی"),
         ("netmask: str(r.netmask).trim()", "ماسک از ردیف آی‌پی"),
+        ("call(node, 'managevps'", "اکشن درست برای تغییر وی‌پی‌اس"),
+        ("res.data.done ?? res.data.saved", "تأیید تغییر از پاسخ، نه فرض موفقیت"),
     ]:
         if needle in src:
             print("گذشت  کد واقعی: %s" % why)
