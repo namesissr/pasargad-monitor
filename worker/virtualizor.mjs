@@ -40,11 +40,25 @@ async function call(node, act, params = {}, body) {
       parsed = JSON.parse(text);
     } catch {
       // ویژالیزور هنگام خطای احراز هویت صفحه ورود اچ‌تی‌ام‌ال می‌دهد نه
-      // جیسون. بدون این پیام فقط «خطای پارس» دیده می‌شد.
-      const hint = text.includes('<html')
-        ? 'پاسخ اچ‌تی‌ام‌ال آمد نه جیسون — معمولاً یعنی کلید یا رمز ای‌پی‌آی اشتباه است'
-        : 'پاسخ جیسون نبود';
-      return { ok: false, error: hint, raw: text.slice(0, 300) };
+      // جیسون. ولی «کلید اشتباه» تنها علت نیست و حدس‌زدن وقت می‌گیرد،
+      // پس نشانه‌های قابل تشخیص جدا می‌شوند و بریده‌ای از پاسخ هم
+      // برمی‌گردد تا در پنل دیده شود.
+      let hint;
+      const lower = text.toLowerCase();
+      if (res.status === 404) {
+        hint = 'مسیر پیدا نشد (۴۰۴) — آدرس نود درست نیست';
+      } else if (lower.includes('login') || lower.includes('username')) {
+        hint =
+          'صفحه ورود برگشت — یا کلید و رمز ای‌پی‌آی اشتباه است، یا آی‌پی سرور پنل ' +
+          'در فهرست مجاز ای‌پی‌آی نیست، یا این آدرس پنل کاربر است نه پنل ادمین (پورت ۴۰۸۵)';
+      } else if (lower.includes('<html')) {
+        hint = 'پاسخ اچ‌تی‌ام‌ال آمد نه جیسون (کد ' + res.status + ')';
+      } else {
+        hint = 'پاسخ جیسون نبود (کد ' + res.status + ')';
+      }
+      // برچسب‌های اچ‌تی‌ام‌ال حذف می‌شوند تا بریده خوانا باشد
+      const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      return { ok: false, error: hint + ' — پاسخ: ' + plain.slice(0, 160), raw: text.slice(0, 300) };
     }
 
     if (parsed && parsed.error) {
