@@ -37,17 +37,23 @@ export async function GET() {
 }
 
 /**
- * یونیون تفکیک‌شده لازم است، نه استنتاج خودکار.
+ * یونیون تفکیک‌شده با تگ صریح.
  *
- * بدون تایپ صریح، تایپ‌اسکریپت دو شاخه بازگشتی را طوری یکی می‌کند که
- * «c.error» از نوع «string | undefined» درمی‌آید و «'error' in c» هم
- * باریکش نمی‌کند. بیلد با «Type 'undefined' is not assignable» می‌شکند —
- * خطایی که فقط هنگام کامپایل معلوم می‌شود، نه در بررسی‌های سریع.
+ * دو تلاش قبلی شکست خورد و هر دو درس دارند:
+ *
+ *   بدون تایپ صریح، تایپ‌اسکریپت دو شاخه را طوری یکی می‌کند که
+ *   «'error' in c» باریکش نمی‌کند.
+ *
+ *   با تایپ صریح ولی بدون تگ، «if (parsed.error)» هم کافی نیست: چون
+ *   «error» از نوع string است و رشته خالی هم string است، شاخه خطا با
+ *   بررسی درستی حذف نمی‌شود و «value» همچنان ممکن است undefined باشد.
+ *
+ * تگ بولی «ok» هر دو مشکل را حل می‌کند چون مقدارش literal است.
  */
 type CleanResult =
-  | { error: string; value?: undefined }
+  | { ok: false; error: string }
   | {
-      error?: undefined;
+      ok: true;
       value: {
         name: string;
         url: string;
@@ -65,16 +71,21 @@ function clean(body: Record<string, unknown>): CleanResult {
   const anchor = String(body.anchor_vpsid ?? '').trim();
   const maxPerRun = Number(body.max_per_run);
 
-  if (!name) return { error: 'نام نود را وارد کنید' };
-  if (!/^https?:\/\/.+/i.test(url)) return { error: 'آدرس نود باید با http یا https شروع شود' };
-  if (anchor && !/^\d+$/.test(anchor)) return { error: 'شناسه وی‌پی‌اس لنگر باید عدد باشد' };
+  if (!name) return { ok: false, error: 'نام نود را وارد کنید' };
+  if (!/^https?:\/\/.+/i.test(url)) {
+    return { ok: false, error: 'آدرس نود باید با http یا https شروع شود' };
+  }
+  if (anchor && !/^\d+$/.test(anchor)) {
+    return { ok: false, error: 'شناسه وی‌پی‌اس لنگر باید عدد باشد' };
+  }
 
   const bindServerId = body.bind_server_id ? Number(body.bind_server_id) : null;
   if (bindServerId !== null && !Number.isInteger(bindServerId)) {
-    return { error: 'سرور لنگر نامعتبر است' };
+    return { ok: false, error: 'سرور لنگر نامعتبر است' };
   }
 
   return {
+    ok: true,
     value: {
       name,
       url,
@@ -92,7 +103,7 @@ export async function POST(req: Request) {
     await requireUser();
     const body = await readJson<Record<string, unknown>>(req);
     const parsed = clean(body);
-    if (parsed.error) return fail(parsed.error, 400);
+    if (!parsed.ok) return fail(parsed.error, 400);
     const c = parsed.value;
 
     const key = String(body.api_key ?? '').trim();
@@ -123,7 +134,7 @@ export async function PATCH(req: Request) {
     if (!Number.isInteger(id)) return fail('شناسه نود نامعتبر است', 400);
 
     const parsed = clean(body);
-    if (parsed.error) return fail(parsed.error, 400);
+    if (!parsed.ok) return fail(parsed.error, 400);
     const c = parsed.value;
 
     // خالی یعنی «عوض نکن» — وگرنه هر ذخیره‌ای که رمز را دوباره نمی‌نویسد،
