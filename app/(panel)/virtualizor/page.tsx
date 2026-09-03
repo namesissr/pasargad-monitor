@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useLoad, LoadState } from '@/components/useLoad';
-import { Field, Modal, Notice } from '@/components/ui';
+import { Field, Modal, Mono, Notice } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { faNum, timeAgo } from '@/lib/format';
 
@@ -319,7 +319,10 @@ function NodeForm({
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="کلید ای‌پی‌آی" hint={node ? 'خالی یعنی همان کلید قبلی بماند' : 'از Configuration ← API Credentials'}>
+          <Field
+            label="کلید ای‌پی‌آی"
+            hint={node ? 'خالی یعنی همان کلید قبلی بماند' : 'از Configuration ← Server Info، نه API Credentials'}
+          >
             <input className="input ltr" type="password" value={form.api_key} onChange={set('api_key')} autoComplete="off" />
           </Field>
           <Field label="رمز ای‌پی‌آی" hint={node ? 'خالی یعنی همان رمز قبلی بماند' : ''}>
@@ -379,6 +382,13 @@ function NodeForm({
             </select>
           </Field>
         </div>
+
+        <Notice type="warn">
+          کلید و رمز را از <Mono>Configuration ← Server Info</Mono> پنل ادمین بردارید، نه از
+          بخش <Mono>API Credentials</Mono>. آن یکی برای این کار نیست و همه درخواست‌ها را با
+          ریدایرکت به صفحه ورود برمی‌گرداند. آدرس هم باید پورت ۴۰۸۵ باشد، بدون
+          <Mono>/index.php</Mono> در انتها.
+        </Notice>
 
         <Notice type="warn">
           تخصیص در ویژالیزور به‌تنهایی کافی نیست — آدرس باید داخل خود وی‌پی‌اس هم روی کارت شبکه

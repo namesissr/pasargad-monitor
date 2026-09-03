@@ -1,3 +1,4 @@
+import { createHash, randomInt } from 'node:crypto';
 import { logErr } from './db.mjs';
 
 /**
@@ -11,6 +12,105 @@ import { logErr } from './db.mjs';
  * است که باید عوض شود.
  */
 
+/**
+ * ساخت پارامتر apikey، دقیقاً مثل اس‌دی‌کی رسمی ویژالیزور.
+ *
+ * از /usr/local/virtualizor/sdk/admin.php:
+ *   $key    = generateRandStr(8)          رشته تصادفی هشت‌کاراکتری کوچک
+ *   $apikey = $key . md5($pass . $key)
+ *
+ * سه پارامتر با هم فرستاده می‌شوند: adminapikey و adminapipass خام، و این
+ * apikey محاسبه‌شده. فرستادن فقط دو تای اول کافی نیست — ویژالیزور با
+ * ریدایرکت ۳۰۲ به صفحه ورود جواب می‌دهد، بدون هیچ پیامی که بگوید چرا.
+ */
+function makeApiKey(pass) {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let rand = '';
+  for (let i = 0; i < 8; i++) rand += alphabet[randomInt(alphabet.length)];
+  return rand + createHash('md5').update(pass + rand).digest('hex');
+}
+
+/**
+ * خواندن خروجی serialize پی‌اچ‌پی.
+ *
+ * اس‌دی‌کی «api=serialize» می‌فرستد و همان قالب تأییدشده روی نسخه نصب‌شده
+ * است، پس همان را می‌فرستیم. جیسون به‌عنوان جایگزین می‌ماند برای
+ * نسخه‌هایی که آن را برمی‌گردانند.
+ *
+ * روی بایت کار می‌کند نه کاراکتر: طول رشته در این قالب بر حسب بایت است و
+ * نام مشتری فارسی یا هاست‌نیم یونیکد، شمارش کاراکتری را از جا درمی‌آورد.
+ */
+function phpUnserialize(text) {
+  const buf = Buffer.from(text, 'utf8');
+  let at = 0;
+
+  const fail = (why) => {
+    throw new Error(`خروجی serialize خراب است در بایت ${at}: ${why}`);
+  };
+  const expect = (ch) => {
+    if (buf[at] !== ch.charCodeAt(0)) fail(`«${ch}» انتظار می‌رفت`);
+    at++;
+  };
+  const until = (ch) => {
+    const idx = buf.indexOf(ch.charCodeAt(0), at);
+    if (idx === -1) fail(`«${ch}» پیدا نشد`);
+    const out = buf.toString('utf8', at, idx);
+    at = idx + 1;
+    return out;
+  };
+
+  function value() {
+    const tag = String.fromCharCode(buf[at]);
+    switch (tag) {
+      case 'N':
+        at += 2; // N;
+        return null;
+      case 'b': {
+        at += 2; // b:
+        const v = until(';');
+        return v === '1';
+      }
+      case 'i': {
+        at += 2;
+        return parseInt(until(';'), 10);
+      }
+      case 'd': {
+        at += 2;
+        return parseFloat(until(';'));
+      }
+      case 's': {
+        at += 2;
+        const len = parseInt(until(':'), 10);
+        if (!Number.isFinite(len) || len < 0) fail('طول رشته نامعتبر');
+        expect('"');
+        const out = buf.toString('utf8', at, at + len);
+        at += len;
+        expect('"');
+        expect(';');
+        return out;
+      }
+      case 'a': {
+        at += 2;
+        const count = parseInt(until(':'), 10);
+        if (!Number.isFinite(count) || count < 0) fail('تعداد عضو نامعتبر');
+        expect('{');
+        const out = {};
+        for (let i = 0; i < count; i++) {
+          const k = value();
+          out[String(k)] = value();
+        }
+        expect('}');
+        return out;
+      }
+      default:
+        return fail(`نوع ناشناخته «${tag}»`);
+    }
+  }
+
+  const result = value();
+  return result;
+}
+
 /** یک فراخوانی به یک نود */
 async function call(node, act, params = {}, body) {
   const base = String(node.url || '').replace(/\/+$/, '');
@@ -20,9 +120,10 @@ async function call(node, act, params = {}, body) {
 
   const qs = new URLSearchParams({
     act,
-    api: 'json',
-    apikey: node.api_key,
-    apipass: node.api_pass,
+    adminapikey: node.api_key,
+    adminapipass: node.api_pass,
+    api: 'serialize',
+    apikey: makeApiKey(node.api_pass),
     ...params,
   });
 
@@ -37,7 +138,9 @@ async function call(node, act, params = {}, body) {
     const text = await res.text();
     let parsed;
     try {
-      parsed = JSON.parse(text);
+      parsed = text.trimStart().startsWith('{') || text.trimStart().startsWith('[')
+        ? JSON.parse(text)
+        : phpUnserialize(text);
     } catch {
       // ویژالیزور هنگام خطای احراز هویت صفحه ورود اچ‌تی‌ام‌ال می‌دهد نه
       // جیسون. ولی «کلید اشتباه» تنها علت نیست و حدس‌زدن وقت می‌گیرد،
@@ -52,9 +155,9 @@ async function call(node, act, params = {}, body) {
           'صفحه ورود برگشت — یا کلید و رمز ای‌پی‌آی اشتباه است، یا آی‌پی سرور پنل ' +
           'در فهرست مجاز ای‌پی‌آی نیست، یا این آدرس پنل کاربر است نه پنل ادمین (پورت ۴۰۸۵)';
       } else if (lower.includes('<html')) {
-        hint = 'پاسخ اچ‌تی‌ام‌ال آمد نه جیسون (کد ' + res.status + ')';
+        hint = 'پاسخ اچ‌تی‌ام‌ال آمد نه داده (کد ' + res.status + ')';
       } else {
-        hint = 'پاسخ جیسون نبود (کد ' + res.status + ')';
+        hint = 'پاسخ نه جیسون بود نه serialize (کد ' + res.status + ')';
       }
       // برچسب‌های اچ‌تی‌ام‌ال حذف می‌شوند تا بریده خوانا باشد
       const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
