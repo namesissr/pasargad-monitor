@@ -29,6 +29,12 @@ interface ChartProps {
   formatTime: (t: string) => string;
   fill?: boolean;
   emptyText?: string;
+  /**
+   * سقف محور عمودی. وقتی دو نمودار کنار هم مقایسه می‌شوند باید یک مقیاس
+   * داشته باشند، وگرنه آپلود کوچک به‌اندازه دانلود بزرگ دیده می‌شود و
+   * نسبتشان گمراه‌کننده می‌شود.
+   */
+  maxValue?: number;
 }
 
 const PAD = { top: 12, right: 8, bottom: 22, left: 52 };
@@ -41,6 +47,7 @@ export function Chart({
   formatTime,
   fill = true,
   emptyText = 'داده‌ای برای این بازه ثبت نشده است',
+  maxValue,
 }: ChartProps) {
   const [hover, setHover] = useState<number | null>(null);
   const width = 800; // مختصات داخلی؛ viewBox مقیاس را به عرض واقعی می‌رساند
@@ -56,7 +63,9 @@ export function Chart({
         if (Number.isFinite(v) && v > peak) peak = v;
       }
     }
-    const maxV = isPercent ? 100 : peak <= 0 ? 1 : peak * 1.15;
+    const maxV = maxValue && maxValue > 0
+      ? maxValue
+      : isPercent ? 100 : peak <= 0 ? 1 : peak * 1.15;
 
     const xAt = (i: number) =>
       PAD.left + (points.length <= 1 ? inner.w / 2 : (i / (points.length - 1)) * inner.w);
@@ -90,7 +99,7 @@ export function Chart({
     }));
 
     return { max: maxV, paths, areas, xs: xAt, ys };
-  }, [points, series, height, fill]);
+  }, [points, series, height, fill, maxValue]);
 
   if (!points.length) {
     return (

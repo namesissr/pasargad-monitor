@@ -163,10 +163,40 @@ export default function ServerDetailPage() {
   const s = d.server;
   const ramPct = s.ram_used_bytes && s.ram_total_bytes ? (s.ram_used_bytes / s.ram_total_bytes) * 100 : 0;
   const diskPct = s.disk_used_bytes && s.disk_total_bytes ? (s.disk_used_bytes / s.disk_total_bytes) * 100 : 0;
-  const monthBytes = Number(d.traffic.month.rx) + Number(d.traffic.month.tx);
   const quotaBytes = Number(s.traffic_quota_gb ?? 0) * Math.pow(1024, 3);
   const points = metrics.data?.points ?? [];
   const isLongRange = ['7d', '30d', '90d', '1y'].includes(range);
+
+  // اوج هر جهت در بازه نمایش‌داده‌شده، و مقیاس مشترک دو نمودار
+  const peakOf = (key: string) =>
+    points.reduce((m, pt) => Math.max(m, Number(pt[key]) || 0), 0);
+  const peakRx = peakOf('rx_bps');
+  const peakTx = peakOf('tx_bps');
+  const speedScale = Math.max(peakRx, peakTx) * 1.15 || 1;
+  const volumeScale = Math.max(peakOf('rx_bytes'), peakOf('tx_bytes')) * 1.15 || 1;
+
+  // کدام جهت پول دارد، طبق قرارداد دیتاسنتر
+  const dir = d.billing?.rates.billing_direction;
+  const monthRx = Number(d.traffic.month.rx);
+  const monthTx = Number(d.traffic.month.tx);
+  const rxBilled = dir === 'in' || dir === 'total' || (dir === 'max' && monthRx >= monthTx);
+  const txBilled = dir === 'out' || dir === 'total' || (dir === 'max' && monthTx > monthRx);
+
+  /**
+   * حجمی که واقعاً پول دارد، طبق قرارداد دیتاسنتر.
+   * بدون دیتاسنتر به مجموع دو جهت برمی‌گردد — همان رفتار قبلی.
+   */
+  const billableOf = (rx: number | string, tx: number | string) => {
+    const r = Number(rx) || 0;
+    const t = Number(tx) || 0;
+    if (dir === 'in') return r;
+    if (dir === 'out') return t;
+    if (dir === 'max') return Math.max(r, t);
+    return r + t;
+  };
+
+  // نوار سهمیه هم همان جهتی را می‌شمارد که دیتاسنتر حساب می‌کند
+  const monthBytes = billableOf(d.traffic.month.rx, d.traffic.month.tx);
 
   // رشته زمان از سرور در منطقه زمانی گزارش آمده و از Date عبور نمی‌کند،
   // پس منطقه زمانی مرورگر بازدیدکننده روی برچسب اثر ندارد
@@ -243,9 +273,9 @@ export default function ServerDetailPage() {
           tone={diskPct > 90 ? 'danger' : diskPct > 75 ? 'warn' : 'default'}
         />
         <StatCard
-          title="ترافیک لحظه‌ای"
-          value={formatMbps(Number(s.rx_bps ?? 0) + Number(s.tx_bps ?? 0))}
-          sub={`↓ ${formatMbps(s.rx_bps)} · ↑ ${formatMbps(s.tx_bps)}`}
+          title="دانلود لحظه‌ای"
+          value={formatMbps(s.rx_bps)}
+          sub={`آپلود: ${formatMbps(s.tx_bps)}`}
           tone="cyan"
         />
         <StatCard title="آپ‌تایم" value={formatDuration(s.uptime_sec)} sub={`از زمان آخرین راه‌اندازی`} />
@@ -259,7 +289,12 @@ export default function ServerDetailPage() {
 
       {/* مصرف ترافیک */}
       <section className="card p-4">
-        <h2 className="text-sm font-bold mb-3">مصرف ترافیک</h2>
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <h2 className="text-sm font-bold">مصرف ترافیک</h2>
+          <span className="text-[11px] text-muted">
+            عدد بزرگ: {d.billing ? DIRECTION_LABEL[d.billing.rates.billing_direction] : 'مجموع دو جهت'}
+          </span>
+        </div>
         <div className="grid sm:grid-cols-3 gap-4 mb-4">
           {[
             { label: 'امروز', v: d.traffic.today },
@@ -268,7 +303,7 @@ export default function ServerDetailPage() {
           ].map((row) => (
             <div key={row.label} className="bg-panel2 rounded-lg p-3">
               <p className="text-[11px] text-muted mb-1.5">{row.label}</p>
-              <p className="text-lg font-bold">{formatTB(Number(row.v.rx) + Number(row.v.tx))}</p>
+              <p className="text-lg font-bold">{formatTB(billableOf(row.v.rx, row.v.tx))}</p>
               <p className="text-[11px] text-muted mt-1">
                 <span className="text-cyan">↓</span> {formatBytes(row.v.rx)} ·{' '}
                 <span className="text-amber">↑</span> {formatBytes(row.v.tx)}
@@ -387,38 +422,6 @@ export default function ServerDetailPage() {
           </div>
 
           <div className="card p-4">
-            <h3 className="text-sm font-bold mb-2">
-              {isLongRange ? 'اوج ترافیک' : 'ترافیک شبکه'}
-            </h3>
-            <Chart
-              points={points}
-              height={200}
-              series={[
-                { key: 'rx_bps', label: 'دریافت', color: '#3ED6C5' },
-                { key: 'tx_bps', label: 'ارسال', color: '#F2B44C' },
-              ]}
-              format={(v) => formatBps(v, 0)}
-              formatTime={timeLabel}
-            />
-          </div>
-
-          {isLongRange && (
-            <div className="card p-4">
-              <h3 className="text-sm font-bold mb-2">حجم ترافیک هر بازه</h3>
-              <Chart
-                points={points}
-                height={180}
-                series={[
-                  { key: 'rx_bytes', label: 'دریافت', color: '#3ED6C5' },
-                  { key: 'tx_bytes', label: 'ارسال', color: '#F2B44C' },
-                ]}
-                format={(v) => formatBytes(v, 0)}
-                formatTime={timeLabel}
-              />
-            </div>
-          )}
-
-          <div className="card p-4">
             <h3 className="text-sm font-bold mb-2">دیسک و بار سیستم</h3>
             <Chart
               points={points}
@@ -432,6 +435,98 @@ export default function ServerDetailPage() {
             />
           </div>
         </div>
+      </section>
+
+      {/* تفکیک دانلود و آپلود */}
+      <section className="card p-4">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+          <h2 className="text-sm font-bold">تفکیک دانلود و آپلود</h2>
+          <span className="text-[11px] text-muted">
+            بازه {RANGES.find((r) => r.key === range)?.label}
+            {d.billing && <> · مبنای صورتحساب: {DIRECTION_LABEL[d.billing.rates.billing_direction]}</>}
+          </span>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-3 mb-4">
+          <TrafficSide
+            title="دانلود — دریافتی"
+            color="#3ED6C5"
+            now={s.rx_bps}
+            peak={peakRx}
+            today={d.traffic.today.rx}
+            month={monthRx}
+            monthLabel={d.traffic.month.label}
+            billed={rxBilled}
+          />
+          <TrafficSide
+            title="آپلود — ارسالی"
+            color="#F2B44C"
+            now={s.tx_bps}
+            peak={peakTx}
+            today={d.traffic.today.tx}
+            month={monthTx}
+            monthLabel={d.traffic.month.label}
+            billed={txBilled}
+          />
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <p className="text-[11px] text-muted mb-1">سرعت دانلود</p>
+            <Chart
+              points={points}
+              height={150}
+              maxValue={speedScale}
+              series={[{ key: 'rx_bps', label: 'دریافتی', color: '#3ED6C5' }]}
+              format={(v) => formatBps(v, 0)}
+              formatTime={timeLabel}
+            />
+          </div>
+          <div>
+            <p className="text-[11px] text-muted mb-1">سرعت آپلود</p>
+            <Chart
+              points={points}
+              height={150}
+              maxValue={speedScale}
+              series={[{ key: 'tx_bps', label: 'ارسالی', color: '#F2B44C' }]}
+              format={(v) => formatBps(v, 0)}
+              formatTime={timeLabel}
+            />
+          </div>
+        </div>
+
+        {isLongRange && (
+          <div className="mt-4 pt-4 border-t border-line/60 space-y-3">
+            <p className="text-xs font-bold">حجم هر بازه</p>
+            <div>
+              <p className="text-[11px] text-muted mb-1">دانلود</p>
+              <Chart
+                points={points}
+                height={130}
+                maxValue={volumeScale}
+                series={[{ key: 'rx_bytes', label: 'دریافتی', color: '#3ED6C5' }]}
+                format={(v) => formatBytes(v, 0)}
+                formatTime={timeLabel}
+              />
+            </div>
+            <div>
+              <p className="text-[11px] text-muted mb-1">آپلود</p>
+              <Chart
+                points={points}
+                height={130}
+                maxValue={volumeScale}
+                series={[{ key: 'tx_bytes', label: 'ارسالی', color: '#F2B44C' }]}
+                format={(v) => formatBytes(v, 0)}
+                formatTime={timeLabel}
+              />
+            </div>
+          </div>
+        )}
+
+        <p className="text-[11px] text-muted/70 mt-3">
+          دو نمودار عمداً روی یک مقیاس‌اند تا نسبت دانلود به آپلود درست دیده شود. اگر هرکدام
+          مقیاس خودش را داشت، آپلود کوچک هم‌اندازه دانلود بزرگ به نظر می‌رسید.
+        </p>
       </section>
 
       {/* مشخصات و آی‌پی‌ها */}
@@ -548,6 +643,58 @@ export default function ServerDetailPage() {
       <Modal open={showAgent} title="نصب ایجنت روی این سرور" onClose={() => setShowAgent(false)} wide>
         <AgentPanel serverId={s.id} token={s.agent_token} onRotated={detail.reload} />
       </Modal>
+    </div>
+  );
+}
+
+/** خلاصه یک جهت ترافیک: سرعت لحظه‌ای، اوج بازه، و حجم امروز و ماه */
+function TrafficSide({
+  title,
+  color,
+  now,
+  peak,
+  today,
+  month,
+  monthLabel,
+  billed,
+}: {
+  title: string;
+  color: string;
+  now: number | null;
+  peak: number;
+  today: number;
+  month: number;
+  monthLabel: string;
+  billed: boolean;
+}) {
+  return (
+    <div className="bg-panel2 rounded-lg p-3.5">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <span className="flex items-center gap-2 text-xs font-bold">
+          <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: color }} />
+          {title}
+        </span>
+        {billed && <span className="badge bg-cyan/15 text-cyan shrink-0">محاسبه می‌شود</span>}
+      </div>
+
+      <p className="text-xl font-bold" style={{ color }}>
+        {formatMbps(now)}
+      </p>
+
+      <dl className="text-[11px] mt-2.5 space-y-1">
+        <div className="flex justify-between gap-2">
+          <dt className="text-muted">اوج بازه</dt>
+          <dd>{formatBps(peak, 1)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt className="text-muted">حجم امروز</dt>
+          <dd>{formatBytes(today)}</dd>
+        </div>
+        <div className="flex justify-between gap-2">
+          <dt className="text-muted">حجم {monthLabel}</dt>
+          <dd>{formatTB(month, 2)}</dd>
+        </div>
+      </dl>
     </div>
   );
 }
