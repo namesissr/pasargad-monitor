@@ -35,9 +35,19 @@ function customerLabel(vps, user) {
  * معتبری نیست چون بیت‌ها پیوسته نیستند. پذیرفتنش یک ساب‌نت غلط در پنل
  * می‌سازد — و پرفیکس بایند از همان ساب‌نت می‌آید، یعنی آدرس‌ها با ماسک
  * اشتباه روی لنگر می‌نشینند. پس پیوستگی بررسی می‌شود.
+ *
+ * ویژالیزور ماسک را گاهی نقطه‌ای («255.255.255.0») و گاهی عددی («24»)
+ * می‌دهد؛ هر دو پذیرفته می‌شوند.
  */
 function maskToPrefix(netmask) {
-  const parts = String(netmask || '').split('.');
+  const raw = String(netmask || '').trim();
+
+  if (/^\d{1,2}$/.test(raw)) {
+    const n = Number(raw);
+    return n >= 8 && n <= 32 ? n : null;
+  }
+
+  const parts = raw.split('.');
   if (parts.length !== 4) return null;
 
   let value = 0;
@@ -104,26 +114,87 @@ export async function discoverNode(node) {
     return { ok: false, error: ips.error };
   }
   for (const [name, res] of [['مخزن‌ها', pools], ['وی‌پی‌اس‌ها', vpses], ['کاربران', users]]) {
-    if (!res.ok) logErr(`نود ${node.name}: خواندن ${name} ناموفق —`, res.error);
+    if (!res.ok) {
+      logErr(`نود ${node.name}: خواندن ${name} ناموفق —`, res.error);
+      continue;
+    }
+    // فهرست خالی بی‌صدا نماند. یک بار فهرست مخزن‌ها خالی برگشت و چون هیچ
+    // لاگی نداشت، تشخیصش چند دور طول کشید: معلوم نبود پاسخ خالی است یا
+    // کلیدش عوض شده یا فیلتر همه را انداخته.
+    if (!res.items.length) {
+      logErr(
+        `نود ${node.name}: فهرست ${name} خالی است.`,
+        `ردیف خام: ${res.rawCount ?? '؟'}،`,
+        `کلیدهای پاسخ: ${(res.topKeys || []).join(', ') || 'ندارد'}.`,
+        `نمونه پاسخ: ${String(res.raw || '').slice(0, 200)}`,
+      );
+    } else if (res.rawCount && res.rawCount > res.items.length) {
+      log(
+        `نود ${node.name}: ${res.rawCount - res.items.length} ردیف ${name} فیلتر شد`,
+        `(نسخه ۶ یا داده ناقص) از ${res.rawCount}`,
+      );
+    }
   }
 
-  // ── ساب‌نت‌ها ────────────────────────────────────────────────
+  // ── بلوک‌ها ─────────────────────────────────────────────────
+  //
+  // منبع اصلی خودِ ردیف‌های آی‌پی است، نه فهرست مخزن‌ها. هر ردیف آی‌پی
+  // گیت‌وی، ماسک و شناسه مخزنش را دارد. وقتی بلوک‌ها را به یک فراخوانی
+  // دوم گره زدیم، آن فراخوانی خالی برگشت و هیچ بلوکی ساخته نشد — پس
+  // ماسک و گیت‌وی خالی ماند و پرفیکس بایند به ۳۲ برگشت.
+  //
+  // فهرست مخزن‌ها فقط مکمل است: مخزنی که هیچ آی‌پی‌ای ندارد از آنجا می‌آید.
+  const blocks = new Map();
+
+  const addBlock = (poolid, name, gateway, netmask, source) => {
+    const prefix = maskToPrefix(netmask);
+    const cidr = networkOf(gateway, prefix);
+    if (!cidr) {
+      if (!blocks.has('bad:' + poolid)) {
+        blocks.set('bad:' + poolid, null);
+        logErr(
+          `نود ${node.name}: بلوک «${name || poolid}» (${source}) خوانده نشد —`,
+          `گیت‌وی «${gateway}» یا ماسک «${netmask}» معتبر نیست`,
+        );
+      }
+      return;
+    }
+    if (!blocks.has(cidr)) blocks.set(cidr, { cidr, poolid, name, gateway });
+  };
+
+  for (const row of ips.items) {
+    if (!row.gateway || !row.netmask) continue;
+    addBlock(row.ippoolid, row.poolName, row.gateway, row.netmask, 'از آی‌پی');
+  }
   if (pools.ok) {
     for (const pool of pools.items) {
-      const prefix = maskToPrefix(pool.netmask);
-      const cidr = networkOf(pool.firstip, prefix);
-      if (!cidr) continue;
-      await q(
-        `INSERT INTO ip_subnets (cidr, version, gateway, label, vz_node_id, vz_poolid)
-         VALUES ($1::cidr, 4, NULLIF($2,'')::inet, $3, $4, $5)
-         ON CONFLICT (cidr) DO UPDATE
-           SET gateway    = COALESCE(EXCLUDED.gateway, ip_subnets.gateway),
-               label      = COALESCE(NULLIF(EXCLUDED.label,''), ip_subnets.label),
-               vz_node_id = EXCLUDED.vz_node_id,
-               vz_poolid  = EXCLUDED.vz_poolid`,
-        [cidr, pool.gateway, pool.name || null, node.id, pool.poolid],
-      ).catch((e) => logErr(`ساب‌نت ${cidr} ثبت نشد:`, e.message));
+      addBlock(pool.poolid, pool.name, pool.gateway, pool.netmask, 'از مخزن');
     }
+  }
+
+  for (const block of blocks.values()) {
+    if (!block) continue;
+    await q(
+      `INSERT INTO ip_subnets (cidr, version, gateway, label, vz_node_id, vz_poolid)
+       VALUES ($1::cidr, 4, NULLIF($2,'')::inet, NULLIF($3,''), $4, NULLIF($5,''))
+       ON CONFLICT (cidr) DO UPDATE
+         SET gateway    = COALESCE(EXCLUDED.gateway, ip_subnets.gateway),
+             label      = COALESCE(EXCLUDED.label, ip_subnets.label),
+             vz_node_id = EXCLUDED.vz_node_id,
+             vz_poolid  = COALESCE(EXCLUDED.vz_poolid, ip_subnets.vz_poolid)`,
+      [block.cidr, block.gateway, block.name || null, node.id, block.poolid || null],
+    ).catch((e) => logErr(`بلوک ${block.cidr} ثبت نشد:`, e.message));
+  }
+
+  const madeBlocks = Array.from(blocks.values()).filter(Boolean).length;
+  if (!madeBlocks && ips.items.length) {
+    logErr(
+      `نود ${node.name}: هیچ بلوکی ساخته نشد با اینکه ${ips.items.length} آدرس آمد.`,
+      'یعنی ردیف‌های آی‌پی گیت‌وی یا ماسک ندارند — بدون بلوک، پرفیکس بایند ۳۲ می‌ماند',
+      'و آدرس‌ها روی لنگر کار نمی‌کنند.',
+    );
+  } else if (madeBlocks) {
+    log(`نود ${node.name}: ${madeBlocks} بلوک ثبت شد`);
   }
 
   // ── نگاشت وی‌پی‌اس و کاربر ──────────────────────────────────

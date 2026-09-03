@@ -209,10 +209,20 @@ function isIpv4(value) {
 async function paged(node, act, key, extra = {}, maxPages = 60) {
   const out = [];
   const seen = new Set();
+  // پاسخ خام صفحه اول و کلیدهای بالای آن نگه داشته می‌شوند: اگر فهرست
+  // خالی برگردد، تنها راه فهمیدن اینکه کلید پاسخ عوض شده یا واقعاً چیزی
+  // نیست، دیدن همین‌هاست. بدون آن، خالی‌بودن بی‌صدا می‌ماند.
+  let raw = null;
+  let topKeys = null;
 
   for (let page = 1; page <= maxPages; page++) {
     const res = await call(node, act, { ...extra, page: String(page), reslen: '500' });
-    if (!res.ok) return { ok: false, error: res.error, items: out };
+    if (!res.ok) return { ok: false, error: res.error, items: out, raw: res.raw };
+
+    if (page === 1) {
+      raw = res.raw;
+      topKeys = res.data && typeof res.data === 'object' ? Object.keys(res.data) : [];
+    }
 
     const batch = rows(res.data?.[key]);
     if (!batch.length) break;
@@ -233,9 +243,19 @@ async function paged(node, act, key, extra = {}, maxPages = 60) {
     if (batch.length < 500) break;
   }
 
-  return { ok: true, items: out };
+  return { ok: true, items: out, raw, topKeys };
 }
 
+/**
+ * فهرست آی‌پی‌ها.
+ *
+ * هر ردیف خودش گیت‌وی، ماسک و شناسه مخزن را دارد — طبق مستندات رسمی.
+ * برای همین بلوک‌ها از همین‌جا ساخته می‌شوند و نه از act=ippool: وقتی
+ * فهرست مخزن به هر دلیلی خالی برگردد، بلوک‌ها همچنان درست ساخته می‌شوند.
+ * وابسته‌کردن ماسک و گیت‌وی به یک فراخوانی دوم، یک نقطه شکست اضافه بود.
+ *
+ * https://www.virtualizor.com/docs/admin-api/list-ips/
+ */
 export async function listIps(node) {
   const res = await paged(node, 'ips', 'ips');
   if (!res.ok) return res;
@@ -246,14 +266,35 @@ export async function listIps(node) {
         ipid: str(r.ipid),
         ip: str(r.ip).trim(),
         vpsid: str(r.vpsid, '0'),
-        ippoolid: str(r.ippoolid),
+        // نام فیلد «ippid» است؛ «ippoolid» فقط در پاسخ مخزن‌ها هست
+        ippoolid: str(r.ippid ?? r.ippoolid),
+        poolName: str(r.ippool_name),
+        gateway: str(r.gateway).trim(),
+        netmask: str(r.netmask).trim(),
+        poolServerId: str(r.ipp_serid ?? r.ip_serid),
+        isV6: str(r.ipv6) === '1',
         locked: str(r.locked) === '1',
       }))
       // فقط نسخه ۴. نسخه ۶ نه در پایش اکسس معنی دارد نه در لنگر.
-      .filter((r) => isIpv4(r.ip)),
+      .filter((r) => !r.isV6 && isIpv4(r.ip)),
+    rawCount: res.items.length,
+    raw: res.raw,
+    topKeys: res.topKeys,
   };
 }
 
+/**
+ * فهرست مخزن‌های آی‌پی.
+ *
+ * فیلدها طبق مستندات رسمی: ippid، ippool_name، gateway، netmask، ipv6.
+ * یک بار «firstip» فرض شد که اصلاً وجود ندارد — نتیجه‌اش این بود که هیچ
+ * بلوکی ساخته نمی‌شد و در نتیجه ماسک و گیت‌وی آی‌پی‌ها خالی می‌ماند و
+ * پرفیکس بایند به ۳۲ برمی‌گشت.
+ *
+ * شبکه از روی گیت‌وی حساب می‌شود، چون گیت‌وی همیشه داخل همان بلوک است.
+ *
+ * https://www.virtualizor.com/docs/admin-api/list-ip-pool/
+ */
 export async function listPools(node) {
   const res = await paged(node, 'ippool', 'ippools');
   if (!res.ok) return res;
@@ -261,14 +302,18 @@ export async function listPools(node) {
     ok: true,
     items: res.items
       .map((r) => ({
-        poolid: str(r.ippid ?? r.ippoolid),
-        name: str(r.ippool_name ?? r.name),
+        poolid: str(r.ippid),
+        name: str(r.ippool_name),
         gateway: str(r.gateway).trim(),
         netmask: str(r.netmask).trim(),
-        firstip: str(r.firstip).trim(),
+        isV6: str(r.ipv6) === '1',
       }))
-      // مخزن نسخه ۶ یک ساب‌نت بی‌معنی در پنل می‌ساخت
-      .filter((r) => r.poolid && isIpv4(r.firstip)),
+      // پرچم ipv6 خود ویژالیزور، به‌علاوه بررسی گیت‌وی برای نسخه‌هایی که
+      // آن پرچم را نمی‌فرستند
+      .filter((r) => r.poolid && !r.isV6 && isIpv4(r.gateway)),
+    rawCount: res.items.length,
+    raw: res.raw,
+    topKeys: res.topKeys,
   };
 }
 

@@ -221,8 +221,11 @@ def main():
         ("adminapipass: node.api_pass", "پارامتر adminapipass"),
         ("api: 'serialize'", "قالب پاسخ"),
         ("buf.toString('utf8', at, at + len)", "برش رشته بر حسب بایت"),
-        (".filter((r) => isIpv4(r.ip))", "فیلتر نسخه ۴ در فهرست آی‌پی"),
-        ("isIpv4(r.firstip)", "فیلتر نسخه ۴ در فهرست مخزن"),
+        ("!r.isV6 && isIpv4(r.gateway)", "فیلتر نسخه ۶ در فهرست مخزن"),
+        ("!r.isV6 && isIpv4(r.ip)", "فیلتر نسخه ۶ در فهرست آی‌پی"),
+        ("ippoolid: str(r.ippid ?? r.ippoolid)", "نام درست فیلد شناسه مخزن در ردیف آی‌پی"),
+        ("gateway: str(r.gateway).trim()", "گیت‌وی از ردیف آی‌پی"),
+        ("netmask: str(r.netmask).trim()", "ماسک از ردیف آی‌پی"),
     ]:
         if needle in src:
             print("گذشت  کد واقعی: %s" % why)

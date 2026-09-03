@@ -30,8 +30,14 @@ ANCHOR = "77"
 
 
 def mask_to_prefix(netmask):
-    """بازسازی maskToPrefix — با بررسی پیوستگی بیت‌ها"""
-    parts = str(netmask or "").split(".")
+    """بازسازی maskToPrefix — نقطه‌ای یا عددی، با بررسی پیوستگی بیت‌ها"""
+    raw = str(netmask or "").strip()
+
+    if len(raw) in (1, 2) and raw.isdigit():
+        n = int(raw)
+        return n if 8 <= n <= 32 else None
+
+    parts = raw.split(".")
     if len(parts) != 4:
         return None
     value = 0
@@ -89,6 +95,12 @@ MASK_CASES = [
     ("255.0.255.0", None, "ناپیوسته در وسط"),
     ("0.0.0.0", None, "کوتاه‌تر از ۸"),
     ("abc.def.ghi.jkl", None, "ماسک بی‌معنی"),
+    # ویژالیزور گاهی ماسک را عددی می‌دهد
+    ("24", 24, "ماسک عددی"),
+    ("8", 8, "ماسک عددی کوچک"),
+    ("32", 32, "ماسک عددی بیشینه"),
+    ("7", None, "عددی کمتر از ۸"),
+    ("33", None, "عددی بیشتر از ۳۲"),
 ]
 
 NETWORK_CASES = [
@@ -177,6 +189,8 @@ def main():
         ("if (row.locked || (!free && !onAnchor)) {", "محافظ قفل و وی‌پی‌اس دیگر"),
         ("if (onAnchor && panel.managed_by_panel) detach.push(row.ip);", "شرط جداکردن"),
         ("if (free && panel.access_watch) attach.push(row.ip);", "شرط چسباندن"),
+        ("const cidr = networkOf(gateway, prefix);", "شبکه از گیت‌وی حساب می‌شود"),
+        ("for (const row of ips.items) {", "بلوک‌ها از ردیف‌های آی‌پی ساخته می‌شوند"),
     ]:
         if needle in src:
             print("گذشت  کد واقعی: %s" % why)

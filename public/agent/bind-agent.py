@@ -33,6 +33,7 @@ import ssl
 import subprocess
 import sys
 import time
+from multiprocessing.dummy import Pool
 
 try:
     from urllib.request import Request, urlopen
@@ -197,7 +198,7 @@ def ping_from(source, target):
         return None
 
 
-def routing_test(ip, gateway, shares_subnet, base_ip):
+def routing_test(ip, gateway, shares_subnet, base_ip, gateway_alive=None):
     """
     آیا این آدرس واقعاً روی شبکه شناخته شده است؟
 
@@ -224,8 +225,11 @@ def routing_test(ip, gateway, shares_subnet, base_ip):
     if ping_from(ip, gateway):
         return True
 
-    # پینگ شاهد: آیا این گیت‌وی اصلاً به کسی جواب می‌دهد؟
-    if base_ip and ping_from(base_ip, gateway) is False:
+    # پینگ شاهد: آیا این گیت‌وی اصلاً به کسی جواب می‌دهد؟ نتیجه‌اش یک بار
+    # برای کل دور حساب می‌شود و از بیرون داده می‌شود؛ محاسبه‌اش به‌ازای هر
+    # آدرس، دور را چند برابر طولانی می‌کرد.
+    alive = gateway_alive if gateway_alive is not None else ping_from(base_ip, gateway)
+    if alive is False:
         return None
 
     return False
@@ -257,6 +261,8 @@ def main():
     ap.add_argument("--token", required=True)
     ap.add_argument("--iface", default="", help="رابط شبکه؛ خالی یعنی رابط مسیر پیش‌فرض")
     ap.add_argument("--interval", type=int, default=300)
+    ap.add_argument("--concurrency", type=int, default=12,
+                    help="چند تست روت همزمان؛ سریال با صدها آدرس عملاً تمام نمی‌شود")
     ap.add_argument("--insecure", action="store_true")
     args = ap.parse_args()
 
@@ -331,29 +337,72 @@ def main():
                     say("جداکردن %s ناموفق: %s" % (ip, out.strip()[:120] or "هنوز روی رابط است"))
 
             # بایند خواسته‌ها
+            #
+            # پرفیکس درست اول بررسی می‌شود. اگر آدرس با پرفیکس دیگری روی
+            # کارت باشد، اول برداشته می‌شود.
+            #
+            # چرا: «ip addr add» با پرفیکس متفاوت خطای «File exists» نمی‌دهد،
+            # یک ورودی دوم می‌سازد. نتیجه‌اش این بود که آدرس هم با /۳۲ روی
+            # کارت بود هم با /۲۴ — و همان /۳۲ که مانع کار بود سر جایش
+            # می‌ماند.
+            pending = []
             for ip in sorted(wanted):
-                cidr = "%s/%d" % (ip, addresses.get(ip, 32))
-                code, out = run_ip(["addr", "add", cidr, "dev", iface])
+                want_prefix = addresses.get(ip, 32)
                 shares = same_subnet(ip, base_ip, base_prefix)
+                have = current_prefix(iface, ip)
+
+                if have == want_prefix:
+                    state.add(ip)
+                    pending.append((ip, shares))
+                    continue
+
+                if have is not None:
+                    run_ip(["addr", "del", "%s/%d" % (ip, have), "dev", iface])
+                    say("پرفیکس %s از /%d به /%d اصلاح شد" % (ip, have, want_prefix))
+
+                cidr = "%s/%d" % (ip, want_prefix)
+                code, out = run_ip(["addr", "add", cidr, "dev", iface])
                 if code == 0 or "File exists" in out:
                     state.add(ip)
-                    routed = routing_test(ip, gateways.get(ip), shares, base_ip)
+                    pending.append((ip, shares))
                     if code == 0:
-                        note = ""
-                        if shares is False:
-                            note = "  (رنج متفاوت)"
-                        if routed is False:
-                            note += "  (روت نشده)"
-                        say("بایند شد: %s%s" % (ip, note))
-                    results.append({
-                        "ip": ip, "bound": True, "same_subnet": shares, "routed": routed,
-                    })
+                        say("بایند شد: %s%s" % (ip, "  (رنج متفاوت)" if shares is False else ""))
                 else:
                     results.append({
                         "ip": ip, "bound": False, "same_subnet": shares,
                         "error": out.strip()[:200],
                     })
                     say("بایند %s ناموفق: %s" % (ip, out.strip()[:120]))
+
+            # تست روت، موازی.
+            #
+            # سریال اجرا می‌شد و هر آدرس تا چند ثانیه پینگ می‌خواست. با
+            # دویست آدرس یعنی یک دور بیست دقیقه‌ای — یعنی عملاً هرگز تمام
+            # نمی‌شد و پنل هیچ نتیجه‌ای نمی‌گرفت.
+            if pending:
+                # پینگ شاهد یک بار برای کل دور، نه یک بار به‌ازای هر آدرس
+                gw_alive = {}
+                for ip, _ in pending:
+                    gw = gateways.get(ip)
+                    if gw and gw not in gw_alive:
+                        gw_alive[gw] = ping_from(base_ip, gw) if base_ip else None
+
+                def check(item):
+                    ip, shares = item
+                    gw = gateways.get(ip)
+                    routed = routing_test(ip, gw, shares, base_ip, gw_alive.get(gw))
+                    return {"ip": ip, "bound": True, "same_subnet": shares, "routed": routed}
+
+                pool = Pool(min(args.concurrency, max(1, len(pending))))
+                try:
+                    results.extend(pool.map(check, pending))
+                finally:
+                    pool.close()
+                    pool.join()
+
+                bad = [r["ip"] for r in results if r.get("routed") is False]
+                if bad:
+                    say("روت نشده (%d): %s" % (len(bad), "، ".join(bad[:8])))
 
             save_state(state)
 
