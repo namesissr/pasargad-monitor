@@ -5,7 +5,7 @@ import { fail, handle, ok, readJson } from '@/lib/http';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const EDITABLE: Record<string, 'text' | 'int' | 'bool' | 'status'> = {
+const EDITABLE: Record<string, 'text' | 'int' | 'bool' | 'status' | 'prefix' | 'inet'> = {
   status: 'status',
   server_id: 'int',
   subnet_id: 'int',
@@ -16,6 +16,8 @@ const EDITABLE: Record<string, 'text' | 'int' | 'bool' | 'status'> = {
   is_monitored: 'bool',
   access_watch: 'bool',
   bind_server_id: 'int',
+  bind_prefix: 'prefix',
+  gateway: 'inet',
 };
 
 const VALID_STATUS = ['free', 'assigned', 'reserved', 'blocked', 'abuse'];
@@ -43,15 +45,21 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       } else if (kind === 'int') {
         value = raw === null || raw === '' ? null : Number(raw);
         if (value !== null && !Number.isFinite(value as number)) return fail(`مقدار «${key}» باید عدد باشد`, 400);
+      } else if (kind === 'prefix') {
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 8 || n > 32) {
+          return fail('پرفیکس بایند باید عددی بین ۸ و ۳۲ باشد', 400);
+        }
+        value = n;
       } else if (kind === 'bool') {
         value = Boolean(raw);
       } else {
         const s = String(raw ?? '').trim();
-        value = s === '' ? null : s;
+        value = kind === 'inet' ? s : s === '' ? null : s;
       }
 
       values.push(value);
-      sets.push(`${key} = $${values.length}`);
+      sets.push(kind === 'inet' ? `${key} = NULLIF($${values.length}, '')::inet` : `${key} = $${values.length}`);
     }
 
     if (!sets.length) return fail('هیچ فیلدی برای تغییر فرستاده نشده است', 400);

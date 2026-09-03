@@ -72,7 +72,10 @@ export async function GET(req: Request) {
               i.access_watch, i.iran_access_status, i.access_blocked_since, i.access_released_at,
               i.bind_server_id, i.bind_ok, i.bind_error,
               i.server_id, s.name AS server_name,
-              i.subnet_id, n.cidr::text AS subnet
+              i.subnet_id, n.cidr::text AS subnet,
+              masklen(n.cidr) AS subnet_prefix,
+              host(COALESCE(i.gateway, n.gateway)) AS gateway,
+              i.bind_prefix
          FROM ip_addresses i
          LEFT JOIN servers s   ON s.id = i.server_id
          LEFT JOIN ip_subnets n ON n.id = i.subnet_id
@@ -114,6 +117,9 @@ export async function POST(req: Request) {
     const monitored = Boolean(b.is_monitored);
     const accessWatch = Boolean(b.access_watch);
     const bindServerId = b.bind_server_id ? Number(b.bind_server_id) : null;
+    const gateway = String(b.gateway ?? '').trim() || null;
+    const bindPrefix = Number(b.bind_prefix);
+    const prefix = Number.isInteger(bindPrefix) && bindPrefix >= 8 && bindPrefix <= 32 ? bindPrefix : 32;
 
     const list = raw
       .split(/[\s,،\n]+/)
@@ -141,6 +147,17 @@ export async function POST(req: Request) {
 
         // آی‌پی اکسس‌شده که تازه به پایش اضافه می‌شود، «در اکسس» فرض می‌شود —
         // کل سناریو همین است: فهرست بسته‌شده‌ها وارد و منتظر آزادشدن می‌مانیم
+        if (gateway || prefix !== 32) {
+          await query(
+            `UPDATE ip_addresses
+                SET gateway = COALESCE(NULLIF($2, '')::inet, gateway),
+                    bind_prefix = $3,
+                    updated_at = now()
+              WHERE ip = $1::inet`,
+            [ip, gateway ?? '', prefix],
+          );
+        }
+
         if (accessWatch) {
           await query(
             `UPDATE ip_addresses

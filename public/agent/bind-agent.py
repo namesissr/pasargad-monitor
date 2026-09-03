@@ -8,6 +8,12 @@
 می‌شود، فهرست آی‌پی‌های سپرده به این سرور را از پنل می‌گیرد و رویش بایند
 می‌کند تا زنده شوند و دیدبان‌ها بتوانند بسنجندشان.
 
+آدرس با /32 روی رابط مسیر پیش‌فرض می‌نشیند و گیت‌وی جداگانه لازم ندارد:
+سرور از قبل مسیر پیش‌فرض دارد و پاسخ پینگ از همان برمی‌گردد. با /32 کرنل به
+ARP آن آدرس جواب می‌دهد، که همان چیزی است که روتر بالادست می‌خواهد. دادن
+ماسک واقعی یک مسیر متصل تکراری می‌سازد و می‌تواند با مسیر آی‌پی اصلی سرور
+تداخل کند — پس پرفیکس فقط وقتی عوض می‌شود که ادمین در پنل صریح خواسته باشد.
+
 نکته مهم: آی‌پی‌هایی که خودش قبلاً بایند کرده و دیگر در فهرست نیستند را
 جدا می‌کند — فهرستشان در یک فایل حالت محلی نگه داشته می‌شود تا هرگز به
 آی‌پی‌هایی که خود سرور از قبل داشته دست نزند.
@@ -146,7 +152,21 @@ def main():
         started = time.time()
         try:
             listing = http_json(base + "/api/bind", args.token, insecure=args.insecure)
-            wanted = set(listing.get("ips") or [])
+
+            # نگاشت آی‌پی به پرفیکس. «addresses» شکل تازه است؛ اگر پنل
+            # قدیمی بود، «ips» با پرفیکس ۳۲ استفاده می‌شود.
+            addresses = {}
+            for row in (listing.get("addresses") or []):
+                ip_text = str(row.get("ip") or "").strip()
+                if ip_text:
+                    try:
+                        addresses[ip_text] = int(row.get("prefix") or 32)
+                    except (TypeError, ValueError):
+                        addresses[ip_text] = 32
+            if not addresses:
+                for ip_text in (listing.get("ips") or []):
+                    addresses[str(ip_text).strip()] = 32
+            wanted = set(addresses)
             server_interval = listing.get("interval")
             if isinstance(server_interval, int) and 60 <= server_interval <= 3600:
                 interval = server_interval
@@ -157,6 +177,7 @@ def main():
             # جداکردن آی‌پی‌هایی که ما بایند کردیم و دیگر خواسته نیستند.
             # فقط از روی فایل حالت — هرگز به آدرس‌های خود سرور دست نمی‌زنیم.
             for ip in sorted(state - wanted):
+                # پرفیکس هنگام حذف اهمیتی ندارد؛ کرنل با خود آدرس پیدایش می‌کند
                 code, out = run_ip(["addr", "del", ip + "/32", "dev", iface])
                 if code == 0 or "Cannot assign" in out:
                     state.discard(ip)
@@ -166,7 +187,8 @@ def main():
 
             # بایند خواسته‌ها
             for ip in sorted(wanted):
-                code, out = run_ip(["addr", "add", ip + "/32", "dev", iface])
+                cidr = "%s/%d" % (ip, addresses.get(ip, 32))
+                code, out = run_ip(["addr", "add", cidr, "dev", iface])
                 if code == 0:
                     state.add(ip)
                     say("بایند شد: %s" % ip)

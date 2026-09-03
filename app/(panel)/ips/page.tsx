@@ -30,6 +30,9 @@ interface IpRow {
   server_name: string | null;
   subnet_id: number | null;
   subnet: string | null;
+  subnet_prefix: number | null;
+  gateway: string | null;
+  bind_prefix: number;
 }
 
 interface IpData {
@@ -211,6 +214,7 @@ export default function IpsPage() {
                 <th>مشتری</th>
                 <th>رکورد معکوس</th>
                 <th>بلوک</th>
+                <th>ماسک و گیت‌وی</th>
                 <th>اکسس ایران</th>
                 <th>پینگ</th>
                 <th></th>
@@ -227,6 +231,19 @@ export default function IpsPage() {
                   <td className="text-xs truncate max-w-[140px]">{ip.customer || <span className="text-muted">—</span>}</td>
                   <td className="text-xs text-muted truncate max-w-[180px]">{ip.ptr || '—'}</td>
                   <td><Mono className="text-muted">{ip.subnet || '—'}</Mono></td>
+                  <td className="text-xs whitespace-nowrap">
+                    {ip.subnet_prefix ? (
+                      <Mono className="text-muted">/{ip.subnet_prefix}</Mono>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                    {ip.gateway && (
+                      <>
+                        <br />
+                        <Mono className="text-muted">{ip.gateway}</Mono>
+                      </>
+                    )}
+                  </td>
                   <td className="text-xs whitespace-nowrap">
                     {!ip.access_watch ? (
                       <span className="text-muted/60">—</span>
@@ -361,6 +378,8 @@ function AddIpModal({
   const [monitored, setMonitored] = useState(true);
   const [accessWatch, setAccessWatch] = useState(false);
   const [bindServerId, setBindServerId] = useState('');
+  const [gateway, setGateway] = useState('');
+  const [bindPrefix, setBindPrefix] = useState('32');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [result, setResult] = useState<{ added: number; failed: { ip: string; reason: string }[] } | null>(null);
@@ -379,6 +398,8 @@ function AddIpModal({
         is_monitored: monitored,
         access_watch: accessWatch,
         bind_server_id: accessWatch && bindServerId ? Number(bindServerId) : null,
+        gateway,
+        bind_prefix: Number(bindPrefix) || 32,
       });
       setResult(res);
       onDone();
@@ -421,6 +442,12 @@ function AddIpModal({
           <Field label="مشتری">
             <input className="input" value={customer} onChange={(e) => setCustomer(e.target.value)} />
           </Field>
+          <Field
+            label="گیت‌وی"
+            hint="برای مستندسازی و تحویل به مشتری. خالی یعنی گیت‌وی بلوک استفاده شود."
+          >
+            <input className="input ltr" value={gateway} onChange={(e) => setGateway(e.target.value)} placeholder="185.1.2.1" />
+          </Field>
           <div className="flex items-end">
             <label className="flex items-center gap-2 text-xs text-muted cursor-pointer pb-2">
               <input type="checkbox" checked={monitored} onChange={(e) => setMonitored(e.target.checked)} />
@@ -437,17 +464,30 @@ function AddIpModal({
           </label>
 
           {accessWatch && (
-            <Field
-              label="سرور لنگر"
-              hint="آی‌پی بیکار به پینگ جواب نمی‌دهد. روی این سرور خودکار بایند می‌شود تا قابل سنجش شود. فقط سروری که ایجنت لنگر رویش نصب است."
-            >
-              <select className="input" value={bindServerId} onChange={(e) => setBindServerId(e.target.value)}>
-                <option value="">بدون لنگر — فقط اگر آی‌پی از قبل به ماشینی وصل است</option>
-                {servers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </Field>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Field
+                label="سرور لنگر"
+                hint="آی‌پی بیکار به پینگ جواب نمی‌دهد. روی این سرور خودکار بایند می‌شود تا قابل سنجش شود. فقط سروری که ایجنت لنگر رویش نصب است."
+              >
+                <select className="input" value={bindServerId} onChange={(e) => setBindServerId(e.target.value)}>
+                  <option value="">بدون لنگر — فقط اگر آی‌پی از قبل به ماشینی وصل است</option>
+                  {servers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field
+                label="پرفیکس بایند"
+                hint="۳۲ را عوض نکنید مگر دیتاسنتر صریح چیز دیگری بخواهد. ماسک واقعی یک مسیر متصل تکراری می‌سازد و می‌تواند با آی‌پی اصلی سرور تداخل کند."
+              >
+                <select className="input" value={bindPrefix} onChange={(e) => setBindPrefix(e.target.value)}>
+                  <option value="32">۳۲ — پیشنهادی</option>
+                  <option value="30">۳۰</option>
+                  <option value="29">۲۹</option>
+                  <option value="24">۲۴</option>
+                </select>
+              </Field>
+            </div>
           )}
         </div>
 
@@ -581,6 +621,8 @@ function EditIpModal({
     is_monitored: false,
     access_watch: false,
     bind_server_id: '',
+    gateway: '',
+    bind_prefix: '32',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -597,6 +639,8 @@ function EditIpModal({
       is_monitored: ip.is_monitored,
       access_watch: ip.access_watch,
       bind_server_id: ip.bind_server_id ? String(ip.bind_server_id) : '',
+      gateway: ip.gateway ?? '',
+      bind_prefix: String(ip.bind_prefix ?? 32),
     });
     setErr(null);
   }, [ip]);
@@ -613,6 +657,7 @@ function EditIpModal({
         ...form,
         server_id: form.server_id || null,
         bind_server_id: form.bind_server_id || null,
+        bind_prefix: Number(form.bind_prefix) || 32,
       });
       onDone();
       onClose();
@@ -663,6 +708,13 @@ function EditIpModal({
           <Field label="مک آدرس">
             <input className="input ltr" value={form.mac} onChange={(e) => setForm((f) => ({ ...f, mac: e.target.value }))} />
           </Field>
+          <Field label="گیت‌وی" hint="خالی یعنی گیت‌وی بلوک استفاده شود">
+            <input
+              className="input ltr"
+              value={form.gateway}
+              onChange={(e) => setForm((f) => ({ ...f, gateway: e.target.value }))}
+            />
+          </Field>
           <div className="flex items-end">
             <label className="flex items-center gap-2 text-xs text-muted cursor-pointer pb-2">
               <input
@@ -685,18 +737,32 @@ function EditIpModal({
             <span className="font-bold">پایش اکسس ایران</span>
           </label>
           {form.access_watch && (
-            <Field label="سرور لنگر" hint="خالی یعنی بدون بایند خودکار">
-              <select
-                className="input"
-                value={form.bind_server_id}
-                onChange={(e) => setForm((f) => ({ ...f, bind_server_id: e.target.value }))}
-              >
-                <option value="">بدون لنگر</option>
-                {servers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </Field>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <Field label="سرور لنگر" hint="خالی یعنی بدون بایند خودکار">
+                <select
+                  className="input"
+                  value={form.bind_server_id}
+                  onChange={(e) => setForm((f) => ({ ...f, bind_server_id: e.target.value }))}
+                >
+                  <option value="">بدون لنگر</option>
+                  {servers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="پرفیکس بایند" hint="۳۲ پیشنهادی است">
+                <select
+                  className="input"
+                  value={form.bind_prefix}
+                  onChange={(e) => setForm((f) => ({ ...f, bind_prefix: e.target.value }))}
+                >
+                  <option value="32">۳۲ — پیشنهادی</option>
+                  <option value="30">۳۰</option>
+                  <option value="29">۲۹</option>
+                  <option value="24">۲۴</option>
+                </select>
+              </Field>
+            </div>
           )}
         </div>
 

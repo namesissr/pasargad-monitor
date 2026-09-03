@@ -31,14 +31,21 @@ export async function GET(req: Request) {
   const server = await authServer(req);
   if (!server) return fail('توکن نامعتبر است', 403);
 
-  const ips = await query<{ ip: string }>(
-    `SELECT host(ip) AS ip FROM ip_addresses
+  const ips = await query<{ ip: string; prefix: number }>(
+    `SELECT host(ip) AS ip, bind_prefix AS prefix
+       FROM ip_addresses
       WHERE bind_server_id = $1 AND access_watch AND version = 4
       ORDER BY ip`,
     [server.id],
   );
 
-  return ok({ ips: ips.map((r) => r.ip), interval: 300 });
+  // «ips» رشته ساده می‌ماند تا ایجنت‌های قدیمی‌تر هم کار کنند؛ پرفیکس در
+  // فهرست جدا می‌آید و ایجنت تازه از آن استفاده می‌کند
+  return ok({
+    ips: ips.map((r) => r.ip),
+    addresses: ips.map((r) => ({ ip: r.ip, prefix: Number(r.prefix) || 32 })),
+    interval: 300,
+  });
 }
 
 interface BindResult {
