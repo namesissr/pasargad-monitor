@@ -72,7 +72,10 @@ export async function POST(req: Request) {
     const inserted = await query<{ cnt: number }>(
       `WITH added AS (
          INSERT INTO ip_addresses (ip, version, subnet_id, status, is_monitored)
-         SELECT (network($1::cidr) + i)::inet, 4, $2, $3, $4
+         -- host() ماسک را جدا می‌کند. بدون آن آدرس به شکل «x.x.x.x/24»
+         -- ذخیره می‌شود و «ip = 'x.x.x.x'::inet» هرگز مطابقت نمی‌کند،
+         -- چون مقایسه inet ماسک را هم حساب می‌کند.
+         SELECT host(network($1::cidr) + i)::inet, 4, $2, $3, $4
            FROM generate_series($5::bigint, $6::bigint) AS i
          ON CONFLICT (ip) DO NOTHING
          RETURNING 1

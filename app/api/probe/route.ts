@@ -82,53 +82,71 @@ export async function POST(req: Request) {
     if (!results.length) return ok({ ok: true, evaluated: 0 });
     if (results.length > 20_000) return fail('تعداد نتیجه‌ها بیش از حد است', 400);
 
-    const touched: number[] = [];
+    // یک جست‌وجوی دسته‌ای به‌جای یکی به‌ازای هر آدرس. با هزاران آی‌پی،
+    // حلقه قبلی دو کوئری در هر آدرس می‌زد — یعنی هزاران رفت‌وبرگشت در
+    // هر دور، هر ده دقیقه.
+    const seen = new Set<string>();
+    const wanted: string[] = [];
+    for (const r of results) {
+      const ipText = String(r.ip ?? '').trim();
+      if (ipText && !seen.has(ipText)) {
+        seen.add(ipText);
+        wanted.push(ipText);
+      }
+    }
+
+    const known = await query<{ id: number; ip: string }>(
+      `SELECT id, host(ip) AS ip FROM ip_addresses WHERE access_watch AND ip = ANY($1::inet[])`,
+      [wanted],
+    );
+    const byIp = new Map(known.map((k) => [k.ip, k.id]));
+
+    const ids: number[] = [];
+    const oks: (boolean | null)[] = [];
+    const times: (number | null)[] = [];
     const skipped: string[] = [];
 
     for (const r of results) {
       const ipText = String(r.ip ?? '').trim();
       if (!ipText) continue;
-      // پینگ به آدرسی که روی خود دیدبان بایند است از لوپ‌بک رد می‌شود و
-      // همیشه موفق است؛ به‌عنوان نتیجه ثبت می‌شود ولی در تصمیم نمی‌آید
-      const isLocal = r.local === true;
-      const isOk = !isLocal && r.ok === true;
-
-      // این جست‌وجو قبلاً «catch(() => null)» داشت. نتیجه‌اش این بود که
-      // پست با کد ۲۰۰ برمی‌گشت و هیچ ردیفی ثبت نمی‌شد، بدون هیچ سرنخی —
-      // نه در لاگ دیدبان، نه در لاگ پنل، نه در پنل. آدرسی که پیدا نشود
-      // حالا شمرده و در پاسخ گزارش می‌شود.
-      const row = await queryOne<{ id: number }>(
-        `SELECT id FROM ip_addresses WHERE ip = $1::inet AND access_watch`,
-        [ipText],
-      );
-      if (!row) {
+      const id = byIp.get(ipText);
+      if (id === undefined) {
+        // این حالت قبلاً «catch(() => null)» بود و بی‌صدا رد می‌شد: پست با
+        // کد ۲۰۰ برمی‌گشت و هیچ ردیفی ثبت نمی‌شد، بدون سرنخ در هیچ لاگی.
         skipped.push(ipText);
         continue;
       }
+      ids.push(id);
+      // پینگ به آدرسی که روی خود دیدبان بایند است از لوپ‌بک رد می‌شود و
+      // همیشه موفق است. NULL یعنی «نتیجه‌ای که نباید قضاوت شود» و در
+      // شمارش پیاپی هم صفر می‌ماند.
+      oks.push(r.local === true ? null : r.ok === true);
+      times.push(Number.isFinite(Number(r.ms)) ? Number(r.ms) : null);
+    }
 
+    if (ids.length) {
       await query(
         `INSERT INTO ip_probe_state (ip_id, probe_id, ok, ms, ok_streak, fail_streak, checked_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())
+         SELECT u.ip_id, $1, u.ok, u.ms,
+                CASE WHEN u.ok IS TRUE  THEN 1 ELSE 0 END,
+                CASE WHEN u.ok IS FALSE THEN 1 ELSE 0 END,
+                now()
+           FROM unnest($2::int[], $3::boolean[], $4::real[]) AS u(ip_id, ok, ms)
          ON CONFLICT (ip_id, probe_id) DO UPDATE SET
            ok          = EXCLUDED.ok,
            ms          = EXCLUDED.ms,
            checked_at  = now(),
-           ok_streak   = CASE WHEN $7 THEN 0
-                              WHEN EXCLUDED.ok THEN ip_probe_state.ok_streak + 1 ELSE 0 END,
-           fail_streak = CASE WHEN $7 THEN 0
-                              WHEN EXCLUDED.ok THEN 0 ELSE ip_probe_state.fail_streak + 1 END`,
-        [
-          row.id,
-          probe.id,
-          isLocal ? null : isOk,
-          Number.isFinite(Number(r.ms)) ? Number(r.ms) : null,
-          isOk ? 1 : 0,
-          isLocal ? 0 : isOk ? 0 : 1,
-          isLocal,
-        ],
+           ok_streak   = CASE WHEN EXCLUDED.ok IS NULL THEN 0
+                              WHEN EXCLUDED.ok THEN ip_probe_state.ok_streak + 1
+                              ELSE 0 END,
+           fail_streak = CASE WHEN EXCLUDED.ok IS NULL THEN 0
+                              WHEN EXCLUDED.ok THEN 0
+                              ELSE ip_probe_state.fail_streak + 1 END`,
+        [probe.id, ids, oks, times],
       );
-      touched.push(row.id);
     }
+
+    const touched = ids;
 
     const transitions = await evaluate(Array.from(new Set(touched)));
     await announce(transitions);
