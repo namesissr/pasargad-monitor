@@ -39,7 +39,31 @@ try:
 except ImportError:                                       # پایتون ۲
     from urllib2 import Request, urlopen, HTTPError
 
-VERSION = "1.2.0"
+VERSION = "1.2.1"
+
+
+def text(value):
+    """
+    هر مقدار را به رشته بومی همین نسخه پایتون تبدیل می‌کند.
+
+    چرا لازم است: در پایتون ۲ متن‌های فارسی این فایل بایت‌اند (پیشوند u
+    ندارند) ولی چیزی که از شبکه می‌آید یونیکد است. قالب‌بندی «بایت ٪ یونیکد»
+    پایتون ۲ را وادار به رمزگشایی اسکی می‌کند و روی اولین حرف فارسی
+    UnicodeDecodeError می‌دهد.
+
+    این دقیقاً یک بار ایجنت را در حلقه ری‌استارت انداخت، و بدترین جایش این
+    بود که فقط در مسیر گزارش خطا رخ می‌داد: ایجنت تا وقتی همه‌چیز درست بود
+    کار می‌کرد و دقیقاً وقتی می‌خواست بگوید چه اشکالی هست، می‌مرد.
+    """
+    if isinstance(value, bytes):
+        return value if bytes is str else value.decode("utf-8", "replace")
+    try:
+        return str(value)
+    except Exception:
+        try:
+            return value.encode("utf-8")
+        except Exception:
+            return repr(value)
 
 
 def say(message):
@@ -49,7 +73,7 @@ def say(message):
     گزینه flush در print پایتون ۳ اضافه شده و در ۲٫۷ وجود ندارد؛ بدون تخلیه،
     لاگ ایجنت در journald تا پر شدن بافر دیده نمی‌شود و عیب‌یابی سخت می‌شود.
     """
-    print(message)
+    print(text(message))
     try:
         sys.stdout.flush()
     except Exception:
@@ -611,7 +635,7 @@ def main():
         except HTTPError as err:
             detail = ""
             try:
-                detail = err.read().decode("utf-8")[:200]
+                detail = text(err.read())[:200]
             except Exception:
                 pass
             fail_streak += 1
@@ -624,7 +648,7 @@ def main():
         except Exception as err:  # noqa: BLE001 — ایجنت هرگز نباید بمیرد
             fail_streak += 1
             if fail_streak in (1, 5, 30) or fail_streak % 60 == 0:
-                say("ارسال ناموفق (%s بار پیاپی): %s" % (fail_streak, err))
+                say("ارسال ناموفق (%s بار پیاپی): %s" % (fail_streak, text(err)))
 
         if sent:
             pending_rx = 0
