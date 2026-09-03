@@ -265,25 +265,15 @@ export default function SettingsPage() {
       <section className="card p-5 space-y-4">
         <h2 className="text-sm font-bold">ویژالیزور</h2>
         <p className="text-xs text-muted">
-          کلید و رمز ای‌پی‌آی در <Mono>.env</Mono> است. این‌ها فقط تعیین می‌کنند روی کدام
-          وی‌پی‌اس کار انجام شود.
+          نودها و کلیدهایشان در صفحه <Mono>ویژالیزور</Mono> تعریف می‌شوند. اینجا فقط تناوب کشف
+          خودکار تعیین می‌شود.
         </p>
-
         <div className="grid sm:grid-cols-2 gap-4">
           <Field
-            label="شناسه وی‌پی‌اس لنگر"
-            hint="یک وی‌پی‌اس خالی که فقط برای نگه‌داشتن آی‌پی‌های اکسس‌شده است. خالی یعنی هیچ تغییری روی ویژالیزور انجام نشود."
+            label="فاصله کشف خودکار (ساعت)"
+            hint="هر چند ساعت فهرست آی‌پی‌ها، بلوک‌ها و مشتری هر آدرس از همه نودها به‌روز شود"
           >
-            <input className="input ltr" value={form.vz_anchor_vpsid ?? ''} onChange={set('vz_anchor_vpsid')} placeholder="1234" />
-          </Field>
-          <Field label="شناسه مخزن آی‌پی" hint="خالی یعنی همه مخزن‌ها">
-            <input className="input ltr" value={form.vz_pool_id ?? ''} onChange={set('vz_pool_id')} placeholder="1" />
-          </Field>
-          <Field
-            label="سقف هر اجرا"
-            hint="تخصیص چند صد آدرس یکجا هم ویژالیزور را کند می‌کند هم پیکربندی شبکه مهمان را"
-          >
-            <input className="input ltr" value={form.vz_max_per_run ?? ''} onChange={set('vz_max_per_run')} placeholder="200" />
+            <input className="input ltr" value={form.vz_discover_hours ?? ''} onChange={set('vz_discover_hours')} placeholder="1" />
           </Field>
         </div>
       </section>

@@ -12,6 +12,9 @@ interface IpRow {
   version: number;
   status: string;
   customer: string | null;
+  customer_manual: boolean;
+  vz_hostname: string | null;
+  vz_node_name: string | null;
   ptr: string | null;
   mac: string | null;
   is_monitored: boolean;
@@ -257,7 +260,25 @@ export default function IpsPage() {
                   </td>
                   <td><IpBadge status={ip.status} /></td>
                   <td className="text-xs">{ip.server_name || <span className="text-muted">—</span>}</td>
-                  <td className="text-xs truncate max-w-[140px]">{ip.customer || <span className="text-muted">—</span>}</td>
+                  <td className="text-xs max-w-[180px]">
+                    {ip.customer ? (
+                      <>
+                        <span className="truncate block" title={ip.customer}>{ip.customer}</span>
+                        {ip.vz_hostname && ip.vz_hostname !== ip.customer && (
+                          <span className="text-muted text-[11px] truncate block ltr" title={ip.vz_hostname}>
+                            {ip.vz_hostname}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                    {ip.vz_node_name && (
+                      <span className="text-muted text-[11px] block" title="نود ویژالیزور">
+                        {ip.vz_node_name}
+                      </span>
+                    )}
+                  </td>
                   <td className="text-xs text-muted truncate max-w-[180px]">{ip.ptr || '—'}</td>
                   <td><Mono className="text-muted">{ip.subnet || '—'}</Mono></td>
                   <td className="text-xs whitespace-nowrap">

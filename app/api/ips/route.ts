@@ -90,10 +90,12 @@ export async function GET(req: Request) {
               i.subnet_id, n.cidr::text AS subnet,
               masklen(n.cidr) AS subnet_prefix,
               host(COALESCE(i.gateway, n.gateway)) AS gateway,
-              i.bind_prefix
+              i.bind_prefix, i.vz_hostname, i.customer_manual,
+              vn.name AS vz_node_name
          FROM ip_addresses i
          LEFT JOIN servers s   ON s.id = i.server_id
          LEFT JOIN ip_subnets n ON n.id = i.subnet_id
+         LEFT JOIN vz_nodes vn ON vn.id = i.vz_node_id
          LEFT JOIN LATERAL (
            SELECT s2.ok, s2.ok_streak, s2.fail_streak
              FROM ip_probe_state s2

@@ -1,67 +1,87 @@
-import { query } from '@/lib/db';
+import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
 import { fail, handle, ok, readJson } from '@/lib/http';
-import { listAllIps, virtualizorConfigured } from '@/lib/virtualizor';
-import { runVzSync } from '@/lib/vz-sync';
-import { getSettings } from '@/lib/settings';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/** وضعیت اتصال و خلاصه مخزن — فقط خواندن، چیزی تغییر نمی‌کند */
+/**
+ * وضعیت و صف درخواست ویژالیزور.
+ *
+ * هیچ تماسی با ویژالیزور از اینجا انجام نمی‌شود. درخواست در صف گذاشته
+ * می‌شود و ورکر ظرف حدود بیست ثانیه برش می‌دارد.
+ *
+ * چرا: این عملیات روی پنل واقعی می‌نویسد و دو پیاده‌سازی از یک عملیات
+ * مخرب دیر یا زود از هم واگرا می‌شوند. یک پیاده‌سازی، در ورکر.
+ */
+
 export async function GET() {
   return handle(async () => {
     await requireUser();
 
-    const configured = virtualizorConfigured();
-    const s = await getSettings();
-    const anchor = String(s.vz_anchor_vpsid || '').trim();
-
-    const runs = await query(
-      `SELECT id, started_at, dry_run, imported, attached, detached, ok, detail
-         FROM vz_sync_runs ORDER BY started_at DESC LIMIT 10`,
+    const nodes = await query(
+      `SELECT n.id, n.name, n.anchor_vpsid, n.is_active, n.last_sync_at, n.last_error,
+              (SELECT COUNT(*)::int FROM ip_addresses i WHERE i.vz_node_id = n.id) AS ip_count,
+              (SELECT COUNT(*)::int FROM ip_addresses i
+                WHERE i.vz_node_id = n.id AND i.vz_vpsid IS NOT NULL) AS assigned_count,
+              (SELECT COUNT(*)::int FROM ip_addresses i
+                WHERE i.vz_node_id = n.id AND i.access_watch) AS watched_count
+         FROM vz_nodes n ORDER BY n.name`,
     );
 
-    if (!configured) {
-      return ok({ configured: false, anchor, runs, summary: null });
-    }
+    const runs = await query(
+      `SELECT r.id, r.node_id, n.name AS node_name, r.started_at, r.kind, r.dry_run,
+              r.discovered, r.attached, r.detached, r.ok, r.detail
+         FROM vz_sync_runs r
+         LEFT JOIN vz_nodes n ON n.id = r.node_id
+        ORDER BY r.started_at DESC LIMIT 20`,
+    );
 
-    const listing = await listAllIps({ poolId: String(s.vz_pool_id || '').trim() || undefined });
-    if (!listing.ok) {
-      return ok({ configured: true, anchor, runs, summary: null, error: listing.error });
-    }
+    const pending = await queryOne<{ cnt: number }>(
+      `SELECT COUNT(*)::int AS cnt FROM vz_sync_queue WHERE taken_at IS NULL`,
+    );
 
-    const onAnchor = anchor ? listing.ips.filter((r) => r.vpsid === anchor).length : 0;
-    const free = listing.ips.filter((r) => r.vpsid === '0' || r.vpsid === '').length;
-
-    return ok({
-      configured: true,
-      anchor,
-      runs,
-      summary: {
-        total: listing.ips.length,
-        free,
-        onAnchor,
-        inUse: listing.ips.length - free - onAnchor,
-      },
-    });
+    return ok({ nodes, runs, pending: pending?.cnt ?? 0 });
   });
 }
 
-/**
- * اجرای همگام‌سازی.
- *
- * حالت آزمایشی پیش‌فرض است و برای اجرای واقعی باید صریح «apply: true»
- * فرستاده شود. این کار روی پنل ویژالیزور واقعی می‌نویسد.
- */
+/** صف‌کردن یک درخواست — کشف، یا اعمال آزمایشی و واقعی */
 export async function POST(req: Request) {
   return handle(async () => {
     await requireUser();
-    const body = await readJson<{ apply?: boolean }>(req);
-    const apply = body.apply === true;
+    const body = await readJson<{ nodeId?: number; kind?: string; apply?: boolean }>(req);
 
-    const report = await runVzSync({ dryRun: !apply });
-    if (!report.ok) return fail(report.error || 'همگام‌سازی ناموفق بود', 502);
-    return ok(report);
+    const nodeId = Number(body.nodeId);
+    if (!Number.isInteger(nodeId)) return fail('نود را انتخاب کنید', 400);
+
+    const kind = body.kind === 'apply' ? 'apply' : 'discover';
+    const dryRun = kind === 'apply' ? body.apply !== true : true;
+
+    const node = await queryOne<{ id: number; anchor_vpsid: string | null; is_active: boolean }>(
+      `SELECT id, anchor_vpsid, is_active FROM vz_nodes WHERE id = $1`,
+      [nodeId],
+    );
+    if (!node) return fail('نود پیدا نشد', 404);
+    if (!node.is_active) return fail('این نود غیرفعال است', 400);
+    if (kind === 'apply' && !String(node.anchor_vpsid || '').trim()) {
+      return fail('برای این نود شناسه وی‌پی‌اس لنگر تعیین نشده است', 400);
+    }
+
+    // درخواست تکراری صف را پر نکند — کاربری که دکمه را دوبار می‌زند نباید
+    // دو بار روی پنل واقعی بنویسد
+    const dup = await queryOne<{ id: number }>(
+      `SELECT id FROM vz_sync_queue
+        WHERE node_id = $1 AND kind = $2 AND dry_run = $3 AND taken_at IS NULL`,
+      [nodeId, kind, dryRun],
+    );
+    if (dup) return ok({ queued: false, reason: 'همین درخواست از قبل در صف است' });
+
+    await query(`INSERT INTO vz_sync_queue (node_id, kind, dry_run) VALUES ($1, $2, $3)`, [
+      nodeId,
+      kind,
+      dryRun,
+    ]);
+
+    return ok({ queued: true });
   });
 }

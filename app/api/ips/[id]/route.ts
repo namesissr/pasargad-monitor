@@ -33,6 +33,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const sets: string[] = [];
     const values: unknown[] = [];
 
+    // نوشتن دستی مشتری علامت می‌خورد. بدون این، کشف ساعتی ویژالیزور
+    // ورودی ادمین را با مقدار خودش بازنویسی می‌کرد و کسی نمی‌فهمید چرا
+    // اسمی که نوشته بود ناپدید شد.
+    if ('customer' in body) {
+      sets.push(`customer_manual = ${String(body.customer ?? '').trim() ? 'TRUE' : 'FALSE'}`);
+    }
+
     for (const [key, kind] of Object.entries(EDITABLE)) {
       if (!(key in body)) continue;
       const raw = body[key];

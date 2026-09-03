@@ -3,6 +3,7 @@ import { checkServers, checkIps, checkProbes } from './checks.mjs';
 import { dispatchNotifications } from './incidents.mjs';
 import { evaluateThresholds } from './alerts.mjs';
 import { rollupHourly, rollupDaily, purgeOld } from './rollup.mjs';
+import { discoverAll, drainQueue } from './vz-sync.mjs';
 import { hashPassword } from './hash.mjs';
 
 /**
@@ -20,6 +21,11 @@ const CYCLE = {
   threshold: 60_000,
   rollup: 300_000,    // هر پنج دقیقه — گزارش‌ها حداکثر پنج دقیقه عقب می‌مانند
   purge: 6 * 3600_000,
+  // صف درخواست پنل. کوتاه است چون کاربر منتظر نتیجه دکمه‌ای است که زده.
+  vzQueue: 20_000,
+  // کشف نودها. خود discoverAll فاصله واقعی هر نود را از تنظیمات می‌خواند؛
+  // این فقط تناوب بررسی است.
+  vzDiscover: 600_000,
 };
 
 let stopping = false;
@@ -114,6 +120,9 @@ async function main() {
   );
 
   schedule('پاک‌سازی', purgeOld, async () => CYCLE.purge);
+
+  schedule('صف ویژالیزور', drainQueue, async () => CYCLE.vzQueue);
+  schedule('کشف ویژالیزور', discoverAll, async () => CYCLE.vzDiscover);
 }
 
 for (const sig of ['SIGTERM', 'SIGINT']) {
