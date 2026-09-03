@@ -15,6 +15,7 @@ const ALLOWED = [
   'telegram_enabled',
   'telegram_chat_ids',
   'vz_discover_hours',
+  'vz_auto_apply',
   'alert_repeat_min',
   'down_after_sec',
   'raw_retention_days',

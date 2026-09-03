@@ -1,6 +1,7 @@
 import { query, queryOne } from '@/lib/db';
 import { fail, ok, readJson } from '@/lib/http';
 import { notify } from '@/lib/notify';
+import { getSettings } from '@/lib/settings';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -150,6 +151,7 @@ export async function POST(req: Request) {
 
     const transitions = await evaluate(Array.from(new Set(touched)));
     await announce(transitions);
+    await queueRelease(transitions);
 
     if (skipped.length) {
       console.error('[probe] آدرس‌های ثبت‌نشده یا بدون تیک پایش:', skipped.join(', '));
@@ -174,6 +176,54 @@ interface Transition {
   from: string;
   to: 'blocked' | 'released';
   blockedDays: number | null;
+}
+
+/**
+ * صف‌کردن اعمال برای آی‌پی‌های تازه‌آزادشده.
+ *
+ * آی‌پی که «آزاد شد» می‌گیرد تا وقتی از وی‌پی‌اس لنگر برداشته نشود عملا
+ * اشغال است و برای ساخت سرور تازه قابل استفاده نیست. منتظر ماندن تا
+ * چرخه بعدی یا کلیک ادمین یعنی ساعت‌ها یا روزها اشغال بی‌مورد.
+ *
+ * پس همان لحظه یک درخواست اعمال برای نود همان آی‌پی در صف می‌رود؛ ورکر
+ * ظرف حدود بیست ثانیه برش می‌دارد.
+ *
+ * سه شرط: تنظیم vz_auto_apply روشن باشد، نود شناسه لنگر داشته باشد، و
+ * درخواست مشابهی از قبل در صف نباشد — وگرنه چند آزادشدن همزمان چند
+ * نوشتن تکراری روی ویژالیزور می‌ساخت.
+ */
+async function queueRelease(transitions: Transition[]): Promise<void> {
+  const released = transitions.filter((t) => t.to === 'released').map((t) => t.ipId);
+  if (!released.length) return;
+
+  const s = await getSettings();
+  if (s.vz_auto_apply === 'false') return;
+
+  const queued = await query<{ node_id: number }>(
+    `INSERT INTO vz_sync_queue (node_id, kind, dry_run)
+     SELECT DISTINCT i.vz_node_id, 'apply', FALSE
+       FROM ip_addresses i
+       JOIN vz_nodes n ON n.id = i.vz_node_id
+      WHERE i.id = ANY($1::int[])
+        AND n.is_active
+        AND COALESCE(n.anchor_vpsid, '') <> ''
+        AND NOT EXISTS (
+          SELECT 1 FROM vz_sync_queue q
+           WHERE q.node_id = i.vz_node_id AND q.kind = 'apply'
+             AND NOT q.dry_run AND q.taken_at IS NULL
+        )
+     RETURNING node_id`,
+    [released],
+  ).catch((e) => {
+    console.error('[probe] صف‌کردن اعمال ناموفق:', e instanceof Error ? e.message : e);
+    return [] as { node_id: number }[];
+  });
+
+  if (queued.length) {
+    console.log(
+      `[probe] ${released.length} آی‌پی آزاد شد؛ اعمال برای ${queued.length} نود در صف رفت`,
+    );
+  }
 }
 
 /** ارزیابی وضعیت آی‌پی‌های تازه‌گزارش‌شده */

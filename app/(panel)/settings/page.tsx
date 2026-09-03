@@ -273,7 +273,16 @@ export default function SettingsPage() {
             label="فاصله کشف خودکار (ساعت)"
             hint="هر چند ساعت فهرست آی‌پی‌ها، بلوک‌ها و مشتری هر آدرس از همه نودها به‌روز شود"
           >
-            <input className="input ltr" value={form.vz_discover_hours ?? ''} onChange={set('vz_discover_hours')} placeholder="1" />
+            <input className="input ltr" value={form.vz_discover_hours ?? ''} onChange={set('vz_discover_hours')} placeholder="3" />
+          </Field>
+          <Field
+            label="آزادسازی خودکار"
+            hint="لحظه‌ای که آی‌پی «آزاد شد» بگیرد، خودکار از لنگر برداشته و به مخزن ویژالیزور برگردد — بدون انتظار تا چرخه بعدی"
+          >
+            <select className="input" value={form.vz_auto_apply ?? 'true'} onChange={set('vz_auto_apply')}>
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال — فقط دستی</option>
+            </select>
           </Field>
         </div>
       </section>

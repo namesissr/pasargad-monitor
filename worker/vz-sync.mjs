@@ -330,6 +330,28 @@ export async function discoverNode(node) {
     );
   }
 
+  // هر آدرسی که روی وی‌پی‌اس لنگر نشسته، تحت مدیریت پنل است.
+  //
+  // چرا لازم شد: جداکردن فقط آدرسی را برمی‌داشت که managed_by_panel
+  // داشت، و آن علامت فقط با یک اعمال موفق ست می‌شد. تا وقتی اعمال کار
+  // نمی‌کرد، هیچ آدرس آزادشده‌ای هم از لنگر برداشته نمی‌شد — یعنی همان
+  // آی‌پی که «آزاد شد» گرفته بود، همچنان اشغال می‌ماند.
+  //
+  // محافظ اصلی سر جایش است: آدرسی که روی وی‌پی‌اس دیگری باشد هرگز دست
+  // نمی‌خورد. لنگر به‌تعریف اختصاصی است و مشتری رویش نیست.
+  const anchorVpsid = String(node.anchor_vpsid || '').trim();
+  if (anchorVpsid) {
+    const adopted = await q(
+      `UPDATE ip_addresses SET managed_by_panel = TRUE, updated_at = now()
+        WHERE vz_node_id = $1 AND vz_vpsid = $2 AND NOT managed_by_panel
+        RETURNING id`,
+      [node.id, anchorVpsid],
+    );
+    if (adopted.length) {
+      log(`نود ${node.name}: ${adopted.length} آدرس روی لنگر تحت مدیریت پنل ثبت شد`);
+    }
+  }
+
   // آدرس‌های قفل‌شده: علامت می‌خورند و از پایش خارج می‌شوند. حذف خودکار
   // نمی‌شوند چون ممکن است یادداشت یا نام مشتری داشته باشند.
   if (lockedAddr.length) {
@@ -498,7 +520,7 @@ export async function applyNode(node, { dryRun = true } = {}) {
 
 /** کشف دوره‌ای همه نودهای فعال */
 export async function discoverAll() {
-  const hours = Math.max(1, await settingNum('vz_discover_hours', 1));
+  const hours = Math.max(1, await settingNum('vz_discover_hours', 3));
   const nodes = await q(
     `SELECT * FROM vz_nodes
       WHERE is_active
