@@ -215,6 +215,7 @@ export default function VirtualizorPage() {
                   <th className="text-start py-1">چسبید</th>
                   <th className="text-start py-1">جدا شد</th>
                   <th className="text-start py-1">نتیجه</th>
+                  <th className="text-start py-1">شرح</th>
                 </tr>
               </thead>
               <tbody>
@@ -229,12 +230,19 @@ export default function VirtualizorPage() {
                     <td className="py-1.5">{faNum(r.discovered)}</td>
                     <td className="py-1.5">{faNum(r.attached)}</td>
                     <td className="py-1.5">{faNum(r.detached)}</td>
-                    <td className="py-1.5">
+                    <td className="py-1.5 whitespace-nowrap">
                       {r.ok ? (
-                        <span className="text-ok" title={r.detail || undefined}>موفق</span>
+                        <span className="text-ok">موفق</span>
                       ) : (
-                        <span className="text-danger" title={r.detail || undefined}>ناموفق</span>
+                        <span className="text-danger">ناموفق</span>
                       )}
+                    </td>
+                    {/* شرح تا حالا فقط در تولتیپ بود. مهم‌ترین اطلاعات هر
+                        اجرا — از جمله اینکه دیسک در بدنه هست یا نه — آنجا
+                        پنهان می‌ماند و کسی که نمی‌داند باید موس نگه دارد،
+                        هرگز نمی‌بیندش. */}
+                    <td className={`py-1.5 ${r.ok ? 'text-muted' : 'text-danger'}`}>
+                      {r.detail || '—'}
                     </td>
                   </tr>
                 ))}
