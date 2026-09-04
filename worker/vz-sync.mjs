@@ -189,16 +189,23 @@ export async function discoverNode(node) {
   for (const block of blocks.values()) {
     if (!block) continue;
     await q(
-      `INSERT INTO ip_subnets (cidr, version, gateway, label, vz_node_id, vz_poolid)
-       VALUES ($1::cidr, 4, NULLIF($2,'')::inet, NULLIF($3,''), $4, NULLIF($5,''))
+      `INSERT INTO ip_subnets (cidr, version, gateway, label, vz_node_id, vz_poolid, vz_total_ips)
+       VALUES ($1::cidr, 4, NULLIF($2,'')::inet, NULLIF($3,''), $4, NULLIF($5,''), $6)
        -- یکتایی ترکیبی است: یک سی‌آی‌دی‌آر می‌تواند در دو هایپروایزر
        -- باشد و هرکدام ردیف خودش را دارد
        ON CONFLICT (cidr, vz_node_id) WHERE vz_node_id IS NOT NULL DO UPDATE
          SET gateway    = COALESCE(EXCLUDED.gateway, ip_subnets.gateway),
              label      = COALESCE(EXCLUDED.label, ip_subnets.label),
              vz_node_id = EXCLUDED.vz_node_id,
-             vz_poolid  = COALESCE(EXCLUDED.vz_poolid, ip_subnets.vz_poolid)`,
-      [block.cidr, block.gateway, block.name || null, node.id, block.poolid || null],
+             vz_poolid  = COALESCE(EXCLUDED.vz_poolid, ip_subnets.vz_poolid),
+             -- تعداد اعلامی هایپروایزر. یک بار در ویرایش هدف تعارض از قلم
+             -- افتاد و ستون خالی ماند در حالی که لاگ مقدار درست را نشان
+             -- می‌داد — همان اختلافی که مدتی دنبالش گشتیم.
+             vz_total_ips = COALESCE(EXCLUDED.vz_total_ips, ip_subnets.vz_total_ips)`,
+      [
+        block.cidr, block.gateway, block.name || null, node.id,
+        block.poolid || null, block.total,
+      ],
     ).catch((e) => logErr(`بلوک ${block.cidr} ثبت نشد:`, e.message));
   }
 
@@ -463,16 +470,6 @@ export async function discoverNode(node) {
   return { ok: true, discovered: addr.length };
 }
 
-/**
- * اعمال روی یک نود — می‌نویسد.
- *
- * محافظ‌ها، هرکدام برای خطری که واقعاً می‌تواند رخ دهد:
- *   • بدون شناسه لنگر هیچ نوشتنی انجام نمی‌شود
- *   • آدرسی که به وی‌پی‌اس دیگری تخصیص یافته دست نمی‌خورد
- *   • از لنگر فقط آدرسی برداشته می‌شود که پنل خودش چسبانده
- *   • آدرس قفل‌شده دست نمی‌خورد
- *   • سقف هر اجرا
- */
 /**
  * اعمال روی یک هایپروایزر — می‌نویسد.
  *

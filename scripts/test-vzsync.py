@@ -214,6 +214,9 @@ def main():
         ("if (row.locked) {", "آدرس قفل‌شده در کشف وارد نمی‌شود"),
         ("const autoWatchable = free && !row.isReserved;",
          "آدرس رزروشده خودکار تحت پایش نمی‌رود"),
+        # این ستون یک بار در ویرایشی از قلم افتاد و ستون خالی ماند
+        ("vz_total_ips = COALESCE(EXCLUDED.vz_total_ips", "تعداد اعلامی بلوک نوشته می‌شود"),
+        ("block.poolid || null, block.total,", "تعداد در پارامترها فرستاده می‌شود"),
         ("WHERE i.vz_node_id = $1 AND i.vz_vpsid = a.vpsid",
          "آدرس روی هر یک از لنگرها تحت مدیریت پنل ثبت می‌شود"),
         ("[node.id, allAddr],", "تشخیص حذف از نود با فهرست کامل، نه فهرست واردشده"),
