@@ -28,10 +28,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS ip_subnets_cidr_manual_uq
   ON ip_subnets (cidr) WHERE vz_node_id IS NULL;
 
 -- برای هر ترکیب بلوک و نودی که آدرس دارد ولی ردیف ندارد، ردیف بساز.
--- لنگر و برچسب از ردیف موجود کپی می‌شوند تا پیکربندی از دست نرود.
-INSERT INTO ip_subnets (cidr, version, gateway, label, provider, location, notes,
+--
+-- برچسب کپی نمی‌شود: نام بلوک از خود هایپروایزر می‌آید و نام یکی روی
+-- دیگری گمراه‌کننده است. کشف بعدی نام درست را می‌نویسد.
+--
+-- لنگر کپی می‌شود تا پیکربندی از دست نرود، ولی باید بازبینی شود: دو بخش
+-- روی دو هایپروایزرند و احتمالا لنگرهای متفاوتی لازم دارند.
+INSERT INTO ip_subnets (cidr, version, gateway, provider, location, notes,
                         anchor_id, vz_node_id)
-SELECT DISTINCT s.cidr, s.version, s.gateway, s.label, s.provider, s.location, s.notes,
+SELECT DISTINCT s.cidr, s.version, s.gateway, s.provider, s.location, s.notes,
        s.anchor_id, i.vz_node_id
   FROM ip_addresses i
   JOIN ip_subnets s ON s.id = i.subnet_id
