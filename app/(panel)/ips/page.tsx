@@ -67,6 +67,7 @@ interface SubnetRow {
   cidr: string;
   anchor_id: number | null;
   anchor_name: string | null;
+  vz_total_ips: number | null;
   version: number;
   gateway: string | null;
   provider: string | null;
@@ -121,7 +122,7 @@ export default function IpsPage() {
       setAnchorErr(e instanceof ApiError ? e.message : 'تعیین لنگر انجام نشد');
     }
   }
-  const servers = useLoad<{ servers: { id: number; name: string }[] }>('/api/servers?anchors=1');
+  const servers = useLoad<{ servers: { id: number; name: string }[] }>('/api/servers?role=all');
 
   const total = data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / (data?.limit ?? 100)));
@@ -447,8 +448,8 @@ export default function IpsPage() {
               <thead>
                 <tr>
                   <th>بلوک</th>
+                  <th>نام</th>
                   <th>گیت‌وی</th>
-                  <th>ارائه‌دهنده</th>
                   <th>ثبت‌شده</th>
                   <th>تخصیص‌یافته</th>
                   <th>آزاد</th>
@@ -461,9 +462,24 @@ export default function IpsPage() {
                 {(subnets.data?.subnets ?? []).map((n) => (
                   <tr key={n.id}>
                     <td><Mono className="text-cyan">{n.cidr}</Mono></td>
+                    {/* نام همان چیزی است که در پنل هایپروایزر می‌بینید؛
+                        بدون آن دو فهرست قابل تطبیق نیستند */}
+                    <td className="text-xs max-w-[200px]">
+                      <span className="truncate block" title={n.label || undefined}>
+                        {n.label || n.provider || '—'}
+                      </span>
+                    </td>
                     <td><Mono className="text-muted">{n.gateway || '—'}</Mono></td>
-                    <td className="text-xs">{n.provider || '—'}</td>
-                    <td className="text-xs">{faNum(n.total)}</td>
+                    <td className="text-xs">
+                      {faNum(n.total)}
+                      {/* اگر شمارش پنل با شمارش هایپروایزر نخواند، همین‌جا
+                          دیده شود — نه اینکه کسی دو پنل را دستی مقایسه کند */}
+                      {n.vz_total_ips !== null && n.vz_total_ips !== n.total && (
+                        <span className="text-amber" title="تعداد اعلامی هایپروایزر">
+                          {' '}/ {faNum(n.vz_total_ips)}
+                        </span>
+                      )}
+                    </td>
                     <td className="text-xs text-cyan">{faNum(n.assigned)}</td>
                     <td className="text-xs text-ok">{faNum(n.free)}</td>
                     <td className="text-xs">

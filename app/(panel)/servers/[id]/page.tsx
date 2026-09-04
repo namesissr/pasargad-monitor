@@ -55,6 +55,7 @@ interface Detail {
     status: string;
     last_seen_at: string | null;
     is_active: boolean;
+    is_monitor: boolean;
     notes: string | null;
     cpu_percent: number | null;
     ram_used_bytes: number | null;
@@ -770,6 +771,7 @@ function EditServerModal({
     monthly_cost: String(server.monthly_cost ?? 0),
     notes: server.notes ?? '',
     status: server.status,
+    is_monitor: server.is_monitor ? 'true' : 'false',
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -784,6 +786,7 @@ function EditServerModal({
     try {
       await api.patch(`/api/servers/${server.id}`, {
         ...form,
+        is_monitor: form.is_monitor === 'true',
         datacenter_id: form.datacenter_id ? Number(form.datacenter_id) : null,
         ssh_port: Number(form.ssh_port) || 22,
         port_mbps: Number(form.port_mbps) || 1000,
@@ -843,6 +846,15 @@ function EditServerModal({
               <option value="down">قطع</option>
               <option value="unknown">نامشخص</option>
               <option value="maintenance">تعمیرات</option>
+            </select>
+          </Field>
+          <Field
+            label="نوع سرور"
+            hint="سرور پایش موجودی فروش نیست و در گزارش مصرف و نمای زنده نمی‌آید. لنگرها خودکار تشخیص داده می‌شوند؛ این برای دیدبان‌هاست."
+          >
+            <select className="input" value={form.is_monitor} onChange={set('is_monitor')}>
+              <option value="false">سرور اختصاصی</option>
+              <option value="true">سرور پایش</option>
             </select>
           </Field>
         </div>

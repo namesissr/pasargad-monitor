@@ -147,7 +147,7 @@ export async function discoverNode(node) {
   // فهرست مخزن‌ها فقط مکمل است: مخزنی که هیچ آی‌پی‌ای ندارد از آنجا می‌آید.
   const blocks = new Map();
 
-  const addBlock = (poolid, name, gateway, netmask, source) => {
+  const addBlock = (poolid, name, gateway, netmask, source, total) => {
     const prefix = maskToPrefix(netmask);
     const cidr = networkOf(gateway, prefix);
     if (!cidr) {
@@ -160,7 +160,7 @@ export async function discoverNode(node) {
       }
       return;
     }
-    if (!blocks.has(cidr)) blocks.set(cidr, { cidr, poolid, name, gateway });
+    if (!blocks.has(cidr)) blocks.set(cidr, { cidr, poolid, name, gateway, total: total ?? null });
   };
 
   for (const row of ips.items) {
@@ -169,7 +169,7 @@ export async function discoverNode(node) {
   }
   if (pools.ok) {
     for (const pool of pools.items) {
-      addBlock(pool.poolid, pool.name, pool.gateway, pool.netmask, 'از مخزن');
+      addBlock(pool.poolid, pool.name, pool.gateway, pool.netmask, 'از مخزن', pool.totalIps);
     }
   }
 

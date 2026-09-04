@@ -77,15 +77,18 @@ export async function transaction<T>(fn: (q: ScopedQuery) => Promise<T>): Promis
 }
 
 /**
- * سرور لنگر: وی‌پی‌اسی که فقط برای نگه‌داشتن آی‌پی‌های اکسس‌شده ساخته شده.
+ * سرور پایش: لنگر یا دیدبان — وی‌پی‌اسی که برای خود سیستم پایش است، نه
+ * موجودی فروش. مشتری ندارد و ترافیکش ناچیز است، پس در گزارش مصرف و نمای
+ * زنده فقط نویز می‌سازد.
  *
- * این‌ها موجودی واقعی نیستند و در فهرست سرورها، گزارش مصرف و لاگ ترافیک
- * فقط نویز می‌سازند — ترافیکشان ناچیز است و مشتری ندارند.
- *
- * تشخیص از روی vz_anchors است نه یک ستون جدا، تا وقتی وی‌پی‌اسی دیگر
- * لنگر نباشد خودکار به فهرست‌ها برگردد.
+ * تشخیص دو راه دارد و هر دو لازم است:
+ *   • خودکار از vz_anchors، تا وی‌پی‌اسی که دیگر لنگر نیست خودش برگردد
+ *   • ستون is_monitor، برای دیدبان‌ها که در هیچ جدولی به‌عنوان لنگر ثبت
+ *     نمی‌شوند
  *
  * هرجا استفاده می‌شود، جدول servers باید با نام «s» صدا زده شده باشد.
  */
-export const NOT_ANCHOR_SERVER =
-  'NOT EXISTS (SELECT 1 FROM vz_anchors va WHERE va.bind_server_id = s.id)';
+export const IS_MONITOR_SERVER =
+  '(s.is_monitor OR EXISTS (SELECT 1 FROM vz_anchors va WHERE va.bind_server_id = s.id))';
+
+export const NOT_ANCHOR_SERVER = `NOT ${IS_MONITOR_SERVER}`;

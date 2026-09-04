@@ -71,6 +71,40 @@ def map_ip(r, block):
     }
 
 
+def ip_to_int(value):
+    parts = str(value or "").strip().split(".")
+    if len(parts) != 4:
+        return None
+    out = 0
+    for part in parts:
+        if not part.isdigit() or int(part) > 255:
+            return None
+        out = out * 256 + int(part)
+    return out
+
+
+def int_to_ip(v):
+    return "%d.%d.%d.%d" % ((v >> 24) & 255, (v >> 16) & 255, (v >> 8) & 255, v & 255)
+
+
+def enumerate_block(block, registered, max_enum=8192):
+    """
+    بازسازی شمارش بازه بلوک در listIps.
+
+    سولوس فقط آدرس‌های ثبت‌شده را برمی‌گرداند. آدرس آزادی که هرگز به سروری
+    داده نشده در آن فهرست نیست — و همان‌ها دقیقا آن‌هایی هستند که باید
+    پایش شوند.
+    """
+    first = ip_to_int(block.get("from"))
+    last = ip_to_int(block.get("to"))
+    if first is None or last is None or last < first:
+        return []
+    if last - first + 1 > max_enum:
+        return []
+    seen = set(registered)
+    return [int_to_ip(v) for v in range(first, last + 1) if int_to_ip(v) not in seen]
+
+
 def plan_write(on_anchor, want, cap=200):
     """بازسازی تصمیم writeVpsIps: چه چسبانده و چه برداشته شود"""
     want_set = set(want)
@@ -153,6 +187,24 @@ def main():
 
     print("")
 
+    # ── شمارش بازه بلوک ─────────────────────────────────────────
+    small = {"from": "2.188.255.130", "to": "2.188.255.135"}
+    extra = enumerate_block(small, ["2.188.255.132"])
+    check("بازه: آدرس‌های ثبت‌نشده اضافه می‌شوند", len(extra), 5)
+    check("بازه: آدرس ثبت‌شده تکرار نمی‌شود", "2.188.255.132" in extra, False)
+    check("بازه: مرزها هم می‌آیند",
+          ("2.188.255.130" in extra, "2.188.255.135" in extra), (True, True))
+
+    # بلوک بزرگ‌تر از سقف اصلا شمرده نمی‌شود؛ ساختن ده‌ها هزار ردیف در پنل
+    # نه مفید است نه سریع
+    big = {"from": "10.0.0.0", "to": "10.0.255.255"}
+    check("بازه: بلوک بزرگ‌تر از سقف شمرده نمی‌شود", enumerate_block(big, []), [])
+
+    check("بازه: ورودی خراب", enumerate_block({"from": "x", "to": "y"}, []), [])
+    check("بازه: بازه وارونه", enumerate_block({"from": "1.1.1.9", "to": "1.1.1.1"}, []), [])
+
+    print("")
+
     # ── تصمیم نوشتن ─────────────────────────────────────────────
     A = {"ip": "1.1.1.1", "ipid": "10", "isPrimary": True}
     B = {"ip": "1.1.1.2", "ipid": "11", "isPrimary": False}
@@ -190,6 +242,9 @@ def main():
         ("type: 'IPv4',", "نوع در بدنه چسباندن"),
         ("ids: detachable.map((r) => Number(r.ipid))", "بدنه دسته‌ای برداشتن"),
         ("delayed: false", "اجرای بی‌درنگ، نه صف تاخیری"),
+        ("const MAX_ENUM = 8192;", "سقف شمارش بازه"),
+        ("if (seen.has(ip)) continue;", "آدرس ثبت‌شده دوباره ساخته نمی‌شود"),
+        ("totalIps: Number.isFinite(Number(b.total_ips_count))", "تعداد اعلامی بلوک"),
         ("customer: user ? str(user.email) : ''", "مشتری از ایمیل مالک"),
     ]:
         if needle in src:

@@ -377,7 +377,7 @@ function NodeForm({
     bind_server_id: node?.bind_server_id ? String(node.bind_server_id) : '',
     auto_watch_free: node?.auto_watch_free ?? true,
   });
-  const servers = useLoad<{ servers: ServerOption[] }>('/api/servers?anchors=1');
+  const servers = useLoad<{ servers: ServerOption[] }>('/api/servers?role=all');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -568,7 +568,7 @@ function AnchorForm({
     max_per_run: String(anchor?.max_per_run ?? 200),
     is_default: anchor?.is_default ?? false,
   });
-  const servers = useLoad<{ servers: ServerOption[] }>('/api/servers?anchors=1');
+  const servers = useLoad<{ servers: ServerOption[] }>('/api/servers?role=all');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 

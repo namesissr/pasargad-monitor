@@ -1,4 +1,4 @@
-import { NOT_ANCHOR_SERVER, query, queryOne } from '@/lib/db';
+import { IS_MONITOR_SERVER, NOT_ANCHOR_SERVER, query, queryOne } from '@/lib/db';
 import { generateAgentToken, requireUser } from '@/lib/auth';
 import { fail, handle, ok, readJson } from '@/lib/http';
 import { getSetting } from '@/lib/settings';
@@ -38,7 +38,9 @@ SELECT
   COALESCE(t.rx, 0)::float8  AS period_rx,
   COALESCE(t.tx, 0)::float8  AS period_tx,
   COALESCE(ipc.cnt, 0)::int  AS ip_count,
-  COALESCE(inc.cnt, 0)::int  AS open_incidents
+  COALESCE(inc.cnt, 0)::int  AS open_incidents,
+  s.is_monitor,
+  EXISTS (SELECT 1 FROM vz_anchors va WHERE va.bind_server_id = s.id) AS is_anchor
 FROM servers s
 LEFT JOIN datacenters dc ON dc.id = s.datacenter_id
 LEFT JOIN LATERAL (
@@ -74,10 +76,15 @@ export async function GET(req: Request) {
 
     if (!includeInactive) where.push('s.is_active');
 
-    // سرورهای لنگر پنهان‌اند مگر صریح خواسته شوند. فرم انتخاب لنگر
-    // «anchors=1» می‌فرستد، وگرنه لنگری که از قبل انتخاب شده در فهرست
-    // خودش پیدا نمی‌شد.
-    if (url.searchParams.get('anchors') !== '1') where.push(NOT_ANCHOR_SERVER);
+    // سه نما: سرور اختصاصی (پیش‌فرض)، سرور پایش، و همه.
+    //
+    // «همه» برای فرم‌هایی است که باید لنگر از قبل انتخاب‌شده را هم ببینند،
+    // وگرنه در فهرست خودش پیدا نمی‌شد.
+    const role =
+      url.searchParams.get('role') ||
+      (url.searchParams.get('anchors') === '1' ? 'all' : 'dedicated');
+    if (role === 'monitor') where.push(IS_MONITOR_SERVER);
+    else if (role !== 'all') where.push(NOT_ANCHOR_SERVER);
     if (datacenterId === 'none') {
       where.push('s.datacenter_id IS NULL');
     } else if (datacenterId && datacenterId !== 'all') {

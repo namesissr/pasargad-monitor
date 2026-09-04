@@ -30,6 +30,7 @@ const EDITABLE: Record<string, 'text' | 'int' | 'bigint' | 'inet' | 'bool' | 'nu
   notes: 'text',
   status: 'text',
   is_active: 'bool',
+  is_monitor: 'bool',
 };
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
@@ -58,7 +59,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
               s.included_tb::float8  AS included_tb,
               s.included_ips,
               s.agent_token, s.agent_version, s.net_iface, s.status, s.last_seen_at, s.boot_time,
-              s.is_active, s.notes, s.created_at,
+              s.is_active, s.is_monitor, s.notes, s.created_at,
               m.ts AS metric_ts, m.cpu_percent,
               m.ram_used_bytes::float8 AS ram_used_bytes,
               m.disk_used_bytes::float8 AS disk_used_bytes,

@@ -65,6 +65,8 @@ export default function ServersPage() {
   const [showAll, setShowAll] = useState(false);
   const [adding, setAdding] = useState(false);
   const [datacenterId, setDatacenterId] = useState('all');
+  // دو نما: سرور اختصاصی (موجودی فروش) و سرور پایش (لنگر و دیدبان)
+  const [role, setRole] = useState<'dedicated' | 'monitor'>('dedicated');
 
   // اگر از صفحه دیتاسنترها آمده‌ایم، فیلتر از آدرس خوانده می‌شود
   useEffect(() => {
@@ -74,6 +76,7 @@ export default function ServersPage() {
 
   const url = `/api/servers?${new URLSearchParams({
     q,
+    role,
     datacenter_id: datacenterId,
     ...(showAll ? { all: '1' } : {}),
   })}`;
@@ -99,6 +102,28 @@ export default function ServersPage() {
         <button type="button" className="btn-primary" onClick={() => setAdding(true)}>
           + افزودن سرور
         </button>
+      </div>
+
+      {/* دو نما. سرورهای پایش موجودی فروش نیستند و ترافیکشان ناچیز است،
+          پس قاطی‌شدنشان با سرورهای اختصاصی گزارش‌ها را گمراه می‌کند. */}
+      <div className="flex gap-2 text-xs">
+        {([
+          ['dedicated', 'سرورهای اختصاصی'],
+          ['monitor', 'سرورهای پایش'],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setRole(key)}
+            className={`px-3 py-1.5 rounded-md border transition-colors ${
+              role === key
+                ? 'bg-cyan/10 text-cyan border-cyan/30'
+                : 'border-line text-muted hover:text-white'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="flex items-center gap-3 flex-wrap">

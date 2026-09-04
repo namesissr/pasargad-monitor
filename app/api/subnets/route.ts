@@ -13,6 +13,7 @@ export async function GET() {
       `SELECT n.id, n.cidr::text AS cidr, n.version, host(n.gateway) AS gateway,
               n.provider, n.location, n.label, n.notes, n.created_at,
               n.anchor_id, a.name AS anchor_name, a.node_id AS anchor_node_id,
+              n.vz_total_ips,
               COALESCE(c.total, 0)::int    AS total,
               COALESCE(c.assigned, 0)::int AS assigned,
               COALESCE(c.free, 0)::int     AS free,

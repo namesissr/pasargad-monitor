@@ -93,6 +93,36 @@ async function paged(node, path, params = {}, maxPages = 200) {
 
 const str = (v, fallback = '') => (v === null || v === undefined ? fallback : String(v));
 
+function ipToInt(value) {
+  const parts = String(value || '').trim().split('.');
+  if (parts.length !== 4) return null;
+  let out = 0;
+  for (const part of parts) {
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
+    out = out * 256 + n;
+  }
+  return out;
+}
+
+function intToIp(value) {
+  return [
+    (value >>> 24) & 255,
+    (value >>> 16) & 255,
+    (value >>> 8) & 255,
+    value & 255,
+  ].join('.');
+}
+
+/**
+ * سقف شمارش یک بلوک.
+ *
+ * بلوک بزرگ می‌تواند ده‌ها هزار آدرس داشته باشد؛ ساختن همه‌شان در پنل نه
+ * مفید است نه سریع. بلوک بزرگ‌تر از این فقط آدرس‌های ثبت‌شده‌اش می‌آید و
+ * تفاوت در لاگ گفته می‌شود، نه اینکه بی‌صدا ناقص بماند.
+ */
+const MAX_ENUM = 8192;
+
 function isIpv4(value) {
   const parts = String(value || '').trim().split('.');
   if (parts.length !== 4) return false;
@@ -111,6 +141,13 @@ export async function listPools(node) {
       gateway: str(b.gateway).trim(),
       netmask: str(b.netmask).trim(),
       isV6: str(b.type).toLowerCase() === 'ipv6',
+      // بازه واقعی بلوک. «ips» فقط آدرس‌های ثبت‌شده را می‌دهد، پس بدون
+      // این دو، آدرس آزادی که هرگز استفاده نشده اصلا دیده نمی‌شود و
+      // شمارش پنل از سولوس کمتر درمی‌آید.
+      from: str(b.from).trim(),
+      to: str(b.to).trim(),
+      // تعداد اعلامی خود سولوس، برای مقایسه با شمارش پنل
+      totalIps: Number.isFinite(Number(b.total_ips_count)) ? Number(b.total_ips_count) : null,
     }))
     .filter((b) => b.poolid && !b.isV6 && isIpv4(b.gateway));
 
@@ -152,9 +189,12 @@ export async function listIps(node) {
     if (firstRaw === null) firstRaw = res.raw;
     rawCount += res.items.length;
 
+    const seen = new Set();
+
     for (const r of res.items) {
       const ip = str(r.ip).trim();
       if (!isIpv4(ip)) continue;
+      seen.add(ip);
       const server = r.server || null;
       const user = r.user || null;
       items.push({
@@ -174,6 +214,41 @@ export async function listIps(node) {
         hostname: server ? str(server.name) : '',
         customer: user ? str(user.email) : '',
       });
+    }
+
+    // آدرس‌های بازه که هنوز در سولوس ثبت نشده‌اند: آزادند و باید پایش
+    // شوند. بدون این‌ها شمارش پنل از سولوس کمتر می‌شد و آدرس اکسس‌شده‌ای
+    // که هرگز به سروری داده نشده، اصلا دیده نمی‌شد.
+    const first = ipToInt(block.from);
+    const last = ipToInt(block.to);
+    if (first !== null && last !== null && last >= first) {
+      const span = last - first + 1;
+      if (span > MAX_ENUM) {
+        logErr(
+          `نود ${node.name}: بلوک «${block.name || block.poolid}» با ${span} آدرس`,
+          `از سقف ${MAX_ENUM} بزرگ‌تر است — فقط آدرس‌های ثبت‌شده‌اش وارد می‌شود`,
+        );
+      } else {
+        for (let v = first; v <= last; v++) {
+          const ip = intToIp(v);
+          if (seen.has(ip)) continue;
+          items.push({
+            ipid: '',
+            ip,
+            vpsid: '0',
+            ippoolid: block.poolid,
+            poolName: block.name,
+            gateway: block.gateway,
+            netmask: block.netmask,
+            poolServerId: '',
+            isV6: false,
+            locked: false,
+            isPrimary: false,
+            hostname: '',
+            customer: '',
+          });
+        }
+      }
     }
   }
 
