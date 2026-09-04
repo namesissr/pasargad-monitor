@@ -425,6 +425,34 @@ export async function discoverNode(node) {
     }
   }
 
+  // آدرسی که به سرور مشتری تخصیص یافته از پایش خارج می‌شود.
+  //
+  // چرا لازم است: تیک پایش هنگام آزاد بودن آدرس خودکار خورده، بعد آدرس
+  // به مشتری داده شده، و کشف تیک را برنمی‌داشت. نتیجه‌اش این بود که
+  // آدرس در حال استفاده در فهرست پایش می‌ماند با وضعیت «نامشخص» —
+  // هیچ‌وقت به لنگر نمی‌چسبد چون روی وی‌پی‌اس دیگری است، و هیچ‌وقت
+  // وضعیتش معلوم نمی‌شود.
+  //
+  // آدرس روی خود لنگر مستثناست: آن عمدا آنجاست و باید پایش شود.
+  {
+    const anchorVpsids = anchors.map((a) => String(a.anchor_vpsid));
+    const dropped = await q(
+      `UPDATE ip_addresses
+          SET access_watch = FALSE, updated_at = now()
+        WHERE vz_node_id = $1
+          AND access_watch
+          AND vz_vpsid IS NOT NULL
+          AND NOT (vz_vpsid = ANY($2::text[]))
+        RETURNING host(ip) AS ip`,
+      [node.id, anchorVpsids],
+    );
+    if (dropped.length) {
+      log(
+        `نود ${node.name}: ${dropped.length} آدرس تخصیص‌یافته به سرور مشتری از پایش خارج شد`,
+      );
+    }
+  }
+
   // آدرس‌های قفل‌شده: علامت می‌خورند و از پایش خارج می‌شوند. حذف خودکار
   // نمی‌شوند چون ممکن است یادداشت یا نام مشتری داشته باشند.
   if (lockedAddr.length) {
@@ -618,9 +646,15 @@ export async function applyNode(node, { dryRun = true } = {}) {
     }
   }
 
-  const payloadNote = dryRun && previewFields
-    ? ` — بدنه: ${previewFields} فیلد، دیسک ${previewDisks ? 'هست' : 'ندارد'}`
-    : '';
+  // بررسی «دیسک در بدنه هست؟» فقط برای ویژالیزور معنی دارد: آنجا کل
+  // پیکربندی وی‌پی‌اس پس فرستاده می‌شود و دیسک نفرستاده حذف می‌شود.
+  //
+  // سولوس دو عملیات جدا دارد و هیچ فیلد دیگری لمس نمی‌شود، پس «دیسک
+  // ندارد» آنجا یک هشدار کاذب بود — خطری را نشان می‌داد که وجود ندارد.
+  const payloadNote =
+    dryRun && previewFields && node.kind === 'virtualizor'
+      ? ` — بدنه: ${previewFields} فیلد، دیسک ${previewDisks ? 'هست' : 'ندارد ⚠'}`
+      : '';
   const detail =
     `${dryRun ? 'آزمایشی — ' : ''}${anchors.length} لنگر، ` +
     `${attachedAll.length} چسبید، ${detachedAll.length} جدا شد، ` +

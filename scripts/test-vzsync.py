@@ -151,6 +151,29 @@ R = {"status": "released", "watch": True, "managed": True}
 RM = {"status": "released", "watch": True, "managed": False}
 NOWATCH = {"status": "blocked", "watch": False, "managed": False}
 
+def should_unwatch(vz_vpsid, anchor_vpsids, watched):
+    """
+    بازسازی قاعده خارج‌کردن از پایش در کشف.
+
+    آدرسی که به سرور مشتری تخصیص یافته هرگز به لنگر نمی‌چسبد، پس ماندنش
+    در فهرست پایش فقط یک «نامشخص» دائمی می‌سازد.
+    """
+    if not watched or vz_vpsid is None:
+        return False
+    return vz_vpsid not in anchor_vpsids
+
+
+# وی‌پی‌اس فعلی، لنگرهای نود، تحت پایش بود، انتظار، توضیح
+UNWATCH_CASES = [
+    ("77", ["77"], True, False, "روی لنگر — پایش می‌ماند"),
+    ("99", ["77"], True, True, "روی سرور مشتری — از پایش خارج"),
+    (None, ["77"], True, False, "آزاد — پایش می‌ماند"),
+    ("99", ["77"], False, False, "از قبل هم تحت پایش نبود"),
+    ("77", ["77", "88"], True, False, "روی لنگر دوم — پایش می‌ماند"),
+    ("99", [], True, True, "بدون لنگر، روی سرور — از پایش خارج"),
+]
+
+
 DECISION_CASES = [
     ("0", False, W, "attach", "آزاد و اکسس‌شده → به لنگر بچسبد"),
     (ANCHOR, False, W, "none", "از قبل روی لنگر و اکسس‌شده → بماند"),
@@ -200,6 +223,18 @@ def main():
             failures += 1
             print("شکست  تصمیم: %s — انتظار %s، نتیجه %s" % (name, expected, got))
 
+    print("")
+
+    for vps, anchor_list, watched, expected, name in UNWATCH_CASES:
+        got = should_unwatch(vps, anchor_list, watched)
+        if got == expected:
+            print("گذشت  خروج از پایش: %s" % name)
+        else:
+            failures += 1
+            print("شکست  خروج از پایش: %s — انتظار %s، نتیجه %s" % (name, expected, got))
+
+    print("")
+
     # کد واقعی باید با جدول بالا بخواند
     src = io.open(os.path.join(ROOT, "worker", "vz-sync.mjs"), encoding="utf-8").read()
     for needle, why in [
@@ -217,6 +252,8 @@ def main():
         # این ستون یک بار در ویرایشی از قلم افتاد و ستون خالی ماند
         ("vz_total_ips = COALESCE(EXCLUDED.vz_total_ips", "تعداد اعلامی بلوک نوشته می‌شود"),
         ("block.poolid || null, block.total,", "تعداد در پارامترها فرستاده می‌شود"),
+        ("AND NOT (vz_vpsid = ANY($2::text[]))",
+         "آدرس تخصیص‌یافته به سرور مشتری از پایش خارج می‌شود"),
         ("WHERE i.vz_node_id = $1 AND i.vz_vpsid = a.vpsid",
          "آدرس روی هر یک از لنگرها تحت مدیریت پنل ثبت می‌شود"),
         ("[node.id, allAddr],", "تشخیص حذف از نود با فهرست کامل، نه فهرست واردشده"),
