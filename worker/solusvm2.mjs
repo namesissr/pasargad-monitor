@@ -144,6 +144,10 @@ export async function listPools(node) {
       // بازه واقعی بلوک. «ips» فقط آدرس‌های ثبت‌شده را می‌دهد، پس بدون
       // این دو، آدرس آزادی که هرگز استفاده نشده اصلا دیده نمی‌شود و
       // شمارش پنل از سولوس کمتر درمی‌آید.
+      // دو نوع بلوک، با رفتار کاملا متفاوت:
+      //   range → from و to دارد، ولی total_ips_count رشته «الف - ب» است
+      //   set   → from و to ندارد، total_ips_count عدد است
+      listType: str(b.list_type).toLowerCase(),
       from: str(b.from).trim(),
       to: str(b.to).trim(),
       // تعداد اعلامی خود سولوس، برای مقایسه با شمارش پنل.
@@ -151,6 +155,8 @@ export async function listPools(node) {
       // با احتیاط خوانده می‌شود: در پاسخ واقعی این فیلد همیشه عدد نیست.
       // Number('') برابر صفر است، پس بررسی خالی‌بودن هم لازم است وگرنه
       // بلوکی بدون این فیلد «صفر آدرس» گزارش می‌شد.
+      // فقط وقتی عدد است. برای بلوک range رشته توصیف بازه می‌آید و
+      // Number آن NaN می‌شود؛ آنجا ظرفیت از خود سی‌آی‌دی‌آر حساب می‌شود.
       totalIps: (() => {
         const raw = b.total_ips_count;
         if (raw === null || raw === undefined || raw === '') return null;
@@ -216,7 +222,16 @@ export async function listIps(node) {
         netmask: block.netmask,
         poolServerId: '',
         isV6: false,
-        locked: r.is_reserved === true && !server,
+        // سولوس معادل «قفل» ویژالیزور را ندارد.
+        //
+        // اول «رزرو بدون سرور» را قفل ترجمه کردم؛ غلط بود. رزرو در سولوس
+        // یعنی «به سرور تازه تخصیص داده نشود» — و آدرس اکسس‌شده‌ای که
+        // ادمین کنار گذاشته دقیقا همین حالت را دارد. یعنی همان‌هایی که
+        // باید پایش شوند، کنار گذاشته می‌شدند.
+        locked: false,
+        // ولی برای چسباندن مهم است: آدرس رزروشده را نمی‌شود مستقیم به
+        // سرور داد و اول باید پرچم رزرو برداشته شود.
+        isReserved: r.is_reserved === true,
         // آی‌پی اصلی سرور؛ برداشتنش شبکه لنگر را قطع می‌کند
         isPrimary: r.is_primary === true,
         // مالک و نام سرور مستقیم از همین ردیف می‌آید
@@ -228,11 +243,21 @@ export async function listIps(node) {
     // آدرس‌های بازه که هنوز در سولوس ثبت نشده‌اند: آزادند و باید پایش
     // شوند. بدون این‌ها شمارش پنل از سولوس کمتر می‌شد و آدرس اکسس‌شده‌ای
     // که هرگز به سروری داده نشده، اصلا دیده نمی‌شد.
+    // فقط بلوک «range» بازه دارد و می‌شود آدرس‌های نیامده‌اش را ساخت.
+    // بلوک «set» فهرست دستی است و اعضای رزرونشده‌اش از ای‌پی‌آی قابل
+    // خواندن نیستند — عددش می‌آید ولی خودشان نه.
     const first = ipToInt(block.from);
     const last = ipToInt(block.to);
-    if (first === null || last === null || last < first) {
-      // بدون بازه، فقط آدرس‌های ثبت‌شده می‌آیند و شمارش پنل از سولوس کمتر
-      // می‌ماند. این باید دیده شود، نه اینکه بی‌صدا ناقص بماند.
+    if (block.listType === 'set') {
+      const known = res.items.length;
+      if (block.totalIps !== null && block.totalIps > known) {
+        logErr(
+          `نود ${node.name}: بلوک «${block.name || block.poolid}» از نوع set است —`,
+          `${known} آدرس از ${block.totalIps} خوانده شد. بقیه در سولوس رزرو نشده‌اند و`,
+          'ای‌پی‌آی راهی برای فهرست‌کردنشان ندارد.',
+        );
+      }
+    } else if (first === null || last === null || last < first) {
       logErr(
         `نود ${node.name}: بازه بلوک «${block.name || block.poolid}» خوانده نشد —`,
         `from «${block.from}» تا «${block.to}». فقط آدرس‌های ثبت‌شده وارد می‌شوند.`,
@@ -259,6 +284,7 @@ export async function listIps(node) {
             poolServerId: '',
             isV6: false,
             locked: false,
+            isReserved: false,
             isPrimary: false,
             hostname: '',
             customer: '',
@@ -353,6 +379,7 @@ export async function writeVpsIps(node, vpsid, ips, { dryRun = true } = {}) {
   const onAnchor = all.items.filter((r) => r.vpsid === serverId);
   const want = new Set(ips);
 
+  const byIp = new Map(all.items.map((r) => [r.ip, r]));
   const toAttach = ips.filter((ip) => !onAnchor.some((r) => r.ip === ip));
   const toDetach = onAnchor.filter((r) => !want.has(r.ip));
 
@@ -385,6 +412,23 @@ export async function writeVpsIps(node, vpsid, ips, { dryRun = true } = {}) {
   }
 
   for (const ip of attachSlice) {
+    const row = byIp.get(ip);
+
+    // آدرس رزروشده را نمی‌شود مستقیم به سرور داد؛ سولوس با «The IP
+    // address has already been reserved» رد می‌کند. اول پرچم رزرو
+    // برداشته می‌شود.
+    //
+    // چرا PATCH و نه DELETE: مستندات صریح می‌گوید DELETE روی بلوک از نوع
+    // «set» آدرس را از خود بلوک حذف می‌کند — یعنی موجودی آی‌پی را از بین
+    // می‌برد. PATCH فقط پرچم را عوض می‌کند.
+    if (row?.isReserved && row.ipid) {
+      const un = await send(node, 'PATCH', `ips/${row.ipid}`, { is_reserved: false });
+      if (!un.ok) {
+        failed.push(`${ip}: برداشتن رزرو ناموفق — ${un.error}`);
+        continue;
+      }
+    }
+
     const res = await send(node, 'POST', `servers/${serverId}/ips`, {
       ip,
       type: 'IPv4',

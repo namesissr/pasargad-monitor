@@ -474,19 +474,19 @@ export default function IpsPage() {
                     {/* «ثبت‌شده از ظرفیت». ظرفیت از خود سی‌آی‌دی‌آر حساب
                         می‌شود، پس همیشه هست. اگر کمتر از ظرفیت باشد یعنی
                         کشف همه آدرس‌ها را نیاورده و باید دیده شود. */}
-                    <td className="text-xs whitespace-nowrap">
-                      <span className={n.capacity !== null && n.total < n.capacity ? 'text-amber' : ''}>
-                        {faNum(n.total)}
-                      </span>
-                      {n.capacity !== null && (
-                        <span className="text-muted"> از {faNum(n.capacity)}</span>
-                      )}
-                      {n.vz_total_ips !== null && n.vz_total_ips !== n.capacity && (
-                        <span className="text-muted" title="تعداد اعلامی هایپروایزر">
-                          {' '}({faNum(n.vz_total_ips)})
-                        </span>
-                      )}
-                    </td>
+                    {/* «ثبت‌شده از کل». کل، عدد اعلامی هایپروایزر است اگر
+                        داده باشد — بلوک از نوع set ممکن است کل سی‌آی‌دی‌آر
+                        را پوشش ندهد. وگرنه از خود سی‌آی‌دی‌آر حساب می‌شود. */}
+                    {(() => {
+                      const cap = n.vz_total_ips ?? n.capacity;
+                      const short = cap !== null && n.total < cap;
+                      return (
+                        <td className="text-xs whitespace-nowrap">
+                          <span className={short ? 'text-amber' : ''}>{faNum(n.total)}</span>
+                          {cap !== null && <span className="text-muted"> از {faNum(cap)}</span>}
+                        </td>
+                      );
+                    })()}
                     <td className="text-xs text-cyan">{faNum(n.assigned)}</td>
                     <td className="text-xs text-ok">{faNum(n.free)}</td>
                     <td className="text-xs">

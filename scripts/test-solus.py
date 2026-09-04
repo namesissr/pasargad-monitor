@@ -62,9 +62,12 @@ def map_ip(r, block):
         "poolName": block["name"],
         "gateway": block["gateway"],
         "netmask": block["netmask"],
-        # «رزروشده» در سولوس یعنی «ثبت‌شده در بلوک»، نه «قفل». آدرسی که
-        # روی یک سرور نشسته هم رزرو است. قفل واقعی یعنی رزرو بدون سرور.
-        "locked": r.get("is_reserved") is True and not server,
+        # سولوس معادل «قفل» ندارد. رزرو یعنی «به سرور تازه تخصیص داده
+        # نشود» — و آدرس اکسس‌شده‌ای که ادمین کنار گذاشته دقیقا همین حالت
+        # را دارد، پس قفل خواندنش یعنی کنار گذاشتن همان‌هایی که باید پایش
+        # شوند.
+        "locked": False,
+        "isReserved": r.get("is_reserved") is True,
         "isPrimary": r.get("is_primary") is True,
         "hostname": str(server["name"]) if server else "",
         "customer": str(user["email"]) if user else "",
@@ -85,6 +88,25 @@ def ip_to_int(value):
 
 def int_to_ip(v):
     return "%d.%d.%d.%d" % ((v >> 24) & 255, (v >> 16) & 255, (v >> 8) & 255, v & 255)
+
+
+def block_total(raw):
+    """
+    بازسازی خواندن total_ips_count.
+
+    برای بلوک «range» این فیلد رشته توصیف بازه است، نه عدد. پذیرفتنش
+    به‌عنوان عدد یعنی NaN یا صفر — و صفر در پنل «بلوک بدون آدرس» دیده
+    می‌شد.
+    """
+    if raw is None or raw == "":
+        return None
+    try:
+        n = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if n != n or n < 0:
+        return None
+    return int(n)
 
 
 def enumerate_block(block, registered, max_enum=8192):
@@ -187,6 +209,17 @@ def main():
 
     print("")
 
+    # ── تعداد اعلامی بلوک ───────────────────────────────────────
+    # شکل واقعی هر دو نوع بلوک، از پاسخ مستر
+    check("تعداد: بلوک set عددی است", block_total("62"), 62)
+    check("تعداد: بلوک range رشته بازه است، نه عدد",
+          block_total("92.242.220.66 - 92.242.220.127"), None)
+    check("تعداد: خالی صفر تفسیر نمی‌شود", block_total(""), None)
+    check("تعداد: تهی", block_total(None), None)
+    check("تعداد: عدد صحیح", block_total(101), 101)
+
+    print("")
+
     # ── شمارش بازه بلوک ─────────────────────────────────────────
     small = {"from": "2.188.255.130", "to": "2.188.255.135"}
     extra = enumerate_block(small, ["2.188.255.132"])
@@ -236,7 +269,6 @@ def main():
         ("authorization: `Bearer ${token}`", "احراز هویت با Bearer"),
         ("`${base}/api/v1/${path}", "مسیر پایه ای‌پی‌آی"),
         ("ip_blocks/${block.poolid}/ips", "مسیر آی‌پی‌های هر بلوک"),
-        ("locked: r.is_reserved === true && !server", "قفل یعنی رزرو بدون سرور"),
         ("isPrimary: r.is_primary === true", "علامت آی‌پی اصلی"),
         ("toDetach.filter((r) => !r.isPrimary && r.ipid)", "آی‌پی اصلی برداشته نمی‌شود"),
         ("type: 'IPv4',", "نوع در بدنه چسباندن"),
@@ -248,6 +280,12 @@ def main():
         ("if (raw === null || raw === undefined || raw === '') return null;",
          "فیلد خالی صفر تفسیر نمی‌شود"),
         ("بازه بلوک", "نبود بازه بلوک گزارش می‌شود"),
+        ("listType: str(b.list_type).toLowerCase()", "نوع بلوک خوانده می‌شود"),
+        ("if (block.listType === 'set') {", "بلوک set جدا مدیریت می‌شود"),
+        ("locked: false,", "رزرو در سولوس قفل نیست"),
+        ("isReserved: r.is_reserved === true", "پرچم رزرو نگه داشته می‌شود"),
+        ("send(node, 'PATCH', `ips/${row.ipid}`, { is_reserved: false })",
+         "پیش از چسباندن، رزرو با PATCH برداشته می‌شود نه DELETE"),
         ("customer: user ? str(user.email) : ''", "مشتری از ایمیل مالک"),
     ]:
         if needle in src:
