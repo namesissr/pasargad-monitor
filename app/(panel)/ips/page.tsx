@@ -69,6 +69,8 @@ interface SubnetRow {
   anchor_name: string | null;
   vz_total_ips: number | null;
   vz_poolid: string | null;
+  foreign_count: number;
+  node_name: string | null;
   capacity: number | null;
   version: number;
   gateway: string | null;
@@ -466,10 +468,16 @@ export default function IpsPage() {
                     <td><Mono className="text-cyan">{n.cidr}</Mono></td>
                     {/* نام همان چیزی است که در پنل هایپروایزر می‌بینید؛
                         بدون آن دو فهرست قابل تطبیق نیستند */}
-                    <td className="text-xs max-w-[200px]">
+                    <td className="text-xs max-w-[220px]">
                       <span className="truncate block" title={n.label || undefined}>
                         {n.label || n.provider || '—'}
                       </span>
+                      {/* یک سی‌آی‌دی‌آر می‌تواند در دو هایپروایزر باشد و
+                          هرکدام ردیف خودش را دارد؛ بدون این نام، دو ردیف
+                          یکسان به نظر می‌رسند */}
+                      {n.node_name && (
+                        <span className="text-muted text-[11px] block truncate">{n.node_name}</span>
+                      )}
                     </td>
                     <td><Mono className="text-muted">{n.gateway || '—'}</Mono></td>
                     {/* «ثبت‌شده از ظرفیت». ظرفیت از خود سی‌آی‌دی‌آر حساب
@@ -488,6 +496,14 @@ export default function IpsPage() {
                         <td className="text-xs whitespace-nowrap">
                           <span className={short ? 'text-amber' : ''}>{faNum(n.total)}</span>
                           {cap !== null && <span className="text-muted"> از {faNum(cap)}</span>}
+                          {n.foreign_count > 0 && (
+                            <span
+                              className="text-amber"
+                              title="آدرس‌هایی در این بلوک که از هایپروایزر دیگری آمده‌اند یا پیوندشان پاک شده"
+                            >
+                              {' '}+{faNum(n.foreign_count)} بیگانه
+                            </span>
+                          )}
                         </td>
                       );
                     })()}

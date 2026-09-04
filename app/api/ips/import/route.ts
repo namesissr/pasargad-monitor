@@ -49,7 +49,7 @@ export async function POST(req: Request) {
     const subnet = await queryOne<{ id: number }>(
       `INSERT INTO ip_subnets (cidr, version, gateway, provider, location, label, notes)
        VALUES ($1::cidr, 4, NULLIF($2, '')::inet, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''))
-       ON CONFLICT (cidr) DO UPDATE SET
+       ON CONFLICT (cidr) WHERE vz_node_id IS NULL DO UPDATE SET
          gateway  = COALESCE(EXCLUDED.gateway, ip_subnets.gateway),
          provider = COALESCE(EXCLUDED.provider, ip_subnets.provider),
          location = COALESCE(EXCLUDED.location, ip_subnets.location),

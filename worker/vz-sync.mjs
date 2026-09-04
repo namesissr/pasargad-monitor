@@ -191,7 +191,9 @@ export async function discoverNode(node) {
     await q(
       `INSERT INTO ip_subnets (cidr, version, gateway, label, vz_node_id, vz_poolid)
        VALUES ($1::cidr, 4, NULLIF($2,'')::inet, NULLIF($3,''), $4, NULLIF($5,''))
-       ON CONFLICT (cidr) DO UPDATE
+       -- یکتایی ترکیبی است: یک سی‌آی‌دی‌آر می‌تواند در دو هایپروایزر
+       -- باشد و هرکدام ردیف خودش را دارد
+       ON CONFLICT (cidr, vz_node_id) WHERE vz_node_id IS NOT NULL DO UPDATE
          SET gateway    = COALESCE(EXCLUDED.gateway, ip_subnets.gateway),
              label      = COALESCE(EXCLUDED.label, ip_subnets.label),
              vz_node_id = EXCLUDED.vz_node_id,
@@ -289,11 +291,18 @@ export async function discoverNode(node) {
               -- مستقل می‌شد به‌جای عضوی از بلوک — روی کارت می‌نشست ولی
               -- تجهیزات بالادست نمی‌دیدندش.
               -- اول با شناسه مخزن ویژالیزور، وگرنه با دربرگیری.
+              -- ترتیب مهم است: اول شناسه مخزن همین نود، بعد دربرگیری در
+              -- بلوک همین نود، و آخر بلوک دستی. بدون قید نود، آدرس ممکن
+              -- بود به ردیف بلوک هایپروایزر دیگری وصل شود — و لنگرش هم از
+              -- آنجا می‌آمد.
               COALESCE(
                 (SELECT sp.id FROM ip_subnets sp
                   WHERE sp.vz_node_id = $7 AND sp.vz_poolid = u.poolid LIMIT 1),
+                (SELECT sn.id FROM ip_subnets sn
+                  WHERE sn.vz_node_id = $7 AND host(u.ip::inet)::inet << sn.cidr
+                  ORDER BY masklen(sn.cidr) DESC LIMIT 1),
                 (SELECT sc.id FROM ip_subnets sc
-                  WHERE host(u.ip::inet)::inet << sc.cidr
+                  WHERE sc.vz_node_id IS NULL AND host(u.ip::inet)::inet << sc.cidr
                   ORDER BY masklen(sc.cidr) DESC LIMIT 1)
               )
          FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[],

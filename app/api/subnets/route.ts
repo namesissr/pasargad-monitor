@@ -13,7 +13,7 @@ export async function GET() {
       `SELECT n.id, n.cidr::text AS cidr, n.version, host(n.gateway) AS gateway,
               n.provider, n.location, n.label, n.notes, n.created_at,
               n.anchor_id, a.name AS anchor_name, a.node_id AS anchor_node_id,
-              n.vz_total_ips, n.vz_poolid,
+              n.vz_total_ips, n.vz_poolid, vn.name AS node_name, vn.kind AS node_kind,
               -- ظرفیت واقعی بلوک، از روی خود سی‌آی‌دی‌آر. به هیچ فیلدی از
               -- هایپروایزر وابسته نیست، پس همیشه عددی برای مقایسه هست —
               -- حتی وقتی آن فیلد نیامده یا شکلش عوض شده.
@@ -25,17 +25,35 @@ export async function GET() {
               COALESCE(c.total, 0)::int    AS total,
               COALESCE(c.assigned, 0)::int AS assigned,
               COALESCE(c.free, 0)::int     AS free,
-              COALESCE(c.blocked, 0)::int  AS blocked
+              COALESCE(c.blocked, 0)::int  AS blocked,
+              COALESCE(f.cnt, 0)::int      AS foreign_count
          FROM ip_subnets n
          LEFT JOIN vz_anchors a ON a.id = n.anchor_id
+         LEFT JOIN vz_nodes vn ON vn.id = n.vz_node_id
          LEFT JOIN LATERAL (
+           -- شمارش فقط آدرس‌های همان هایپروایزری که بلوک به آن تعلق دارد.
+           --
+           -- یک سی‌آی‌دی‌آر می‌تواند در دو هایپروایزر تعریف شده باشد، و چون
+           -- ستون cidr یکتاست هر دو در یک ردیف می‌نشینند. بدون این شرط،
+           -- شمارش هر دو را جمع می‌کرد و با هیچ‌کدام نمی‌خواند.
            SELECT COUNT(*) AS total,
                   COUNT(*) FILTER (WHERE status = 'assigned') AS assigned,
                   COUNT(*) FILTER (WHERE status = 'free')     AS free,
                   COUNT(*) FILTER (WHERE status IN ('blocked','abuse')) AS blocked
-             FROM ip_addresses i WHERE i.subnet_id = n.id
+             FROM ip_addresses i
+            WHERE i.subnet_id = n.id
+              AND (n.vz_node_id IS NULL OR i.vz_node_id IS NOT DISTINCT FROM n.vz_node_id)
          ) c ON TRUE
-        ORDER BY n.cidr`,
+         LEFT JOIN LATERAL (
+           -- آدرس‌هایی که در همین بلوک‌اند ولی از هایپروایزر دیگری آمده‌اند
+           -- یا پیوندشان پاک شده. اختلاف شمارش از همین‌جاست و باید دیده
+           -- شود، نه اینکه در جمع کل گم شود.
+           SELECT COUNT(*) AS cnt FROM ip_addresses i
+            WHERE i.subnet_id = n.id
+              AND n.vz_node_id IS NOT NULL
+              AND i.vz_node_id IS DISTINCT FROM n.vz_node_id
+         ) f ON TRUE
+        ORDER BY n.cidr, vn.name NULLS FIRST`,
     );
     return ok({ subnets: rows });
   });
@@ -53,7 +71,7 @@ export async function POST(req: Request) {
       `INSERT INTO ip_subnets (cidr, version, gateway, provider, location, label, notes)
        VALUES ($1::cidr, CASE WHEN $1::text LIKE '%:%' THEN 6 ELSE 4 END,
                NULLIF($2, '')::inet, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), NULLIF($6, ''))
-       ON CONFLICT (cidr) DO UPDATE SET
+       ON CONFLICT (cidr) WHERE vz_node_id IS NULL DO UPDATE SET
          gateway  = COALESCE(EXCLUDED.gateway, ip_subnets.gateway),
          provider = COALESCE(EXCLUDED.provider, ip_subnets.provider),
          location = COALESCE(EXCLUDED.location, ip_subnets.location),
