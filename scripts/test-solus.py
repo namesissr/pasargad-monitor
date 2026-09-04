@@ -218,6 +218,26 @@ def main():
     check("تعداد: تهی", block_total(None), None)
     check("تعداد: عدد صحیح", block_total(101), 101)
 
+    # بلوک range عدد نمی‌دهد ولی بازه‌اش را می‌دهد؛ تعداد دقیق از همان‌جا
+    def range_total(b):
+        if block_total(b.get("total_ips_count")) is not None:
+            return block_total(b.get("total_ips_count"))
+        if str(b.get("list_type", "")).lower() != "range":
+            return None
+        first = ip_to_int(b.get("from"))
+        last = ip_to_int(b.get("to"))
+        if first is None or last is None or last < first:
+            return None
+        return last - first + 1
+
+    check("تعداد range: از بازه حساب می‌شود",
+          range_total({"list_type": "range", "from": "92.242.220.66",
+                       "to": "92.242.220.127",
+                       "total_ips_count": "92.242.220.66 - 92.242.220.127"}), 62)
+    check("تعداد set: از عدد خودش",
+          range_total({"list_type": "set", "from": None, "to": None,
+                       "total_ips_count": "86"}), 86)
+
     print("")
 
     # ── شمارش بازه بلوک ─────────────────────────────────────────
@@ -235,6 +255,21 @@ def main():
 
     check("بازه: ورودی خراب", enumerate_block({"from": "x", "to": "y"}, []), [])
     check("بازه: بازه وارونه", enumerate_block({"from": "1.1.1.9", "to": "1.1.1.1"}, []), [])
+
+    print("")
+
+    # ── پایش خودکار ─────────────────────────────────────────────
+    # رزرو یعنی ادمین عمدا کنارش گذاشته. پایش خودکارش یعنی چسباندن به
+    # لنگر، و چسباندن یعنی پاک‌شدن پرچم رزرو — تصمیمی که بی‌صدا از بین
+    # می‌رود.
+    def auto_watchable(row):
+        free = row["vpsid"] == "0"
+        return free and not row["isReserved"]
+
+    check("پایش خودکار: آزاد و بدون رزرو", auto_watchable(free), True)
+    check("پایش خودکار: تخصیص‌یافته", auto_watchable(row), False)
+    check("پایش خودکار: آزاد ولی رزروشده",
+          auto_watchable({"vpsid": "0", "isReserved": True}), False)
 
     print("")
 
@@ -282,6 +317,7 @@ def main():
         ("بازه بلوک", "نبود بازه بلوک گزارش می‌شود"),
         ("listType: str(b.list_type).toLowerCase()", "نوع بلوک خوانده می‌شود"),
         ("if (block.listType === 'set') {", "بلوک set جدا مدیریت می‌شود"),
+        ("return { ...b, totalIps: last - first + 1 };", "تعداد بلوک range از بازه"),
         ("locked: false,", "رزرو در سولوس قفل نیست"),
         ("isReserved: r.is_reserved === true", "پرچم رزرو نگه داشته می‌شود"),
         ("send(node, 'PATCH', `ips/${row.ipid}`, { is_reserved: false })",

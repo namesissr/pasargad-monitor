@@ -292,6 +292,9 @@ export async function listIps(node) {
         poolServerId: str(r.ipp_serid ?? r.ip_serid),
         isV6: str(r.ipv6) === '1',
         locked: str(r.locked) === '1',
+        // ویژالیزور مفهوم «رزرو» جدا از قفل ندارد؛ صریح نادرست می‌ماند تا
+        // موتور مشترک همه‌جا مقدار تعریف‌شده ببیند
+        isReserved: false,
       }))
       // فقط نسخه ۴. نسخه ۶ نه در پایش اکسس معنی دارد نه در لنگر.
       .filter((r) => !r.isV6 && isIpv4(r.ip)),

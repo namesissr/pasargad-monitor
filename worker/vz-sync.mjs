@@ -160,7 +160,20 @@ export async function discoverNode(node) {
       }
       return;
     }
-    if (!blocks.has(cidr)) blocks.set(cidr, { cidr, poolid, name, gateway, total: total ?? null });
+    const existing = blocks.get(cidr);
+    if (!existing) {
+      blocks.set(cidr, { cidr, poolid, name, gateway, total: total ?? null });
+      return;
+    }
+    // بلوک اول از ردیف‌های آی‌پی ساخته می‌شود و تعداد اعلامی ندارد؛ آن
+    // تعداد فقط در فهرست مخزن‌ها هست. بدون این ادغام، عدد دور ریخته
+    // می‌شد و پنل ناچار ظرفیت سی‌آی‌دی‌آر را نشان می‌داد — که برای بلوک
+    // فهرستی کاملا غلط است (۲۵۴ به‌جای ۸۶).
+    if (existing.total === null && total !== null && total !== undefined) {
+      existing.total = total;
+    }
+    if (!existing.poolid && poolid) existing.poolid = poolid;
+    if (!existing.name && name) existing.name = name;
   };
 
   for (const row of ips.items) {
@@ -210,6 +223,7 @@ export async function discoverNode(node) {
   const customer = [];
   const assigned = [];
   const poolid = [];
+  const watchable = [];
   // آدرس قفل‌شده در ویژالیزور وارد نمی‌شود. ادمین عمداً کنارش گذاشته و
   // مسیر اعمال هم هرگز به لنگر نمی‌چسباندش — پس بودنش در فهرست پایش
   // فقط یک «روت نشده» دائمی و بی‌دلیل می‌سازد.
@@ -224,8 +238,15 @@ export async function discoverNode(node) {
       continue;
     }
     const free = row.vpsid === '0' || row.vpsid === '';
+    // آدرس رزروشده خودکار تحت پایش نمی‌رود.
+    //
+    // رزرو یعنی ادمین عمدا کنارش گذاشته — شاید برای مشتری خاصی. اگر
+    // خودکار پایش شود، چسباندنش به لنگر پرچم رزرو را پاک می‌کند و آن
+    // تصمیم بی‌صدا از بین می‌رود. ادمین می‌تواند دستی تیکش را بزند.
+    const autoWatchable = free && !row.isReserved;
     const vps = free ? null : vpsById.get(row.vpsid);
     addr.push(row.ip);
+    watchable.push(autoWatchable);
     ipid.push(row.ipid);
     poolid.push(row.ippoolid || null);
     vpsid.push(free ? null : row.vpsid);
@@ -255,11 +276,11 @@ export async function discoverNode(node) {
        SELECT host(u.ip::inet)::inet, 4,
               CASE WHEN u.assigned THEN 'assigned' ELSE 'free' END,
               u.customer, u.ipid, u.vpsid, u.hostname, $7, now(),
-              (NOT u.assigned) AND $8, 'unknown',
-              CASE WHEN (NOT u.assigned) AND $8 THEN now() END,
+              u.watchable AND $8, 'unknown',
+              CASE WHEN u.watchable AND $8 THEN now() END,
               -- سرور لنگر از لنگر همان بلوک می‌آید؛ با چند لنگر، یک
               -- مقدار ثابت برای کل نود غلط می‌شد
-              CASE WHEN (NOT u.assigned) AND $8 THEN (
+              CASE WHEN u.watchable AND $8 THEN (
                 SELECT an.bind_server_id FROM ip_subnets sb
                   JOIN vz_anchors an ON an.id = sb.anchor_id
                  WHERE sb.vz_node_id = $7 AND sb.vz_poolid = u.poolid LIMIT 1
@@ -276,8 +297,8 @@ export async function discoverNode(node) {
                   ORDER BY masklen(sc.cidr) DESC LIMIT 1)
               )
          FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
-                     $6::boolean[], $9::text[])
-              AS u(ip, ipid, vpsid, hostname, customer, assigned, poolid)
+                     $6::boolean[], $9::text[], $10::boolean[])
+              AS u(ip, ipid, vpsid, hostname, customer, assigned, poolid, watchable)
         -- محافظ دوم: اگر فیلتر بالادست روزی عوض شود، آدرس نسخه ۶ نباید
         -- با برچسب «نسخه ۴» وارد شود
         WHERE family(u.ip::inet) = 4
@@ -311,6 +332,7 @@ export async function discoverNode(node) {
         addr, ipid, vpsid, hostname, customer, assigned, node.id,
         node.auto_watch_free !== false,
         poolid,
+        watchable,
       ],
     );
   }

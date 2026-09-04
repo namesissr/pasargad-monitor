@@ -164,6 +164,19 @@ export async function listPools(node) {
         return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null;
       })(),
     }))
+    .map((b) => {
+      // بلوک range تعداد عددی نمی‌دهد؛ رشته توصیف بازه می‌دهد. ولی خود
+      // بازه را دارد، پس تعداد دقیق از همان‌جا حساب می‌شود — بهتر از
+      // ظرفیت سی‌آی‌دی‌آر که آدرس‌های خارج بازه را هم می‌شمارد.
+      if (b.totalIps === null && b.listType === 'range') {
+        const first = ipToInt(b.from);
+        const last = ipToInt(b.to);
+        if (first !== null && last !== null && last >= first) {
+          return { ...b, totalIps: last - first + 1 };
+        }
+      }
+      return b;
+    })
     .filter((b) => b.poolid && !b.isV6 && isIpv4(b.gateway));
 
   return { ok: true, items, rawCount: res.items.length, raw: res.raw, topKeys: res.topKeys };

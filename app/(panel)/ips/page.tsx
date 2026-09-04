@@ -68,6 +68,7 @@ interface SubnetRow {
   anchor_id: number | null;
   anchor_name: string | null;
   vz_total_ips: number | null;
+  vz_poolid: string | null;
   capacity: number | null;
   version: number;
   gateway: string | null;
@@ -474,11 +475,14 @@ export default function IpsPage() {
                     {/* «ثبت‌شده از ظرفیت». ظرفیت از خود سی‌آی‌دی‌آر حساب
                         می‌شود، پس همیشه هست. اگر کمتر از ظرفیت باشد یعنی
                         کشف همه آدرس‌ها را نیاورده و باید دیده شود. */}
-                    {/* «ثبت‌شده از کل». کل، عدد اعلامی هایپروایزر است اگر
-                        داده باشد — بلوک از نوع set ممکن است کل سی‌آی‌دی‌آر
-                        را پوشش ندهد. وگرنه از خود سی‌آی‌دی‌آر حساب می‌شود. */}
+                    {/* «ثبت‌شده از کل».
+                        کل از خود هایپروایزر می‌آید، نه از ظرفیت سی‌آی‌دی‌آر:
+                        بلوک فهرستی ممکن است تنها بخشی از یک ساب‌نت باشد و
+                        شمردن کل ساب‌نت عدد کاملا غلطی می‌دهد — ۲۵۴ به‌جای
+                        ۸۶. ظرفیت سی‌آی‌دی‌آر فقط برای بلوکی است که دستی ثبت
+                        شده و هایپروایزری پشتش نیست. */}
                     {(() => {
-                      const cap = n.vz_total_ips ?? n.capacity;
+                      const cap = n.vz_total_ips ?? (n.vz_poolid ? null : n.capacity);
                       const short = cap !== null && n.total < cap;
                       return (
                         <td className="text-xs whitespace-nowrap">

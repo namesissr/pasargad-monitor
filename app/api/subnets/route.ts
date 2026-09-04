@@ -13,7 +13,7 @@ export async function GET() {
       `SELECT n.id, n.cidr::text AS cidr, n.version, host(n.gateway) AS gateway,
               n.provider, n.location, n.label, n.notes, n.created_at,
               n.anchor_id, a.name AS anchor_name, a.node_id AS anchor_node_id,
-              n.vz_total_ips,
+              n.vz_total_ips, n.vz_poolid,
               -- ظرفیت واقعی بلوک، از روی خود سی‌آی‌دی‌آر. به هیچ فیلدی از
               -- هایپروایزر وابسته نیست، پس همیشه عددی برای مقایسه هست —
               -- حتی وقتی آن فیلد نیامده یا شکلش عوض شده.

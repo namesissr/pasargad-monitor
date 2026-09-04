@@ -212,6 +212,8 @@ def main():
         ("const cidr = networkOf(gateway, prefix);", "شبکه از گیت‌وی حساب می‌شود"),
         ("for (const row of ips.items) {", "بلوک‌ها از ردیف‌های آی‌پی ساخته می‌شوند"),
         ("if (row.locked) {", "آدرس قفل‌شده در کشف وارد نمی‌شود"),
+        ("const autoWatchable = free && !row.isReserved;",
+         "آدرس رزروشده خودکار تحت پایش نمی‌رود"),
         ("WHERE i.vz_node_id = $1 AND i.vz_vpsid = a.vpsid",
          "آدرس روی هر یک از لنگرها تحت مدیریت پنل ثبت می‌شود"),
         ("[node.id, allAddr],", "تشخیص حذف از نود با فهرست کامل، نه فهرست واردشده"),
