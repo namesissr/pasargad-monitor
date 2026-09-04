@@ -71,15 +71,14 @@ export async function POST(req: Request) {
     );
     if (!node) return fail('نود پیدا نشد', 404);
     if (!node.is_active) return fail('این نود غیرفعال است', 400);
-    if (kind === 'apply' && !String(node.anchor_vpsid || '').trim()) {
-      return fail('برای این نود شناسه وی‌پی‌اس لنگر تعیین نشده است', 400);
-    }
-    // نوشتن روی سولوس هنوز فعال نیست؛ صف‌کردنش فقط یک ردیف ناموفق می‌سازد
-    if (kind === 'apply' && node.kind === 'solusvm2') {
-      return fail(
-        'تخصیص خودکار آی‌پی برای سولوس‌وی‌ام ۲ هنوز فعال نیست. کشف و پایش کار می‌کنند.',
-        400,
+    if (kind === 'apply') {
+      const anchor = await queryOne<{ cnt: number }>(
+        `SELECT COUNT(*)::int AS cnt FROM vz_anchors WHERE node_id = $1`,
+        [nodeId],
       );
+      if (!anchor?.cnt) {
+        return fail('برای این هایپروایزر هیچ لنگری تعریف نشده است', 400);
+      }
     }
 
     // درخواست تکراری صف را پر نکند — کاربری که دکمه را دوبار می‌زند نباید

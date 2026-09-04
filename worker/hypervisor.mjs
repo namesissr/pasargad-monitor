@@ -30,7 +30,13 @@ export function clientFor(node) {
   return client;
 }
 
-/** آیا این نوع نود نوشتن روی هایپروایزر را پشتیبانی می‌کند؟ */
+/**
+ * آیا این نوع نود نوشتن روی هایپروایزر را پشتیبانی می‌کند؟
+ *
+ * هر دو نوع پشتیبانی می‌کنند. این تابع برای وقتی می‌ماند که نوع تازه‌ای
+ * اضافه شود و فقط خواندنش پیاده شده باشد — تا «فعال نیست» یک حالت صریح
+ * باشد نه یک خطای زمان اجرا.
+ */
 export function canWrite(node) {
-  return String(node?.kind || 'virtualizor') === 'virtualizor';
+  return ['virtualizor', 'solusvm2'].includes(String(node?.kind || 'virtualizor'));
 }

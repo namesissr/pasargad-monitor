@@ -12,11 +12,13 @@ export async function GET() {
     const rows = await query(
       `SELECT n.id, n.cidr::text AS cidr, n.version, host(n.gateway) AS gateway,
               n.provider, n.location, n.label, n.notes, n.created_at,
+              n.anchor_id, a.name AS anchor_name, a.node_id AS anchor_node_id,
               COALESCE(c.total, 0)::int    AS total,
               COALESCE(c.assigned, 0)::int AS assigned,
               COALESCE(c.free, 0)::int     AS free,
               COALESCE(c.blocked, 0)::int  AS blocked
          FROM ip_subnets n
+         LEFT JOIN vz_anchors a ON a.id = n.anchor_id
          LEFT JOIN LATERAL (
            SELECT COUNT(*) AS total,
                   COUNT(*) FILTER (WHERE status = 'assigned') AS assigned,
@@ -62,6 +64,33 @@ export async function POST(req: Request) {
     });
 
     return ok({ id: row?.id }, { status: 201 });
+  });
+}
+
+/** تعیین لنگر یک بلوک — آدرس‌هایش لنگرشان را از همین می‌گیرند */
+export async function PATCH(req: Request) {
+  return handle(async () => {
+    await requireUser();
+    const body = await readJson<{ id?: number; anchor_id?: number | null }>(req);
+    const id = Number(body.id);
+    if (!Number.isInteger(id)) return fail('شناسه بلوک نامعتبر است', 400);
+
+    const anchorId = body.anchor_id ? Number(body.anchor_id) : null;
+    if (anchorId !== null && !Number.isInteger(anchorId)) {
+      return fail('لنگر نامعتبر است', 400);
+    }
+
+    await query('UPDATE ip_subnets SET anchor_id = $2 WHERE id = $1', [id, anchorId]);
+
+    // آدرس‌هایی که لنگر دستی ندارند، لنگر بلوکشان را می‌گیرند. بدون این،
+    // تغییر لنگر بلوک تا کشف بعدی روی آدرس‌ها اثر نمی‌کرد.
+    await query(
+      `UPDATE ip_addresses SET anchor_id = $2, updated_at = now()
+        WHERE subnet_id = $1 AND anchor_id IS DISTINCT FROM $2`,
+      [id, anchorId],
+    );
+
+    return ok({ ok: true });
   });
 }
 

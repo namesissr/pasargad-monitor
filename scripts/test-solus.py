@@ -62,9 +62,27 @@ def map_ip(r, block):
         "poolName": block["name"],
         "gateway": block["gateway"],
         "netmask": block["netmask"],
-        "locked": r.get("is_reserved") is True,
+        # «رزروشده» در سولوس یعنی «ثبت‌شده در بلوک»، نه «قفل». آدرسی که
+        # روی یک سرور نشسته هم رزرو است. قفل واقعی یعنی رزرو بدون سرور.
+        "locked": r.get("is_reserved") is True and not server,
+        "isPrimary": r.get("is_primary") is True,
         "hostname": str(server["name"]) if server else "",
         "customer": str(user["email"]) if user else "",
+    }
+
+
+def plan_write(on_anchor, want, cap=200):
+    """بازسازی تصمیم writeVpsIps: چه چسبانده و چه برداشته شود"""
+    want_set = set(want)
+    to_attach = [ip for ip in want if not any(r["ip"] == ip for r in on_anchor)]
+    to_detach = [r for r in on_anchor if r["ip"] not in want_set]
+    primaries = [r["ip"] for r in to_detach if r["isPrimary"]]
+    detachable = [r for r in to_detach if not r["isPrimary"] and r["ipid"]]
+    return {
+        "attach": to_attach[:cap],
+        "detach": [r["ip"] for r in detachable],
+        "skippedPrimary": primaries,
+        "over_cap": max(0, len(to_attach) - cap),
     }
 
 
@@ -119,9 +137,9 @@ def main():
     check("آی‌پی: سرور تخصیص‌یافته", row["vpsid"], "1737")
     check("آی‌پی: نام سرور", row["hostname"], "mashaad")
     check("آی‌پی: مشتری از ایمیل مالک", row["customer"], "info@pasargadmizban.com")
-    # is_reserved معادل locked در ویژالیزور است — آدرسی که ادمین عمدا کنار
-    # گذاشته و نباید وارد چرخه شود
-    check("آی‌پی: رزروشده معادل قفل", row["locked"], True)
+    # ۱۸۹۸ روی سرور ۱۷۳۷ نشسته، پس رزرو هست ولی قفل نیست
+    check("آی‌پی روی سرور: قفل نیست", row["locked"], False)
+    check("آی‌پی: علامت اصلی", row["isPrimary"], True)
     check("آی‌پی: ماسک از بلوک", row["netmask"], "255.255.255.128")
 
     print("")
@@ -135,12 +153,43 @@ def main():
 
     print("")
 
+    # ── تصمیم نوشتن ─────────────────────────────────────────────
+    A = {"ip": "1.1.1.1", "ipid": "10", "isPrimary": True}
+    B = {"ip": "1.1.1.2", "ipid": "11", "isPrimary": False}
+    C = {"ip": "1.1.1.3", "ipid": "12", "isPrimary": False}
+
+    plan = plan_write([A, B], ["1.1.1.1", "1.1.1.2", "1.1.1.4"])
+    check("نوشتن: آدرس تازه چسبانده می‌شود", plan["attach"], ["1.1.1.4"])
+    check("نوشتن: آدرس موجود دوباره چسبانده نمی‌شود", "1.1.1.2" in plan["attach"], False)
+
+    plan = plan_write([A, B, C], ["1.1.1.1"])
+    check("نوشتن: آدرس ناخواسته برداشته می‌شود", sorted(plan["detach"]), ["1.1.1.2", "1.1.1.3"])
+
+    # مهم‌ترین محافظ: برداشتن آی‌پی اصلی، شبکه خود لنگر را قطع می‌کند
+    plan = plan_write([A, B], [])
+    check("نوشتن: آی‌پی اصلی هرگز برداشته نمی‌شود", plan["detach"], ["1.1.1.2"])
+    check("نوشتن: آی‌پی اصلی گزارش می‌شود", plan["skippedPrimary"], ["1.1.1.1"])
+
+    plan = plan_write([], ["1.1.1.%d" % i for i in range(1, 10)], cap=3)
+    check("نوشتن: سقف رعایت می‌شود", len(plan["attach"]), 3)
+    check("نوشتن: مازاد گزارش می‌شود", plan["over_cap"], 6)
+
+    plan = plan_write([A], ["1.1.1.1"])
+    check("نوشتن: بدون تغییر، هیچ عملیاتی نیست", (plan["attach"], plan["detach"]), ([], []))
+
+    print("")
+
     src = io.open(os.path.join(ROOT, "worker", "solusvm2.mjs"), encoding="utf-8").read()
     for needle, why in [
         ("authorization: `Bearer ${token}`", "احراز هویت با Bearer"),
         ("`${base}/api/v1/${path}", "مسیر پایه ای‌پی‌آی"),
         ("ip_blocks/${block.poolid}/ips", "مسیر آی‌پی‌های هر بلوک"),
-        ("locked: r.is_reserved === true", "رزروشده معادل قفل"),
+        ("locked: r.is_reserved === true && !server", "قفل یعنی رزرو بدون سرور"),
+        ("isPrimary: r.is_primary === true", "علامت آی‌پی اصلی"),
+        ("toDetach.filter((r) => !r.isPrimary && r.ipid)", "آی‌پی اصلی برداشته نمی‌شود"),
+        ("type: 'IPv4',", "نوع در بدنه چسباندن"),
+        ("ids: detachable.map((r) => Number(r.ipid))", "بدنه دسته‌ای برداشتن"),
+        ("delayed: false", "اجرای بی‌درنگ، نه صف تاخیری"),
         ("customer: user ? str(user.email) : ''", "مشتری از ایمیل مالک"),
     ]:
         if needle in src:
@@ -149,12 +198,13 @@ def main():
             failures += 1
             print("شکست  کد واقعی: %s پیدا نشد" % why)
 
-    # نوشتن نباید نصفه پیاده شده باشد
-    if "export async function writeVpsIps()" in src and "ok: false" in src:
-        print("گذشت  کد واقعی: نوشتن صریح خطا می‌دهد، نه رفتار نصفه")
+    # شکست جزئی نباید موفقیت گزارش شود
+    partial = "if (failed.length) {" in src and "ok: false," in src
+    if partial:
+        print("گذشت  کد واقعی: شکست جزئی موفقیت گزارش نمی‌شود")
     else:
         failures += 1
-        print("شکست  کد واقعی: نوشتن باید صریح خطا بدهد")
+        print("شکست  کد واقعی: شکست جزئی باید ناموفق گزارش شود")
 
     # موتور مشترک نباید مستقیم به کلاینت ویژالیزور وصل باشد
     sync = io.open(os.path.join(ROOT, "worker", "vz-sync.mjs"), encoding="utf-8").read()

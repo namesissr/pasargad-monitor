@@ -257,7 +257,13 @@ export async function discoverNode(node) {
               u.customer, u.ipid, u.vpsid, u.hostname, $7, now(),
               (NOT u.assigned) AND $8, 'unknown',
               CASE WHEN (NOT u.assigned) AND $8 THEN now() END,
-              CASE WHEN (NOT u.assigned) AND $8 THEN $9::int END,
+              -- سرور لنگر از لنگر همان بلوک می‌آید؛ با چند لنگر، یک
+              -- مقدار ثابت برای کل نود غلط می‌شد
+              CASE WHEN (NOT u.assigned) AND $8 THEN (
+                SELECT an.bind_server_id FROM ip_subnets sb
+                  JOIN vz_anchors an ON an.id = sb.anchor_id
+                 WHERE sb.vz_node_id = $7 AND sb.vz_poolid = u.poolid LIMIT 1
+              ) END,
               -- بدون این پیوند، پرفیکس بایند به ۳۲ برمی‌گشت و آدرس یک شبکه
               -- مستقل می‌شد به‌جای عضوی از بلوک — روی کارت می‌نشست ولی
               -- تجهیزات بالادست نمی‌دیدندش.
@@ -270,7 +276,7 @@ export async function discoverNode(node) {
                   ORDER BY masklen(sc.cidr) DESC LIMIT 1)
               )
          FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
-                     $6::boolean[], $10::text[])
+                     $6::boolean[], $9::text[])
               AS u(ip, ipid, vpsid, hostname, customer, assigned, poolid)
         -- محافظ دوم: اگر فیلتر بالادست روزی عوض شود، آدرس نسخه ۶ نباید
         -- با برچسب «نسخه ۴» وارد شود
@@ -295,16 +301,15 @@ export async function discoverNode(node) {
              -- ساب‌نت فقط وقتی پر می‌شود که خالی باشد؛ انتخاب دستی ادمین
              -- نباید هر ساعت بازنویسی شود
              subnet_id   = COALESCE(ip_addresses.subnet_id, EXCLUDED.subnet_id),
-             -- رکوردهایی که پیش از تعیین سرور لنگر وارد شده‌اند اینجا
-             -- گره می‌خورند، وگرنه تا ابد بدون لنگر می‌مانند و ایجنت
-             -- هرگز نمی‌بیندشان
+             -- رکوردهایی که پیش از تعیین لنگر وارد شده‌اند اینجا گره
+             -- می‌خورند، وگرنه تا ابد بدون لنگر می‌مانند و ایجنت هرگز
+             -- نمی‌بیندشان. سرور لنگر از لنگر همان بلوک می‌آید.
              bind_server_id = CASE
                WHEN ip_addresses.access_watch AND ip_addresses.bind_server_id IS NULL
-               THEN $9::int ELSE ip_addresses.bind_server_id END`,
+               THEN EXCLUDED.bind_server_id ELSE ip_addresses.bind_server_id END`,
       [
         addr, ipid, vpsid, hostname, customer, assigned, node.id,
-        node.auto_watch_free !== false && Boolean(node.bind_server_id),
-        node.bind_server_id ?? null,
+        node.auto_watch_free !== false,
         poolid,
       ],
     );
@@ -342,16 +347,30 @@ export async function discoverNode(node) {
   //
   // محافظ اصلی سر جایش است: آدرسی که روی وی‌پی‌اس دیگری باشد هرگز دست
   // نمی‌خورد. لنگر به‌تعریف اختصاصی است و مشتری رویش نیست.
-  const anchorVpsid = String(node.anchor_vpsid || '').trim();
-  if (anchorVpsid) {
+  const anchors = await q(
+    `SELECT id, anchor_vpsid, bind_server_id FROM vz_anchors WHERE node_id = $1`,
+    [node.id],
+  );
+  if (anchors.length) {
     const adopted = await q(
-      `UPDATE ip_addresses SET managed_by_panel = TRUE, updated_at = now()
-        WHERE vz_node_id = $1 AND vz_vpsid = $2 AND NOT managed_by_panel
-        RETURNING id`,
-      [node.id, anchorVpsid],
+      `UPDATE ip_addresses i
+          SET managed_by_panel = TRUE,
+              anchor_id = a.id,
+              bind_server_id = COALESCE(i.bind_server_id, a.bind_server_id),
+              updated_at = now()
+         FROM unnest($2::text[], $3::int[], $4::int[]) AS a(vpsid, id, bind_server_id)
+        WHERE i.vz_node_id = $1 AND i.vz_vpsid = a.vpsid
+          AND (NOT i.managed_by_panel OR i.anchor_id IS DISTINCT FROM a.id)
+        RETURNING i.id`,
+      [
+        node.id,
+        anchors.map((a) => String(a.anchor_vpsid)),
+        anchors.map((a) => a.id),
+        anchors.map((a) => a.bind_server_id),
+      ],
     );
     if (adopted.length) {
-      log(`نود ${node.name}: ${adopted.length} آدرس روی لنگر تحت مدیریت پنل ثبت شد`);
+      log(`نود ${node.name}: ${adopted.length} آدرس روی لنگرها تحت مدیریت پنل ثبت شد`);
     }
   }
 
@@ -410,33 +429,64 @@ export async function discoverNode(node) {
  *   • آدرس قفل‌شده دست نمی‌خورد
  *   • سقف هر اجرا
  */
+/**
+ * اعمال روی یک هایپروایزر — می‌نویسد.
+ *
+ * هر هایپروایزر می‌تواند چند لنگر داشته باشد، چون نودهایش ممکن است در
+ * دیتاسنترهای مختلف باشند. آدرسی از دیتاسنتر «الف» روی لنگری که در
+ * دیتاسنتر «ب» است هرگز روت نمی‌شود.
+ *
+ * تقسیم بر اساس بلوک است نه نود: روت‌شدن یک آدرس به بلوکش بستگی دارد.
+ * هر آدرس لنگرش را از بلوکش می‌گیرد؛ بلوک بدون لنگر به لنگر پیش‌فرض
+ * می‌رود.
+ *
+ * محافظ‌ها، هرکدام برای خطری که واقعا می‌تواند رخ دهد:
+ *   • بدون هیچ لنگری هیچ نوشتنی انجام نمی‌شود
+ *   • آدرسی که به وی‌پی‌اس دیگری تخصیص یافته دست نمی‌خورد
+ *   • از لنگر فقط آدرسی برداشته می‌شود که پنل خودش چسبانده
+ *   • آدرس قفل‌شده دست نمی‌خورد
+ *   • سقف هر اجرا، جدا برای هر لنگر
+ *   • شکست یک لنگر بقیه را متوقف نمی‌کند
+ */
 export async function applyNode(node, { dryRun = true } = {}) {
   const api = clientFor(node);
-  const anchor = String(node.anchor_vpsid || '').trim();
-  if (!/^\d+$/.test(anchor)) {
-    return { ok: false, error: 'شناسه وی‌پی‌اس لنگر برای این نود تعیین نشده است' };
+
+  const anchors = await q(
+    `SELECT id, name, anchor_vpsid, bind_server_id, max_per_run, is_default
+       FROM vz_anchors WHERE node_id = $1 ORDER BY is_default DESC, name`,
+    [node.id],
+  );
+  if (!anchors.length) {
+    return { ok: false, error: 'برای این هایپروایزر هیچ لنگری تعریف نشده است' };
   }
 
   const ips = await api.listIps(node);
   if (!ips.ok) return { ok: false, error: ips.error };
 
+  const fallback = anchors.find((a) => a.is_default) || null;
+
+  // لنگر هر آدرس از بلوکش می‌آید. آدرسی که بلوکش لنگر ندارد به لنگر
+  // پیش‌فرض می‌رود؛ اگر پیش‌فرضی هم نباشد، کنار گذاشته می‌شود تا روی
+  // لنگر اشتباه ننشیند.
   const known = await q(
-    `SELECT host(ip) AS ip, iran_access_status, access_watch, managed_by_panel
-       FROM ip_addresses WHERE version = 4 AND (vz_node_id = $1 OR vz_node_id IS NULL)`,
+    `SELECT host(i.ip) AS ip, i.iran_access_status, i.access_watch, i.managed_by_panel,
+            COALESCE(i.anchor_id, s.anchor_id) AS anchor_id
+       FROM ip_addresses i
+       LEFT JOIN ip_subnets s ON s.id = i.subnet_id
+      WHERE i.version = 4 AND (i.vz_node_id = $1 OR i.vz_node_id IS NULL)`,
     [node.id],
   );
   const byIp = new Map(known.map((k) => [k.ip, k]));
 
-  const cap = Math.min(Math.max(Number(node.max_per_run) || 200, 1), 1000);
-  const attach = [];
-  const detach = [];
+  const byAnchor = new Map(anchors.map((a) => [String(a.id), { anchor: a, attach: [], detach: [] }]));
   const skipped = [];
+  const homeless = [];
 
   for (const row of ips.items) {
     const free = row.vpsid === '0' || row.vpsid === '';
-    const onAnchor = row.vpsid === anchor;
+    const holder = anchors.find((a) => String(a.anchor_vpsid) === row.vpsid) || null;
 
-    if (row.locked || (!free && !onAnchor)) {
+    if (row.locked || (!free && !holder)) {
       skipped.push(row.ip);
       continue;
     }
@@ -445,81 +495,116 @@ export async function applyNode(node, { dryRun = true } = {}) {
     if (!panel) continue;
 
     if (panel.iran_access_status === 'released') {
-      if (onAnchor && panel.managed_by_panel) detach.push(row.ip);
+      if (holder && panel.managed_by_panel) {
+        byAnchor.get(String(holder.id))?.detach.push(row.ip);
+      }
       continue;
     }
-    if (free && panel.access_watch) attach.push(row.ip);
+
+    if (!free || !panel.access_watch) continue;
+
+    const target = panel.anchor_id
+      ? anchors.find((a) => a.id === panel.anchor_id)
+      : fallback;
+    if (!target) {
+      homeless.push(row.ip);
+      continue;
+    }
+    byAnchor.get(String(target.id))?.attach.push(row.ip);
   }
 
-  const attachSlice = attach.slice(0, cap);
-  const onAnchorNow = ips.items.filter((r) => r.vpsid === anchor).map((r) => r.ip);
-  const finalList = Array.from(
-    new Set([...onAnchorNow.filter((ip) => !detach.includes(ip)), ...attachSlice]),
-  );
-
-  const write = await clientFor(node).writeVpsIps(node, anchor, finalList, { dryRun });
-  if (!write.ok) {
-    await q(
-      `INSERT INTO vz_sync_runs (node_id, kind, dry_run, ok, detail) VALUES ($1, 'apply', $2, FALSE, $3)`,
-      [node.id, dryRun, write.error],
+  if (homeless.length) {
+    logErr(
+      `${node.name}: ${homeless.length} آدرس لنگر ندارد —`,
+      'بلوکشان لنگر تعیین‌شده ندارد و لنگر پیش‌فرضی هم نیست:',
+      homeless.slice(0, 8).join('، '),
     );
-    return { ok: false, error: write.error };
   }
 
-  if (!dryRun) {
-    if (attachSlice.length) {
-      await q(
-        `UPDATE ip_addresses
-            SET managed_by_panel = TRUE, vz_vpsid = $2, vz_synced_at = now(),
-                bind_server_id = COALESCE($3::int, bind_server_id)
-          WHERE host(ip) = ANY($1::text[])`,
-        [attachSlice, anchor, node.bind_server_id ?? null],
-      );
+  const attachedAll = [];
+  const detachedAll = [];
+  const failures = [];
+  let previewFields = 0;
+  let previewDisks = false;
+
+  for (const [, plan] of byAnchor) {
+    const a = plan.anchor;
+    const cap = Math.min(Math.max(Number(a.max_per_run) || 200, 1), 1000);
+    const attachSlice = plan.attach.slice(0, cap);
+
+    const onAnchorNow = ips.items
+      .filter((r) => r.vpsid === String(a.anchor_vpsid))
+      .map((r) => r.ip);
+    const finalList = Array.from(
+      new Set([...onAnchorNow.filter((ip) => !plan.detach.includes(ip)), ...attachSlice]),
+    );
+
+    // اگر برای این لنگر هیچ تغییری نیست، اصلا درخواستی فرستاده نمی‌شود
+    if (!attachSlice.length && !plan.detach.length) continue;
+
+    const write = await api.writeVpsIps(node, a.anchor_vpsid, finalList, { dryRun });
+    if (!write.ok) {
+      failures.push(`${a.name}: ${write.error}`);
+      continue;
     }
-    if (detach.length) {
-      // access_watch از قبل هنگام «آزاد شد» خاموش شده؛ اینجا پیوند لنگر
-      // هم پاک می‌شود تا ایجنت آدرس را از کارت شبکه بردارد
-      await q(
-        `UPDATE ip_addresses
-            SET managed_by_panel = FALSE, vz_vpsid = NULL, bind_server_id = NULL, vz_synced_at = now()
-          WHERE host(ip) = ANY($1::text[])`,
-        [detach],
-      );
+
+    const sentKeys = Object.keys(write.sent || {});
+    if (sentKeys.length > previewFields) previewFields = sentKeys.length;
+    if (sentKeys.some((k) => k.startsWith('disks'))) previewDisks = true;
+
+    attachedAll.push(...attachSlice);
+    detachedAll.push(...plan.detach);
+
+    if (!dryRun) {
+      if (attachSlice.length) {
+        await q(
+          `UPDATE ip_addresses
+              SET managed_by_panel = TRUE, vz_vpsid = $2, anchor_id = $4, vz_synced_at = now(),
+                  bind_server_id = COALESCE($3::int, bind_server_id)
+            WHERE host(ip) = ANY($1::text[])`,
+          [attachSlice, String(a.anchor_vpsid), a.bind_server_id ?? null, a.id],
+        );
+      }
+      if (plan.detach.length) {
+        await q(
+          `UPDATE ip_addresses
+              SET managed_by_panel = FALSE, vz_vpsid = NULL, bind_server_id = NULL,
+                  vz_synced_at = now()
+            WHERE host(ip) = ANY($1::text[])`,
+          [plan.detach],
+        );
+      }
     }
   }
 
-  // در حالت آزمایشی، خلاصه بدنه‌ای که فرستاده می‌شد هم ثبت می‌شود.
-  // بدون آن، «آزمون ایمنی» ممکن نبود: کاربر باید پیش از نوشتن روی پنل
-  // واقعی ببیند که دیسک‌ها در درخواست هستند، چون دیسک نفرستاده حذف
-  // می‌شود.
-  const sentKeys = Object.keys(write.sent || {});
-  const hasDisks = sentKeys.some((k) => k.startsWith('disks'));
-  const payloadNote = dryRun
-    ? ` — بدنه: ${sentKeys.length} فیلد، دیسک ${hasDisks ? 'هست' : 'نیست ⚠'}`
+  const payloadNote = dryRun && previewFields
+    ? ` — بدنه: ${previewFields} فیلد، دیسک ${previewDisks ? 'هست' : 'ندارد'}`
     : '';
+  const detail =
+    `${dryRun ? 'آزمایشی — ' : ''}${anchors.length} لنگر، ` +
+    `${attachedAll.length} چسبید، ${detachedAll.length} جدا شد، ` +
+    `${skipped.length} دست‌نخورده` +
+    (homeless.length ? `، ${homeless.length} بدون لنگر` : '') +
+    payloadNote;
 
   await q(
     `INSERT INTO vz_sync_runs (node_id, kind, dry_run, attached, detached, ok, detail)
-     VALUES ($1, 'apply', $2, $3, $4, TRUE, $5)`,
+     VALUES ($1, 'apply', $2, $3, $4, $5, $6)`,
     [
       node.id,
       dryRun,
-      attachSlice.length,
-      detach.length,
-      `${dryRun ? 'آزمایشی — ' : ''}لنگر ${anchor}: ${finalList.length} آدرس، ` +
-        `${skipped.length} دست‌نخورده${payloadNote}`,
+      attachedAll.length,
+      detachedAll.length,
+      failures.length === 0,
+      failures.length ? `${detail} | ناموفق: ${failures.join(' | ')}` : detail,
     ],
   );
 
-  if (dryRun && !hasDisks) {
-    logErr(
-      `نود ${node.name}: بدنه آزمایشی هیچ فیلد دیسکی ندارد.`,
-      'اگر وی‌پی‌اس لنگر دیسک دارد، اعمال واقعی ممکن است حذفشان کند.',
-      `فیلدهای موجود: ${sentKeys.slice(0, 20).join(', ')}`,
-    );
+  if (failures.length) {
+    return { ok: false, error: failures.join(' | '), attached: attachedAll, detached: detachedAll };
   }
 
-  return { ok: true, dryRun, attached: attachSlice, detached: detach, skipped };
+  return { ok: true, dryRun, attached: attachedAll, detached: detachedAll, skipped, homeless };
 }
 
 /** کشف دوره‌ای همه نودهای فعال */

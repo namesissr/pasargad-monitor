@@ -1,4 +1,4 @@
-import { query, queryOne } from '@/lib/db';
+import { NOT_ANCHOR_SERVER, query, queryOne } from '@/lib/db';
 import { generateAgentToken, requireUser } from '@/lib/auth';
 import { fail, handle, ok, readJson } from '@/lib/http';
 import { getSetting } from '@/lib/settings';
@@ -73,6 +73,11 @@ export async function GET(req: Request) {
     const params: unknown[] = [period.from, period.to];
 
     if (!includeInactive) where.push('s.is_active');
+
+    // سرورهای لنگر پنهان‌اند مگر صریح خواسته شوند. فرم انتخاب لنگر
+    // «anchors=1» می‌فرستد، وگرنه لنگری که از قبل انتخاب شده در فهرست
+    // خودش پیدا نمی‌شد.
+    if (url.searchParams.get('anchors') !== '1') where.push(NOT_ANCHOR_SERVER);
     if (datacenterId === 'none') {
       where.push('s.datacenter_id IS NULL');
     } else if (datacenterId && datacenterId !== 'all') {

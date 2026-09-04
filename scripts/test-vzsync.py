@@ -123,7 +123,13 @@ NETWORK_CASES = [
 
 
 def decide(vz_vpsid, locked, panel):
-    """بازسازی حلقه applyNode در worker/vz-sync.mjs"""
+    """
+    بازسازی حلقه applyNode در worker/vz-sync.mjs.
+
+    «on_anchor» یعنی این آدرس روی یکی از لنگرهای همین هایپروایزر نشسته.
+    یک هایپروایزر می‌تواند چند لنگر داشته باشد — برای نودهایی که در
+    دیتاسنترهای مختلف‌اند — ولی جدول تصمیم برای همه یکسان است.
+    """
     free = vz_vpsid in ("0", "")
     on_anchor = vz_vpsid == ANCHOR
 
@@ -197,14 +203,17 @@ def main():
     # کد واقعی باید با جدول بالا بخواند
     src = io.open(os.path.join(ROOT, "worker", "vz-sync.mjs"), encoding="utf-8").read()
     for needle, why in [
-        ("if (row.locked || (!free && !onAnchor)) {", "محافظ قفل و وی‌پی‌اس دیگر"),
-        ("if (onAnchor && panel.managed_by_panel) detach.push(row.ip);", "شرط جداکردن"),
-        ("if (free && panel.access_watch) attach.push(row.ip);", "شرط چسباندن"),
+        ("if (row.locked || (!free && !holder)) {", "محافظ قفل و وی‌پی‌اس دیگر"),
+        ("if (holder && panel.managed_by_panel) {", "شرط جداکردن"),
+        ("if (!free || !panel.access_watch) continue;", "شرط چسباندن"),
+        ("anchors.find((a) => String(a.anchor_vpsid) === row.vpsid)", "تشخیص لنگر از میان چند لنگر"),
+        ("const target = panel.anchor_id", "لنگر هر آدرس از بلوکش می‌آید"),
+        ("if (!target) {", "آدرس بدون لنگر کنار گذاشته می‌شود، نه روی لنگر اشتباه"),
         ("const cidr = networkOf(gateway, prefix);", "شبکه از گیت‌وی حساب می‌شود"),
         ("for (const row of ips.items) {", "بلوک‌ها از ردیف‌های آی‌پی ساخته می‌شوند"),
         ("if (row.locked) {", "آدرس قفل‌شده در کشف وارد نمی‌شود"),
-        ("WHERE vz_node_id = $1 AND vz_vpsid = $2 AND NOT managed_by_panel",
-         "آدرس روی لنگر تحت مدیریت پنل ثبت می‌شود"),
+        ("WHERE i.vz_node_id = $1 AND i.vz_vpsid = a.vpsid",
+         "آدرس روی هر یک از لنگرها تحت مدیریت پنل ثبت می‌شود"),
         ("[node.id, allAddr],", "تشخیص حذف از نود با فهرست کامل، نه فهرست واردشده"),
     ]:
         if needle in src:

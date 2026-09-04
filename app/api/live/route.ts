@@ -1,4 +1,4 @@
-import { query } from '@/lib/db';
+import { NOT_ANCHOR_SERVER, query } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
 import { handle, ok } from '@/lib/http';
 import { getSetting } from '@/lib/settings';
@@ -60,7 +60,7 @@ export async function GET() {
              FROM server_metrics_daily d
             WHERE d.server_id = s.id AND d.day BETWEEN $1::date AND $2::date
          ) t ON TRUE
-        WHERE s.is_active
+        WHERE s.is_active AND ${NOT_ANCHOR_SERVER}
         ORDER BY (s.status = 'down') DESC, s.name`,
       [period.from, period.to],
     );

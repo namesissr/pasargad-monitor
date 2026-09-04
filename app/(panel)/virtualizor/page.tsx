@@ -43,6 +43,19 @@ interface ServerOption {
   name: string;
 }
 
+interface AnchorRow {
+  id: number;
+  node_id: number;
+  name: string;
+  anchor_vpsid: string;
+  bind_server_id: number | null;
+  bind_server_name: string | null;
+  max_per_run: number;
+  is_default: boolean;
+  block_count: number;
+  ip_count: number;
+}
+
 interface VzData {
   nodes: NodeRow[];
   runs: RunRow[];
@@ -56,12 +69,14 @@ const NODE_KIND_LABEL: Record<string, string> = {
   solusvm2: 'سولوس‌وی‌ام ۲',
 };
 
-/** نوشتن روی هایپروایزر فعلا فقط برای ویژالیزور پیاده شده */
-const canWrite = (kind: string) => kind === 'virtualizor';
+/** هر دو نوع نوشتن دارند؛ این برای نوع‌های آینده باقی می‌ماند */
+const canWrite = (kind: string) => ['virtualizor', 'solusvm2'].includes(kind);
 
 export default function VirtualizorPage() {
   const { data, loading, error, reload } = useLoad<VzData>('/api/virtualizor');
+  const anchors = useLoad<{ anchors: AnchorRow[] }>('/api/vz-anchors');
   const [editing, setEditing] = useState<NodeRow | 'new' | null>(null);
+  const [anchorEdit, setAnchorEdit] = useState<{ node: NodeRow; anchor: AnchorRow | null } | null>(null);
   const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -175,10 +190,10 @@ export default function VirtualizorPage() {
                 </button>
                 {canWrite(node.kind) && (
                   <>
-                    <button type="button" className="btn-ghost text-xs" onClick={() => queue(node.id, 'apply', false)} disabled={busy || !node.anchor_vpsid}>
+                    <button type="button" className="btn-ghost text-xs" onClick={() => queue(node.id, 'apply', false)} disabled={busy}>
                       پیش‌نمایش اعمال
                     </button>
-                    <button type="button" className="btn-ghost text-xs" onClick={() => queue(node.id, 'apply', true)} disabled={busy || !node.anchor_vpsid}>
+                    <button type="button" className="btn-ghost text-xs" onClick={() => queue(node.id, 'apply', true)} disabled={busy}>
                       اعمال واقعی
                     </button>
                   </>
@@ -193,13 +208,57 @@ export default function VirtualizorPage() {
             </div>
 
             {node.last_error && <Notice type="error">{node.last_error}</Notice>}
-            {!canWrite(node.kind) && (
-              <Notice type="warn">
-                برای سولوس‌وی‌ام ۲ فعلا فقط کشف و پایش فعال است. آی‌پی‌ها، بلوک‌ها و مشتری هر
-                آدرس می‌آیند و وضعیت اکسسشان سنجیده می‌شود، ولی چسباندن و برداشتن آی‌پی باید
-                دستی در سولوس انجام شود.
-              </Notice>
-            )}
+
+            {/* لنگرها. یک هایپروایزر با نودهای چند دیتاسنتری به چند لنگر
+                نیاز دارد؛ آدرس یک دیتاسنتر روی لنگر دیتاسنتر دیگر روت
+                نمی‌شود. */}
+            <div className="border-t border-line pt-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold">لنگرها</span>
+                <button
+                  type="button"
+                  className="text-xs text-muted hover:text-cyan"
+                  onClick={() => setAnchorEdit({ node, anchor: null })}
+                >
+                  افزودن لنگر
+                </button>
+              </div>
+              {(() => {
+                const list = (anchors.data?.anchors ?? []).filter((a) => a.node_id === node.id);
+                if (!list.length) {
+                  return (
+                    <Notice type="warn">
+                      لنگری تعریف نشده. تا لنگری نباشد هیچ آدرسی به وی‌پی‌اس نگهدارنده تخصیص
+                      نمی‌یابد و همه در حالت «روت نشده» می‌مانند.
+                    </Notice>
+                  );
+                }
+                return (
+                  <div className="space-y-1.5">
+                    {list.map((a) => (
+                      <div key={a.id} className="flex items-center gap-2 text-xs flex-wrap">
+                        <span className="font-bold">{a.name}</span>
+                        {a.is_default && <span className="badge bg-cyan/10 text-cyan">پیش‌فرض</span>}
+                        <Mono className="text-muted">vps {a.anchor_vpsid}</Mono>
+                        <span className="text-muted">
+                          {faNum(a.block_count)} بلوک · {faNum(a.ip_count)} آدرس
+                        </span>
+                        {!a.bind_server_id && (
+                          <span className="badge bg-amber/15 text-amber">سرور لنگر ندارد</span>
+                        )}
+                        <button
+                          type="button"
+                          className="text-muted hover:text-cyan ms-auto"
+                          onClick={() => setAnchorEdit({ node, anchor: a })}
+                        >
+                          ویرایش
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
             {canWrite(node.kind) && !node.anchor_vpsid && (
               <p className="text-xs text-muted">
                 شناسه وی‌پی‌اس لنگر تعیین نشده — فقط کشف انجام می‌شود و هیچ چیزی روی این نود
@@ -212,11 +271,6 @@ export default function VirtualizorPage() {
                 داخل خود وی‌پی‌اس هم روی کارت شبکه بنشیند تا جواب بدهد. بدون این، همه آی‌پی‌ها
                 برای همیشه «روت نشده» می‌مانند.
               </Notice>
-            )}
-            {canWrite(node.kind) && node.bind_server_name && (
-              <p className="text-xs text-muted">
-                لنگر: وی‌پی‌اس {node.anchor_vpsid} در ویژالیزور، سرور «{node.bind_server_name}» در پنل
-              </p>
             )}
           </section>
         ))}
@@ -275,6 +329,19 @@ export default function VirtualizorPage() {
         )}
       </section>
 
+      {anchorEdit && (
+        <AnchorForm
+          node={anchorEdit.node}
+          anchor={anchorEdit.anchor}
+          onClose={() => setAnchorEdit(null)}
+          onDone={() => {
+            setAnchorEdit(null);
+            anchors.reload();
+            reload();
+          }}
+        />
+      )}
+
       {editing && (
         <NodeForm
           node={editing === 'new' ? null : editing}
@@ -310,7 +377,7 @@ function NodeForm({
     bind_server_id: node?.bind_server_id ? String(node.bind_server_id) : '',
     auto_watch_free: node?.auto_watch_free ?? true,
   });
-  const servers = useLoad<{ servers: ServerOption[] }>('/api/servers');
+  const servers = useLoad<{ servers: ServerOption[] }>('/api/servers?anchors=1');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -463,6 +530,142 @@ function NodeForm({
         {err && <Notice type="error">{err}</Notice>}
 
         <div className="flex gap-2 justify-end">
+          <button type="button" className="btn-ghost" onClick={onClose}>انصراف</button>
+          <button type="button" className="btn" onClick={save} disabled={busy}>
+            {busy ? 'در حال ذخیره…' : 'ذخیره'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * فرم لنگر.
+ *
+ * هر لنگر دو شناسه دارد و هر دو لازم‌اند:
+ *   • شناسه وی‌پی‌اس در خود هایپروایزر — برای تخصیص آی‌پی
+ *   • رکورد همان وی‌پی‌اس در بخش سرورها — تا ایجنت بایند فهرستش را بگیرد
+ *
+ * بدون دومی، آدرس تخصیص می‌یابد ولی داخل مهمان روی کارت نمی‌نشیند و
+ * هیچ‌وقت جواب نمی‌دهد.
+ */
+function AnchorForm({
+  node,
+  anchor,
+  onClose,
+  onDone,
+}: {
+  node: NodeRow;
+  anchor: AnchorRow | null;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: anchor?.name ?? '',
+    anchor_vpsid: anchor?.anchor_vpsid ?? '',
+    bind_server_id: anchor?.bind_server_id ? String(anchor.bind_server_id) : '',
+    max_per_run: String(anchor?.max_per_run ?? 200),
+    is_default: anchor?.is_default ?? false,
+  });
+  const servers = useLoad<{ servers: ServerOption[] }>('/api/servers?anchors=1');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function set(key: keyof typeof form) {
+    return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setForm((f) => ({ ...f, [key]: e.target.value }));
+  }
+
+  async function save() {
+    setErr(null);
+    setBusy(true);
+    try {
+      const payload = {
+        node_id: node.id,
+        name: form.name,
+        anchor_vpsid: form.anchor_vpsid,
+        bind_server_id: form.bind_server_id ? Number(form.bind_server_id) : null,
+        max_per_run: Number(form.max_per_run) || 200,
+        is_default: form.is_default,
+      };
+      if (anchor) await api.patch('/api/vz-anchors', { id: anchor.id, ...payload });
+      else await api.post('/api/vz-anchors', payload);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'ذخیره لنگر ناموفق بود');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!anchor) return;
+    if (!confirm(`لنگر «${anchor.name}» حذف شود؟ بلوک‌هایش به لنگر پیش‌فرض برمی‌گردند.`)) return;
+    setBusy(true);
+    try {
+      await api.del(`/api/vz-anchors?id=${anchor.id}`);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'حذف لنگر ناموفق بود');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open title={anchor ? `ویرایش لنگر ${anchor.name}` : `لنگر تازه برای ${node.name}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="نام لنگر" hint="مثلاً نام دیتاسنتری که پوشش می‌دهد">
+            <input className="input" value={form.name} onChange={set('name')} placeholder="تهران — رسپینا" />
+          </Field>
+          <Field label="شناسه وی‌پی‌اس لنگر" hint="عدد در خود هایپروایزر">
+            <input className="input ltr" value={form.anchor_vpsid} onChange={set('anchor_vpsid')} placeholder="2023" />
+          </Field>
+        </div>
+
+        <div className="grid sm:grid-cols-3 gap-4">
+          <Field label="سرور لنگر در پنل" hint="همان وی‌پی‌اس، ثبت‌شده در بخش سرورها">
+            <select
+              className="input"
+              value={form.bind_server_id}
+              onChange={(e) => setForm((f) => ({ ...f, bind_server_id: e.target.value }))}
+            >
+              <option value="">— انتخاب نشده —</option>
+              {(servers.data?.servers ?? []).map((sv) => (
+                <option key={sv.id} value={sv.id}>{sv.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="سقف هر اجرا">
+            <input className="input ltr" value={form.max_per_run} onChange={set('max_per_run')} />
+          </Field>
+          <Field label="لنگر پیش‌فرض" hint="بلوکی که لنگر تعیین‌شده ندارد به اینجا می‌رود">
+            <select
+              className="input"
+              value={form.is_default ? 'true' : 'false'}
+              onChange={(e) => setForm((f) => ({ ...f, is_default: e.target.value === 'true' }))}
+            >
+              <option value="false">نه</option>
+              <option value="true">بله</option>
+            </select>
+          </Field>
+        </div>
+
+        <Notice type="warn">
+          این وی‌پی‌اس تنها چیزی است که پنل روی آن تغییر می‌دهد. باید خالی و بدون مشتری باشد، و
+          روی همان نودی ساخته شود که بلوک‌های این لنگر به آن روت می‌شوند.
+        </Notice>
+
+        {err && <Notice type="error">{err}</Notice>}
+
+        <div className="flex gap-2 justify-end">
+          {anchor && (
+            <button type="button" className="text-xs text-muted hover:text-danger me-auto" onClick={remove}>
+              حذف لنگر
+            </button>
+          )}
           <button type="button" className="btn-ghost" onClick={onClose}>انصراف</button>
           <button type="button" className="btn" onClick={save} disabled={busy}>
             {busy ? 'در حال ذخیره…' : 'ذخیره'}

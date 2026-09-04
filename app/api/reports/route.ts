@@ -1,4 +1,4 @@
-import { query } from '@/lib/db';
+import { NOT_ANCHOR_SERVER, query } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
 import { fail, handle, num, ok } from '@/lib/http';
 import { getSetting } from '@/lib/settings';
@@ -84,7 +84,9 @@ export async function GET(req: Request) {
 
     const servers = await query<{ id: number; name: string; main_ip: string; traffic_quota_gb: number }>(
       `SELECT id, name, host(main_ip) AS main_ip, traffic_quota_gb::float8 AS traffic_quota_gb
-         FROM servers ${sid ? 'WHERE id = $1' : 'WHERE is_active'} ORDER BY name`,
+         FROM servers s
+        ${sid ? 'WHERE s.id = $1' : `WHERE s.is_active AND ${NOT_ANCHOR_SERVER}`}
+        ORDER BY s.name`,
       sid ? [sid] : [],
     );
 

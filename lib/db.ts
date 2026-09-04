@@ -75,3 +75,17 @@ export async function transaction<T>(fn: (q: ScopedQuery) => Promise<T>): Promis
     client.release();
   }
 }
+
+/**
+ * سرور لنگر: وی‌پی‌اسی که فقط برای نگه‌داشتن آی‌پی‌های اکسس‌شده ساخته شده.
+ *
+ * این‌ها موجودی واقعی نیستند و در فهرست سرورها، گزارش مصرف و لاگ ترافیک
+ * فقط نویز می‌سازند — ترافیکشان ناچیز است و مشتری ندارند.
+ *
+ * تشخیص از روی vz_anchors است نه یک ستون جدا، تا وقتی وی‌پی‌اسی دیگر
+ * لنگر نباشد خودکار به فهرست‌ها برگردد.
+ *
+ * هرجا استفاده می‌شود، جدول servers باید با نام «s» صدا زده شده باشد.
+ */
+export const NOT_ANCHOR_SERVER =
+  'NOT EXISTS (SELECT 1 FROM vz_anchors va WHERE va.bind_server_id = s.id)';

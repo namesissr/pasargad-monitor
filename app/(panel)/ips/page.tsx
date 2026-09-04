@@ -56,9 +56,17 @@ interface IpData {
   probeHealth: { outside: number; outside_live: number; inside: number; inside_live: number } | null;
 }
 
+interface AnchorOption {
+  id: number;
+  name: string;
+  node_name: string;
+}
+
 interface SubnetRow {
   id: number;
   cidr: string;
+  anchor_id: number | null;
+  anchor_name: string | null;
   version: number;
   gateway: string | null;
   provider: string | null;
@@ -100,7 +108,20 @@ export default function IpsPage() {
   const { data, loading, error, reload } = useLoad<IpData>(`/api/ips?${params}`);
   const subnets = useLoad<{ subnets: SubnetRow[] }>('/api/subnets');
   const [purging, setPurging] = useState<SubnetRow | null>(null);
-  const servers = useLoad<{ servers: { id: number; name: string }[] }>('/api/servers');
+  const anchors = useLoad<{ anchors: AnchorOption[] }>('/api/vz-anchors');
+  const [anchorErr, setAnchorErr] = useState<string | null>(null);
+
+  async function setBlockAnchor(subnetId: number, anchorId: string) {
+    setAnchorErr(null);
+    try {
+      await api.patch('/api/subnets', { id: subnetId, anchor_id: anchorId ? Number(anchorId) : null });
+      subnets.reload();
+      reload();
+    } catch (e) {
+      setAnchorErr(e instanceof ApiError ? e.message : 'تعیین لنگر انجام نشد');
+    }
+  }
+  const servers = useLoad<{ servers: { id: number; name: string }[] }>('/api/servers?anchors=1');
 
   const total = data?.total ?? 0;
   const pages = Math.max(1, Math.ceil(total / (data?.limit ?? 100)));
@@ -412,6 +433,11 @@ export default function IpsPage() {
       <section className="card overflow-hidden">
         <div className="px-4 py-3 border-b border-line">
           <h2 className="text-sm font-bold">بلوک‌های آی‌پی</h2>
+          <p className="text-xs text-muted mt-1">
+            لنگر هر بلوک تعیین می‌کند آدرس‌هایش روی کدام وی‌پی‌اس بنشینند. برای نودهایی که در
+            دیتاسنترهای مختلف‌اند، هر بلوک باید لنگر همان دیتاسنتر را بگیرد.
+          </p>
+          {anchorErr && <p className="text-xs text-danger mt-1">{anchorErr}</p>}
         </div>
         {(subnets.data?.subnets ?? []).length === 0 ? (
           <p className="p-6 text-center text-xs text-muted">بلوکی ثبت نشده است.</p>
@@ -427,6 +453,7 @@ export default function IpsPage() {
                   <th>تخصیص‌یافته</th>
                   <th>آزاد</th>
                   <th>مسدود</th>
+                  <th>لنگر</th>
                   <th></th>
                 </tr>
               </thead>
@@ -439,7 +466,23 @@ export default function IpsPage() {
                     <td className="text-xs">{faNum(n.total)}</td>
                     <td className="text-xs text-cyan">{faNum(n.assigned)}</td>
                     <td className="text-xs text-ok">{faNum(n.free)}</td>
-                    <td className="text-xs text-danger">{faNum(n.blocked)}</td>
+                    <td className="text-xs">
+                      {/* لنگر هر بلوک تعیین می‌کند آدرس‌هایش روی کدام
+                          وی‌پی‌اس بنشینند. با نودهای چند دیتاسنتری، یک
+                          لنگر برای همه کار نمی‌کند. */}
+                      <select
+                        className="input py-1 text-xs"
+                        value={n.anchor_id ? String(n.anchor_id) : ''}
+                        onChange={(e) => setBlockAnchor(n.id, e.target.value)}
+                      >
+                        <option value="">پیش‌فرض</option>
+                        {(anchors.data?.anchors ?? []).map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.node_name} — {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
                     <td className="text-end">
                       <button
                         type="button"
