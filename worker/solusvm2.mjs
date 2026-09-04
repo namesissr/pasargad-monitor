@@ -146,8 +146,17 @@ export async function listPools(node) {
       // شمارش پنل از سولوس کمتر درمی‌آید.
       from: str(b.from).trim(),
       to: str(b.to).trim(),
-      // تعداد اعلامی خود سولوس، برای مقایسه با شمارش پنل
-      totalIps: Number.isFinite(Number(b.total_ips_count)) ? Number(b.total_ips_count) : null,
+      // تعداد اعلامی خود سولوس، برای مقایسه با شمارش پنل.
+      //
+      // با احتیاط خوانده می‌شود: در پاسخ واقعی این فیلد همیشه عدد نیست.
+      // Number('') برابر صفر است، پس بررسی خالی‌بودن هم لازم است وگرنه
+      // بلوکی بدون این فیلد «صفر آدرس» گزارش می‌شد.
+      totalIps: (() => {
+        const raw = b.total_ips_count;
+        if (raw === null || raw === undefined || raw === '') return null;
+        const n = Number(raw);
+        return Number.isFinite(n) && n >= 0 ? Math.trunc(n) : null;
+      })(),
     }))
     .filter((b) => b.poolid && !b.isV6 && isIpv4(b.gateway));
 
@@ -221,7 +230,14 @@ export async function listIps(node) {
     // که هرگز به سروری داده نشده، اصلا دیده نمی‌شد.
     const first = ipToInt(block.from);
     const last = ipToInt(block.to);
-    if (first !== null && last !== null && last >= first) {
+    if (first === null || last === null || last < first) {
+      // بدون بازه، فقط آدرس‌های ثبت‌شده می‌آیند و شمارش پنل از سولوس کمتر
+      // می‌ماند. این باید دیده شود، نه اینکه بی‌صدا ناقص بماند.
+      logErr(
+        `نود ${node.name}: بازه بلوک «${block.name || block.poolid}» خوانده نشد —`,
+        `from «${block.from}» تا «${block.to}». فقط آدرس‌های ثبت‌شده وارد می‌شوند.`,
+      );
+    } else {
       const span = last - first + 1;
       if (span > MAX_ENUM) {
         logErr(

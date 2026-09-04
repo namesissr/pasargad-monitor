@@ -14,6 +14,14 @@ export async function GET() {
               n.provider, n.location, n.label, n.notes, n.created_at,
               n.anchor_id, a.name AS anchor_name, a.node_id AS anchor_node_id,
               n.vz_total_ips,
+              -- ظرفیت واقعی بلوک، از روی خود سی‌آی‌دی‌آر. به هیچ فیلدی از
+              -- هایپروایزر وابسته نیست، پس همیشه عددی برای مقایسه هست —
+              -- حتی وقتی آن فیلد نیامده یا شکلش عوض شده.
+              CASE
+                WHEN family(n.cidr) <> 4 THEN NULL
+                WHEN masklen(n.cidr) >= 31 THEN (2 ^ (32 - masklen(n.cidr)))::int
+                ELSE (2 ^ (32 - masklen(n.cidr)))::int - 2
+              END AS capacity,
               COALESCE(c.total, 0)::int    AS total,
               COALESCE(c.assigned, 0)::int AS assigned,
               COALESCE(c.free, 0)::int     AS free,

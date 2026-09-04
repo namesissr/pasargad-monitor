@@ -68,6 +68,7 @@ interface SubnetRow {
   anchor_id: number | null;
   anchor_name: string | null;
   vz_total_ips: number | null;
+  capacity: number | null;
   version: number;
   gateway: string | null;
   provider: string | null;
@@ -470,13 +471,19 @@ export default function IpsPage() {
                       </span>
                     </td>
                     <td><Mono className="text-muted">{n.gateway || '—'}</Mono></td>
-                    <td className="text-xs">
-                      {faNum(n.total)}
-                      {/* اگر شمارش پنل با شمارش هایپروایزر نخواند، همین‌جا
-                          دیده شود — نه اینکه کسی دو پنل را دستی مقایسه کند */}
-                      {n.vz_total_ips !== null && n.vz_total_ips !== n.total && (
-                        <span className="text-amber" title="تعداد اعلامی هایپروایزر">
-                          {' '}/ {faNum(n.vz_total_ips)}
+                    {/* «ثبت‌شده از ظرفیت». ظرفیت از خود سی‌آی‌دی‌آر حساب
+                        می‌شود، پس همیشه هست. اگر کمتر از ظرفیت باشد یعنی
+                        کشف همه آدرس‌ها را نیاورده و باید دیده شود. */}
+                    <td className="text-xs whitespace-nowrap">
+                      <span className={n.capacity !== null && n.total < n.capacity ? 'text-amber' : ''}>
+                        {faNum(n.total)}
+                      </span>
+                      {n.capacity !== null && (
+                        <span className="text-muted"> از {faNum(n.capacity)}</span>
+                      )}
+                      {n.vz_total_ips !== null && n.vz_total_ips !== n.capacity && (
+                        <span className="text-muted" title="تعداد اعلامی هایپروایزر">
+                          {' '}({faNum(n.vz_total_ips)})
                         </span>
                       )}
                     </td>

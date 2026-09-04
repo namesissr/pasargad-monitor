@@ -244,7 +244,10 @@ def main():
         ("delayed: false", "اجرای بی‌درنگ، نه صف تاخیری"),
         ("const MAX_ENUM = 8192;", "سقف شمارش بازه"),
         ("if (seen.has(ip)) continue;", "آدرس ثبت‌شده دوباره ساخته نمی‌شود"),
-        ("totalIps: Number.isFinite(Number(b.total_ips_count))", "تعداد اعلامی بلوک"),
+        ("const raw = b.total_ips_count;", "تعداد اعلامی بلوک با احتیاط خوانده می‌شود"),
+        ("if (raw === null || raw === undefined || raw === '') return null;",
+         "فیلد خالی صفر تفسیر نمی‌شود"),
+        ("بازه بلوک", "نبود بازه بلوک گزارش می‌شود"),
         ("customer: user ? str(user.email) : ''", "مشتری از ایمیل مالک"),
     ]:
         if needle in src:
