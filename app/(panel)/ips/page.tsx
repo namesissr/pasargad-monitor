@@ -56,6 +56,12 @@ interface IpData {
   probeHealth: { outside: number; outside_live: number; inside: number; inside_live: number } | null;
 }
 
+interface HvNode {
+  id: number;
+  name: string;
+  kind: string;
+}
+
 interface AnchorOption {
   id: number;
   name: string;
@@ -91,6 +97,9 @@ export default function IpsPage() {
   const [serverId, setServerId] = useState('');
   const [version, setVersion] = useState('');
   const [access, setAccess] = useState('');
+  // تفکیک بر اساس هایپروایزر. یک سی‌آی‌دی‌آر می‌تواند بین دو سیستم مشترک
+  // باشد؛ بدون تفکیک، آدرس‌هایشان در یک فهرست قاطی می‌شوند.
+  const [hv, setHv] = useState('all');
   const [page, setPage] = useState(1);
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -109,9 +118,11 @@ export default function IpsPage() {
   if (serverId) params.set('server_id', serverId);
   if (version) params.set('version', version);
   if (access) params.set('access', access);
+  if (hv !== 'all') params.set('hv', hv);
 
   const { data, loading, error, reload } = useLoad<IpData>(`/api/ips?${params}`);
-  const subnets = useLoad<{ subnets: SubnetRow[] }>('/api/subnets');
+  const subnets = useLoad<{ subnets: SubnetRow[] }>(`/api/subnets?hv=${hv}`);
+  const hvNodes = useLoad<{ nodes: HvNode[] }>('/api/virtualizor');
   const [purging, setPurging] = useState<SubnetRow | null>(null);
   const anchors = useLoad<{ anchors: AnchorOption[] }>('/api/vz-anchors');
   const [anchorErr, setAnchorErr] = useState<string | null>(null);
@@ -173,6 +184,38 @@ export default function IpsPage() {
           })}
         </div>
       )}
+
+      {/* تفکیک هایپروایزر */}
+      <div className="flex gap-2 text-xs flex-wrap items-center">
+        {([
+          ['all', 'همه'],
+          ['virtualizor', 'ویژالیزور'],
+          ['solusvm2', 'سولوس‌وی‌ام ۲'],
+          ['none', 'بدون هایپروایزر'],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => { setHv(key); setPage(1); }}
+            className={`px-3 py-1.5 rounded-md border transition-colors ${
+              hv === key ? 'bg-cyan/10 text-cyan border-cyan/30' : 'border-line text-muted hover:text-white'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+        {/* با چند نود از یک نوع، گاهی باید فقط یکی را دید */}
+        <select
+          className="input max-w-[220px] py-1.5 text-xs"
+          value={/^\d+$/.test(hv) ? hv : ''}
+          onChange={(e) => { setHv(e.target.value || 'all'); setPage(1); }}
+        >
+          <option value="">— یک نود خاص —</option>
+          {(hvNodes.data?.nodes ?? []).map((n) => (
+            <option key={n.id} value={n.id}>{n.name}</option>
+          ))}
+        </select>
+      </div>
 
       {/* هشدار دیدبان — بدون این، «در انتظار اولین بررسی» تا ابد می‌ماند
           و هیچ‌جا نمی‌گوید چرا */}

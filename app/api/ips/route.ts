@@ -17,6 +17,13 @@ export async function GET(req: Request) {
     const serverId = url.searchParams.get('server_id') || '';
     const subnetId = url.searchParams.get('subnet_id') || '';
     const version = url.searchParams.get('version') || '';
+    // تفکیک بر اساس هایپروایزر. «all» همه، «none» آدرس‌های بدون
+    // هایپروایزر، نام نوع برای همه نودهای آن نوع، و عدد برای یک نود خاص.
+    //
+    // چرا لازم است: یک سی‌آی‌دی‌آر می‌تواند بین دو هایپروایزر مشترک باشد.
+    // بدون تفکیک، آدرس‌های دو سیستم در یک فهرست قاطی می‌شوند و معلوم
+    // نیست هرکدام کجاست.
+    const hv = url.searchParams.get('hv') || 'all';
     const access = url.searchParams.get('access') || '';
     const search = (url.searchParams.get('q') || '').trim();
     const limit = Math.min(500, Math.max(10, num(url.searchParams.get('limit'), 100)));
@@ -65,6 +72,16 @@ export async function GET(req: Request) {
       );
     }
 
+    if (hv === 'none') {
+      where.push('i.vz_node_id IS NULL');
+    } else if (hv === 'virtualizor' || hv === 'solusvm2') {
+      p.push(hv);
+      where.push(`i.vz_node_id IN (SELECT id FROM vz_nodes WHERE kind = $${p.length})`);
+    } else if (/^\d+$/.test(hv)) {
+      p.push(Number(hv));
+      where.push(`i.vz_node_id = $${p.length}`);
+    }
+
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
     const total = await queryOne<{ cnt: number }>(
@@ -111,8 +128,18 @@ export async function GET(req: Request) {
       p,
     );
 
+    // آمار با همان تفکیک، وگرنه اعداد بالای صفحه با فهرست نمی‌خوانند
+    const hvFilter =
+      hv === 'none'
+        ? 'WHERE vz_node_id IS NULL'
+        : hv === 'virtualizor' || hv === 'solusvm2'
+          ? `WHERE vz_node_id IN (SELECT id FROM vz_nodes WHERE kind = '${hv}')`
+          : /^\d+$/.test(hv)
+            ? `WHERE vz_node_id = ${Number(hv)}`
+            : '';
+
     const stats = await query<{ status: string; cnt: number }>(
-      `SELECT status, COUNT(*)::int AS cnt FROM ip_addresses GROUP BY status`,
+      `SELECT status, COUNT(*)::int AS cnt FROM ip_addresses ${hvFilter} GROUP BY status`,
     );
 
     const accessStats = await queryOne<{ watch: number; blocked: number; released7: number }>(
@@ -121,7 +148,7 @@ export async function GET(req: Request) {
               COUNT(*) FILTER (WHERE access_watch AND iran_access_status = 'unreachable')::int AS unreachable,
               COUNT(*) FILTER (WHERE iran_access_status = 'released'
                                AND access_released_at > now() - interval '7 days')::int AS released7
-         FROM ip_addresses`,
+         FROM ip_addresses ${hvFilter}`,
     );
 
     // سلامت دیدبان‌ها. بدون این، «در انتظار اولین بررسی» دو معنی کاملاً

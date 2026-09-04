@@ -6,9 +6,26 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /** فهرست بلوک‌های آی‌پی با شمارش وضعیت آدرس‌های داخلشان */
-export async function GET() {
+export async function GET(req: Request) {
   return handle(async () => {
     await requireUser();
+
+    // همان تفکیک فهرست آی‌پی‌ها. یک سی‌آی‌دی‌آر می‌تواند در دو هایپروایزر
+    // باشد و هرکدام ردیف خودش را دارد؛ بدون این فیلتر، هر دو در فهرست
+    // می‌آیند و تشخیصشان سخت است.
+    const hv = new URL(req.url).searchParams.get('hv') || 'all';
+    const params: unknown[] = [];
+    let hvClause = '';
+    if (hv === 'none') {
+      hvClause = 'WHERE n.vz_node_id IS NULL';
+    } else if (hv === 'virtualizor' || hv === 'solusvm2') {
+      params.push(hv);
+      hvClause = `WHERE vn.kind = $${params.length}`;
+    } else if (/^\d+$/.test(hv)) {
+      params.push(Number(hv));
+      hvClause = `WHERE n.vz_node_id = $${params.length}`;
+    }
+
     const rows = await query(
       `SELECT n.id, n.cidr::text AS cidr, n.version, host(n.gateway) AS gateway,
               n.provider, n.location, n.label, n.notes, n.created_at,
@@ -53,7 +70,9 @@ export async function GET() {
               AND n.vz_node_id IS NOT NULL
               AND i.vz_node_id IS DISTINCT FROM n.vz_node_id
          ) f ON TRUE
+        ${hvClause}
         ORDER BY n.cidr, vn.name NULLS FIRST`,
+      params,
     );
     return ok({ subnets: rows });
   });

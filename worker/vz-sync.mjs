@@ -202,6 +202,19 @@ export async function discoverNode(node) {
     ).catch((e) => logErr(`بلوک ${block.cidr} ثبت نشد:`, e.message));
   }
 
+  // گزارش خلاصه هر بلوک. بدون این، «چرا تعداد کل خالی است» فقط با حدس
+  // قابل پیگیری بود — و همین چند دور رفت‌وبرگشت هزینه داد.
+  {
+    const listed = Array.from(blocks.values()).filter(Boolean);
+    const summary = listed
+      .map((b) => `${b.cidr}(مخزن ${b.poolid || '؟'}، کل ${b.total ?? 'ندارد'})`)
+      .join('، ');
+    log(
+      `نود ${node.name}: مخزن‌ها ${pools.ok ? pools.items.length : 'ناموفق'}،`,
+      `بلوک‌ها ${listed.length} → ${summary || 'هیچ'}`,
+    );
+  }
+
   const madeBlocks = Array.from(blocks.values()).filter(Boolean).length;
   if (!madeBlocks && ips.items.length) {
     logErr(
