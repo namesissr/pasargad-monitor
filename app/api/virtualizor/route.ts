@@ -20,7 +20,7 @@ export async function GET() {
     await requireUser();
 
     const nodes = await query(
-      `SELECT n.id, n.name, n.anchor_vpsid, n.is_active, n.last_sync_at, n.last_error,
+      `SELECT n.id, n.name, n.kind, n.anchor_vpsid, n.is_active, n.last_sync_at, n.last_error,
               n.bind_server_id, sv.name AS bind_server_name,
               (SELECT COUNT(*)::int FROM ip_addresses i WHERE i.vz_node_id = n.id) AS ip_count,
               (SELECT COUNT(*)::int FROM ip_addresses i
@@ -60,14 +60,26 @@ export async function POST(req: Request) {
     const kind = body.kind === 'apply' ? 'apply' : 'discover';
     const dryRun = kind === 'apply' ? body.apply !== true : true;
 
-    const node = await queryOne<{ id: number; anchor_vpsid: string | null; is_active: boolean }>(
-      `SELECT id, anchor_vpsid, is_active FROM vz_nodes WHERE id = $1`,
+    const node = await queryOne<{
+      id: number;
+      anchor_vpsid: string | null;
+      is_active: boolean;
+      kind: string;
+    }>(
+      `SELECT id, anchor_vpsid, is_active, kind FROM vz_nodes WHERE id = $1`,
       [nodeId],
     );
     if (!node) return fail('نود پیدا نشد', 404);
     if (!node.is_active) return fail('این نود غیرفعال است', 400);
     if (kind === 'apply' && !String(node.anchor_vpsid || '').trim()) {
       return fail('برای این نود شناسه وی‌پی‌اس لنگر تعیین نشده است', 400);
+    }
+    // نوشتن روی سولوس هنوز فعال نیست؛ صف‌کردنش فقط یک ردیف ناموفق می‌سازد
+    if (kind === 'apply' && node.kind === 'solusvm2') {
+      return fail(
+        'تخصیص خودکار آی‌پی برای سولوس‌وی‌ام ۲ هنوز فعال نیست. کشف و پایش کار می‌کنند.',
+        400,
+      );
     }
 
     // درخواست تکراری صف را پر نکند — کاربری که دکمه را دوبار می‌زند نباید

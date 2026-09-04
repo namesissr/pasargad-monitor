@@ -9,6 +9,7 @@ import { faNum, timeAgo } from '@/lib/format';
 interface NodeRow {
   id: number;
   name: string;
+  kind: string;
   url?: string;
   anchor_vpsid: string | null;
   max_per_run?: number;
@@ -49,6 +50,14 @@ interface VzData {
 }
 
 const KIND_LABEL: Record<string, string> = { discover: 'کشف', apply: 'اعمال' };
+
+const NODE_KIND_LABEL: Record<string, string> = {
+  virtualizor: 'ویژالیزور',
+  solusvm2: 'سولوس‌وی‌ام ۲',
+};
+
+/** نوشتن روی هایپروایزر فعلا فقط برای ویژالیزور پیاده شده */
+const canWrite = (kind: string) => kind === 'virtualizor';
 
 export default function VirtualizorPage() {
   const { data, loading, error, reload } = useLoad<VzData>('/api/virtualizor');
@@ -106,10 +115,10 @@ export default function VirtualizorPage() {
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-lg font-bold">ویژالیزور</h1>
+          <h1 className="text-lg font-bold">هایپروایزرها</h1>
           <p className="text-xs text-muted mt-1">
-            هر نود جدا تعریف می‌شود. کشف خودکار هر ساعت آی‌پی‌ها، بلوک‌ها و مشتری هر آدرس را
-            به‌روز می‌کند.
+            ویژالیزور و سولوس‌وی‌ام ۲، کنار هم. هر نود جدا تعریف می‌شود و کشف خودکار هر سه ساعت
+            آی‌پی‌ها، بلوک‌ها و مشتری هر آدرس را به‌روز می‌کند.
           </p>
         </div>
         <button type="button" className="btn" onClick={() => setEditing('new')}>
@@ -149,6 +158,9 @@ export default function VirtualizorPage() {
               <div>
                 <h2 className="text-sm font-bold">
                   {node.name}
+                  <span className="badge bg-line text-muted ms-2">
+                    {NODE_KIND_LABEL[node.kind] || node.kind}
+                  </span>
                   {!node.is_active && <span className="badge bg-line text-muted ms-2">غیرفعال</span>}
                 </h2>
                 <p className="text-xs text-muted mt-0.5">
@@ -161,12 +173,16 @@ export default function VirtualizorPage() {
                 <button type="button" className="btn-ghost text-xs" onClick={() => queue(node.id, 'discover')} disabled={busy}>
                   کشف حالا
                 </button>
-                <button type="button" className="btn-ghost text-xs" onClick={() => queue(node.id, 'apply', false)} disabled={busy || !node.anchor_vpsid}>
-                  پیش‌نمایش اعمال
-                </button>
-                <button type="button" className="btn-ghost text-xs" onClick={() => queue(node.id, 'apply', true)} disabled={busy || !node.anchor_vpsid}>
-                  اعمال واقعی
-                </button>
+                {canWrite(node.kind) && (
+                  <>
+                    <button type="button" className="btn-ghost text-xs" onClick={() => queue(node.id, 'apply', false)} disabled={busy || !node.anchor_vpsid}>
+                      پیش‌نمایش اعمال
+                    </button>
+                    <button type="button" className="btn-ghost text-xs" onClick={() => queue(node.id, 'apply', true)} disabled={busy || !node.anchor_vpsid}>
+                      اعمال واقعی
+                    </button>
+                  </>
+                )}
                 <button type="button" className="text-xs text-muted hover:text-cyan" onClick={() => setEditing(node)}>
                   ویرایش
                 </button>
@@ -177,7 +193,14 @@ export default function VirtualizorPage() {
             </div>
 
             {node.last_error && <Notice type="error">{node.last_error}</Notice>}
-            {!node.anchor_vpsid && (
+            {!canWrite(node.kind) && (
+              <Notice type="warn">
+                برای سولوس‌وی‌ام ۲ فعلا فقط کشف و پایش فعال است. آی‌پی‌ها، بلوک‌ها و مشتری هر
+                آدرس می‌آیند و وضعیت اکسسشان سنجیده می‌شود، ولی چسباندن و برداشتن آی‌پی باید
+                دستی در سولوس انجام شود.
+              </Notice>
+            )}
+            {canWrite(node.kind) && !node.anchor_vpsid && (
               <p className="text-xs text-muted">
                 شناسه وی‌پی‌اس لنگر تعیین نشده — فقط کشف انجام می‌شود و هیچ چیزی روی این نود
                 نوشته نمی‌شود.
@@ -190,7 +213,7 @@ export default function VirtualizorPage() {
                 برای همیشه «روت نشده» می‌مانند.
               </Notice>
             )}
-            {node.bind_server_name && (
+            {canWrite(node.kind) && node.bind_server_name && (
               <p className="text-xs text-muted">
                 لنگر: وی‌پی‌اس {node.anchor_vpsid} در ویژالیزور، سرور «{node.bind_server_name}» در پنل
               </p>
@@ -280,6 +303,7 @@ function NodeForm({
     url: node?.url ?? '',
     api_key: '',
     api_pass: '',
+    kind: node?.kind ?? 'virtualizor',
     anchor_vpsid: node?.anchor_vpsid ?? '',
     max_per_run: String(node?.max_per_run ?? 200),
     is_active: node?.is_active ?? true,
@@ -317,25 +341,51 @@ function NodeForm({
   return (
     <Modal open title={node ? `ویرایش ${node.name}` : "افزودن نود ویژالیزور"} onClose={onClose}>
       <div className="space-y-4">
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="grid sm:grid-cols-3 gap-4">
+          <Field label="نوع" hint="بعد از ساخت هم قابل تغییر است">
+            <select
+              className="input"
+              value={form.kind}
+              onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}
+            >
+              <option value="virtualizor">ویژالیزور</option>
+              <option value="solusvm2">سولوس‌وی‌ام ۲</option>
+            </select>
+          </Field>
           <Field label="نام نود" hint="فقط برای شناسایی در پنل">
             <input className="input" value={form.name} onChange={set('name')} placeholder="نود ۱ — تهران" />
           </Field>
-          <Field label="آدرس پنل" hint="معمولاً پورت ۴۰۸۵">
-            <input className="input ltr" value={form.url} onChange={set('url')} placeholder="https://185.x.x.x:4085" />
+          <Field
+            label="آدرس"
+            hint={form.kind === 'solusvm2' ? 'آدرس مستر سولوس، بدون مسیر' : 'پنل ادمین، معمولاً پورت ۴۰۸۵'}
+          >
+            <input
+              className="input ltr"
+              value={form.url}
+              onChange={set('url')}
+              placeholder={form.kind === 'solusvm2' ? 'https://master.example.com' : 'https://185.x.x.x:4085'}
+            />
           </Field>
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4">
           <Field
-            label="کلید ای‌پی‌آی"
-            hint={node ? 'خالی یعنی همان کلید قبلی بماند' : 'از Configuration ← Server Info، نه API Credentials'}
+            label={form.kind === 'solusvm2' ? 'توکن ای‌پی‌آی' : 'کلید ای‌پی‌آی'}
+            hint={
+              node
+                ? 'خالی یعنی همان مقدار قبلی بماند'
+                : form.kind === 'solusvm2'
+                  ? 'از Account ← API Tokens'
+                  : 'از Configuration ← Server Info، نه API Credentials'
+            }
           >
             <input className="input ltr" type="password" value={form.api_key} onChange={set('api_key')} autoComplete="off" />
           </Field>
-          <Field label="رمز ای‌پی‌آی" hint={node ? 'خالی یعنی همان رمز قبلی بماند' : ''}>
-            <input className="input ltr" type="password" value={form.api_pass} onChange={set('api_pass')} autoComplete="off" />
-          </Field>
+          {form.kind === 'virtualizor' && (
+            <Field label="رمز ای‌پی‌آی" hint={node ? 'خالی یعنی همان رمز قبلی بماند' : ''}>
+              <input className="input ltr" type="password" value={form.api_pass} onChange={set('api_pass')} autoComplete="off" />
+            </Field>
+          )}
         </div>
 
         <div className="grid sm:grid-cols-3 gap-4">

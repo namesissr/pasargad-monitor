@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
  */
 
 const SELECT = `
-  SELECT n.id, n.name, n.url, n.anchor_vpsid, n.max_per_run, n.is_active,
+  SELECT n.id, n.name, n.url, n.kind, n.anchor_vpsid, n.max_per_run, n.is_active,
          n.bind_server_id, n.auto_watch_free, s.name AS bind_server_name,
          n.last_sync_at, n.last_error,
          (n.api_key <> '' AND n.api_pass <> '') AS has_credentials,
@@ -57,6 +57,7 @@ type CleanResult =
       value: {
         name: string;
         url: string;
+        kind: string;
         anchor: string | null;
         maxPerRun: number;
         isActive: boolean;
@@ -68,6 +69,7 @@ type CleanResult =
 function clean(body: Record<string, unknown>): CleanResult {
   const name = String(body.name ?? '').trim();
   const url = String(body.url ?? '').trim().replace(/\/+$/, '');
+  const kind = body.kind === 'solusvm2' ? 'solusvm2' : 'virtualizor';
   const anchor = String(body.anchor_vpsid ?? '').trim();
   const maxPerRun = Number(body.max_per_run);
 
@@ -89,6 +91,7 @@ function clean(body: Record<string, unknown>): CleanResult {
     value: {
       name,
       url,
+      kind,
       anchor: anchor || null,
       maxPerRun: Number.isInteger(maxPerRun) && maxPerRun > 0 ? Math.min(maxPerRun, 1000) : 200,
       isActive: body.is_active !== false,
@@ -108,13 +111,17 @@ export async function POST(req: Request) {
 
     const key = String(body.api_key ?? '').trim();
     const pass = String(body.api_pass ?? '').trim();
-    if (!key || !pass) return fail('کلید و رمز ای‌پی‌آی را وارد کنید', 400);
+    if (!key) return fail('کلید ای‌پی‌آی را وارد کنید', 400);
+    // سولوس‌وی‌ام فقط توکن دارد؛ رمز جدا ندارد
+    if (c.kind === 'virtualizor' && !pass) {
+      return fail('رمز ای‌پی‌آی را وارد کنید', 400);
+    }
 
     const row = await queryOne<{ id: number }>(
-      `INSERT INTO vz_nodes (name, url, api_key, api_pass, anchor_vpsid, max_per_run,
+      `INSERT INTO vz_nodes (name, url, kind, api_key, api_pass, anchor_vpsid, max_per_run,
                              is_active, bind_server_id, auto_watch_free)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-      [c.name, c.url, key, pass, c.anchor, c.maxPerRun, c.isActive, c.bindServerId, c.autoWatch],
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+      [c.name, c.url, c.kind, key, pass, c.anchor, c.maxPerRun, c.isActive, c.bindServerId, c.autoWatch],
     );
 
     // کشف بی‌درنگ صف می‌شود تا کاربر بلافاصله نتیجه اتصالش را ببیند
@@ -145,11 +152,11 @@ export async function PATCH(req: Request) {
     await query(
       `UPDATE vz_nodes
           SET name = $2, url = $3, anchor_vpsid = $4, max_per_run = $5, is_active = $6,
-              bind_server_id = $9, auto_watch_free = $10,
+              bind_server_id = $9, auto_watch_free = $10, kind = $11,
               api_key  = CASE WHEN $7 = '' THEN api_key  ELSE $7 END,
               api_pass = CASE WHEN $8 = '' THEN api_pass ELSE $8 END
         WHERE id = $1`,
-      [id, c.name, c.url, c.anchor, c.maxPerRun, c.isActive, key, pass, c.bindServerId, c.autoWatch],
+      [id, c.name, c.url, c.anchor, c.maxPerRun, c.isActive, key, pass, c.bindServerId, c.autoWatch, c.kind],
     );
 
     return ok({ ok: true });

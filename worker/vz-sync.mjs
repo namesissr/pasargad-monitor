@@ -1,5 +1,5 @@
 import { q, q1, settingNum, log, logErr } from './db.mjs';
-import { listIps, listPools, listVpses, listUsers, writeVpsIps } from './virtualizor.mjs';
+import { clientFor } from './hypervisor.mjs';
 
 /**
  * کشف و همگام‌سازی نودهای ویژالیزور.
@@ -91,12 +91,13 @@ function networkOf(ip, prefix) {
  */
 export async function discoverNode(node) {
   const started = Date.now();
+  const api = clientFor(node);
 
   const [pools, ips, vpses, users] = await Promise.all([
-    listPools(node),
-    listIps(node),
-    listVpses(node),
-    listUsers(node),
+    api.listPools(node),
+    api.listIps(node),
+    api.listVpses(node),
+    api.listUsers(node),
   ]);
 
   // فهرست آی‌پی‌ها تنها چیزی است که بدونش کشف بی‌معنی است. بقیه اگر
@@ -228,8 +229,10 @@ export async function discoverNode(node) {
     ipid.push(row.ipid);
     poolid.push(row.ippoolid || null);
     vpsid.push(free ? null : row.vpsid);
-    hostname.push(vps?.hostname || null);
-    customer.push(free ? null : customerLabel(vps, userById.get(vps?.uid)));
+    // بعضی کلاینت‌ها نام سرور و مالک را در خود ردیف آی‌پی می‌دهند
+    // (سولوس)، بعضی باید از نگاشت وی‌پی‌اس و کاربر ساخته شود (ویژالیزور)
+    hostname.push(row.hostname || vps?.hostname || null);
+    customer.push(free ? null : row.customer || customerLabel(vps, userById.get(vps?.uid)) || null);
     assigned.push(!free);
   }
 
@@ -408,12 +411,13 @@ export async function discoverNode(node) {
  *   • سقف هر اجرا
  */
 export async function applyNode(node, { dryRun = true } = {}) {
+  const api = clientFor(node);
   const anchor = String(node.anchor_vpsid || '').trim();
   if (!/^\d+$/.test(anchor)) {
     return { ok: false, error: 'شناسه وی‌پی‌اس لنگر برای این نود تعیین نشده است' };
   }
 
-  const ips = await listIps(node);
+  const ips = await api.listIps(node);
   if (!ips.ok) return { ok: false, error: ips.error };
 
   const known = await q(
@@ -453,7 +457,7 @@ export async function applyNode(node, { dryRun = true } = {}) {
     new Set([...onAnchorNow.filter((ip) => !detach.includes(ip)), ...attachSlice]),
   );
 
-  const write = await writeVpsIps(node, anchor, finalList, { dryRun });
+  const write = await clientFor(node).writeVpsIps(node, anchor, finalList, { dryRun });
   if (!write.ok) {
     await q(
       `INSERT INTO vz_sync_runs (node_id, kind, dry_run, ok, detail) VALUES ($1, 'apply', $2, FALSE, $3)`,

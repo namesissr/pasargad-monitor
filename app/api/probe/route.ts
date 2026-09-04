@@ -188,8 +188,9 @@ interface Transition {
  * پس همان لحظه یک درخواست اعمال برای نود همان آی‌پی در صف می‌رود؛ ورکر
  * ظرف حدود بیست ثانیه برش می‌دارد.
  *
- * سه شرط: تنظیم vz_auto_apply روشن باشد، نود شناسه لنگر داشته باشد، و
- * درخواست مشابهی از قبل در صف نباشد — وگرنه چند آزادشدن همزمان چند
+ * چهار شرط: تنظیم vz_auto_apply روشن باشد، نود شناسه لنگر داشته باشد،
+ * نوعش نوشتن را پشتیبانی کند (سولوس‌وی‌ام هنوز نه)، و درخواست مشابهی از
+ * قبل در صف نباشد — وگرنه چند آزادشدن همزمان چند
  * نوشتن تکراری روی ویژالیزور می‌ساخت.
  */
 async function queueRelease(transitions: Transition[]): Promise<void> {
@@ -206,6 +207,7 @@ async function queueRelease(transitions: Transition[]): Promise<void> {
        JOIN vz_nodes n ON n.id = i.vz_node_id
       WHERE i.id = ANY($1::int[])
         AND n.is_active
+        AND n.kind = 'virtualizor'
         AND COALESCE(n.anchor_vpsid, '') <> ''
         AND NOT EXISTS (
           SELECT 1 FROM vz_sync_queue q
