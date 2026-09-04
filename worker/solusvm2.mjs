@@ -16,7 +16,8 @@ import { logErr } from './db.mjs';
  * احراز هویت: هدر «Authorization: Bearer <token>».
  */
 
-const PER_PAGE = 100;
+// سقف واقعی سولوس ۵۰ است؛ بیشتر خواستن اثری ندارد
+const PER_PAGE = 50;
 
 /** یک فراخوانی خواندنی */
 async function get(node, path, params = {}) {
@@ -63,11 +64,20 @@ async function get(node, path, params = {}) {
 /**
  * صفحه‌بندی.
  *
- * شرط توقف روی تعداد رکورد است نه فقط meta: اگر روزی شکل meta عوض شود،
- * حلقه باید همچنان تمام شود، نه اینکه تا سقف صفحه بچرخد.
+ * شرط توقف قبلی «تعداد کمتر از per_page» بود. غلط بود: سولوس سقف صفحه
+ * خودش را دارد و هرچه بخواهی حداکثر ۵۰ ردیف می‌دهد. پس صفحه اول همیشه
+ * کمتر از درخواست بود و حلقه همان‌جا می‌ایستاد — هر بلوک دقیقا ۵۰ آدرس
+ * می‌خواند، چه ۶۲ داشت چه ۱۰۱.
+ *
+ * حالا تا صفحه خالی ادامه می‌یابد. دو شرط توقف دیگر هم هست تا حلقه در
+ * هیچ حالتی بی‌پایان نشود:
+ *   • last_page اگر سرور بدهد
+ *   • صفحه‌ای که چیز تازه‌ای ندارد — یعنی سرور پارامتر page را نادیده
+ *     می‌گیرد و همان داده را برمی‌گرداند
  */
-async function paged(node, path, params = {}, maxPages = 200) {
+async function paged(node, path, params = {}, maxPages = 400) {
   const out = [];
+  const seen = new Set();
   let raw = null;
   let topKeys = null;
 
@@ -81,8 +91,17 @@ async function paged(node, path, params = {}, maxPages = 200) {
     }
 
     const batch = Array.isArray(res.data?.data) ? res.data.data : [];
-    out.push(...batch);
-    if (batch.length < PER_PAGE) break;
+    if (!batch.length) break;
+
+    let fresh = 0;
+    for (const row of batch) {
+      const id = String(row?.id ?? JSON.stringify(row));
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(row);
+      fresh++;
+    }
+    if (fresh === 0) break;
 
     const last = Number(res.data?.meta?.last_page);
     if (Number.isFinite(last) && page >= last) break;

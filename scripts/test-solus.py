@@ -90,6 +90,34 @@ def int_to_ip(v):
     return "%d.%d.%d.%d" % ((v >> 24) & 255, (v >> 16) & 255, (v >> 8) & 255, v & 255)
 
 
+def paginate(pages, per_page=50, max_pages=400):
+    """
+    بازسازی حلقه صفحه‌بندی.
+
+    شرط توقف قبلی «تعداد کمتر از per_page» بود. سولوس سقف صفحه خودش را
+    دارد و هرچه بخواهی حداکثر ۵۰ ردیف می‌دهد، پس صفحه اول همیشه کمتر از
+    درخواست بود و حلقه همان‌جا می‌ایستاد — هر بلوک دقیقا ۵۰ آدرس می‌خواند،
+    چه ۶۲ داشت چه ۱۰۱.
+    """
+    out, seen, calls = [], set(), 0
+    for page in range(1, max_pages + 1):
+        batch = pages(page)
+        calls += 1
+        if not batch:
+            break
+        fresh = 0
+        for row in batch:
+            key = str(row.get("id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(row)
+            fresh += 1
+        if fresh == 0:
+            break
+    return out, calls
+
+
 def block_total(raw):
     """
     بازسازی خواندن total_ips_count.
@@ -209,6 +237,31 @@ def main():
 
     print("")
 
+    # ── صفحه‌بندی ───────────────────────────────────────────────
+    def server_with(total, cap=50):
+        rows = [{"id": i} for i in range(total)]
+        return lambda page: rows[(page - 1) * cap: page * cap]
+
+    got, _ = paginate(server_with(86))
+    check("صفحه‌بندی: بلوک ۸۶ تایی کامل خوانده می‌شود", len(got), 86)
+
+    got, _ = paginate(server_with(101))
+    check("صفحه‌بندی: بلوک ۱۰۱ تایی", len(got), 101)
+
+    got, _ = paginate(server_with(50))
+    check("صفحه‌بندی: دقیقا یک صفحه", len(got), 50)
+
+    got, _ = paginate(server_with(0))
+    check("صفحه‌بندی: خالی", len(got), 0)
+
+    # اگر سرور پارامتر page را نادیده بگیرد، همان داده را برمی‌گرداند؛
+    # بدون شرط «چیز تازه‌ای نبود» حلقه تا سقف صفحه می‌چرخید
+    same = [{"id": i} for i in range(50)]
+    got, calls = paginate(lambda page: same)
+    check("صفحه‌بندی: سرور page را نادیده می‌گیرد → توقف", (len(got), calls), (50, 2))
+
+    print("")
+
     # ── تعداد اعلامی بلوک ───────────────────────────────────────
     # شکل واقعی هر دو نوع بلوک، از پاسخ مستر
     check("تعداد: بلوک set عددی است", block_total("62"), 62)
@@ -310,6 +363,8 @@ def main():
         ("ids: detachable.map((r) => Number(r.ipid))", "بدنه دسته‌ای برداشتن"),
         ("delayed: false", "اجرای بی‌درنگ، نه صف تاخیری"),
         ("const MAX_ENUM = 8192;", "سقف شمارش بازه"),
+        ("if (!batch.length) break;", "توقف روی صفحه خالی، نه صفحه ناقص"),
+        ("if (fresh === 0) break;", "توقف وقتی سرور page را نادیده می‌گیرد"),
         ("if (seen.has(ip)) continue;", "آدرس ثبت‌شده دوباره ساخته نمی‌شود"),
         ("const raw = b.total_ips_count;", "تعداد اعلامی بلوک با احتیاط خوانده می‌شود"),
         ("if (raw === null || raw === undefined || raw === '') return null;",
