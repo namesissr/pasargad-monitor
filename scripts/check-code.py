@@ -502,6 +502,113 @@ def check_id_params():
             )
 
 
+# ── ۲۹) ستونی که در جدول نیست ────────────────────────────────────────────
+# نام ستون در رشته SQL را هیچ کامپایلری بررسی نمی‌کند. خطایش فقط هنگام
+# اجرای واقعی همان مسیر معلوم می‌شود — و اگر آن مسیر کم استفاده باشد،
+# ماه‌ها بی‌سروصدا می‌ماند. پرتال مشتری دقیقا همین بود: ستون mem_used_bytes
+# وجود نداشت (نامش ram_used_bytes است) و چون پرتال به‌خاطر ایراد دیگری
+# اصلا باز نمی‌شد، این خطا هرگز دیده نشده بود.
+#
+# محافظه‌کارانه است: فقط وقتی هشدار می‌دهد که نام مستعار به یک جدول
+# **شناخته‌شده** وصل باشد و همه ستون‌هایش معلوم باشند. زیرکوئری‌ای که
+# ستون می‌سازد یا SELECT دلخواه دارد، نادیده گرفته می‌شود.
+
+DIRECT_ALIAS_RE = re.compile(r"\b(?:FROM|JOIN)\s+(\w+)\s+(?:AS\s+)?(\w+)\b", re.I)
+LATERAL_STAR_RE = re.compile(
+    r"JOIN\s+LATERAL\s*\(\s*SELECT\s+\*\s+FROM\s+(\w+)\b.*?\)\s*(\w+)\s+ON", re.I | re.S
+)
+SQL_LITERAL_RE = re.compile(r"`([^`]*(?:SELECT|UPDATE|INSERT)[^`]*)`", re.I)
+COLUMN_REF_RE = re.compile(r"\b(\w+)\.(\w+)\b")
+
+SQL_KEYWORDS = {
+    "on", "where", "group", "order", "limit", "left", "right", "inner", "lateral",
+    "set", "values", "returning", "as", "select", "and", "or", "using", "having",
+    "union", "from", "join", "natural", "cross", "full", "outer", "do", "conflict",
+    "nothing", "update", "insert", "into",
+}
+
+
+def schema_from_migrations():
+    """نگاشت جدول → ستون‌ها، از روی مهاجرت‌ها به ترتیب شماره"""
+    tables = {}
+    folder = os.path.join(ROOT, "db", "migrations")
+    if not os.path.isdir(folder):
+        return tables
+
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith(".sql"):
+            continue
+        sql = read(os.path.join(folder, name))
+        # نظرها حذف می‌شوند تا نام ستون از داخل توضیح فارسی برداشته نشود
+        sql = re.sub(r"--[^\n]*", "", sql)
+
+        for m in re.finditer(
+            r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\((.*?)\n\)\s*;",
+            sql, re.S | re.I,
+        ):
+            cols = set(tables.get(m.group(1), set()))
+            for line in m.group(2).split("\n"):
+                line = line.strip().rstrip(",")
+                if not line:
+                    continue
+                head = line.split()[0]
+                if head.lower() in ("primary", "unique", "foreign", "check",
+                                    "constraint", "exclude"):
+                    continue
+                if re.match(r"^\w+$", head):
+                    cols.add(head)
+            tables[m.group(1)] = cols
+
+        for m in re.finditer(
+            r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)",
+            sql, re.I,
+        ):
+            tables.setdefault(m.group(1), set()).add(m.group(2))
+
+        for m in re.finditer(
+            r"ALTER\s+TABLE\s+(\w+)\s+DROP\s+COLUMN\s+(?:IF\s+EXISTS\s+)?(\w+)", sql, re.I
+        ):
+            tables.get(m.group(1), set()).discard(m.group(2))
+
+        for m in re.finditer(
+            r"ALTER\s+TABLE\s+(\w+)\s+RENAME\s+COLUMN\s+(\w+)\s+TO\s+(\w+)", sql, re.I
+        ):
+            cols = tables.get(m.group(1))
+            if cols:
+                cols.discard(m.group(2))
+                cols.add(m.group(3))
+
+    return tables
+
+
+def check_sql_columns():
+    tables = schema_from_migrations()
+    if not tables:
+        return
+
+    for path in walk({".ts", ".mjs"}):
+        src = read(path)
+        for q in SQL_LITERAL_RE.findall(src):
+            alias = {}
+            for table, name in DIRECT_ALIAS_RE.findall(q):
+                if name.lower() in SQL_KEYWORDS or table not in tables:
+                    continue
+                alias[name] = table
+            for table, name in LATERAL_STAR_RE.findall(q):
+                if table in tables:
+                    alias[name] = table
+            if not alias:
+                continue
+
+            for name, col in COLUMN_REF_RE.findall(q):
+                if name in alias and col not in tables[alias[name]]:
+                    problems.append(
+                        "%s — ستون «%s.%s» در جدول %s وجود ندارد. "
+                        "SQL کامپایل نمی‌شود؛ خطایش فقط هنگام اجرا معلوم می‌شود."
+                        % (rel(path), name, col, alias[name])
+                    )
+
+
 def main():
     check_non_null_assertion()
     check_empty_catch()
@@ -511,6 +618,7 @@ def main():
     check_hidden_columns()
     check_unterminated_strings()
     check_id_params()
+    check_sql_columns()
     check_undefined_names()
     check_union_props()
     check_route_auth()

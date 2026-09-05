@@ -34,9 +34,8 @@ export async function GET() {
     const servers = await query(
       `SELECT s.id, s.name, s.hostname, host(s.main_ip) AS main_ip, s.status,
               s.port_mbps,
-              -- سهمیه مؤثر: پایه به‌علاوه شارژهای همین دوره. اگر فقط پایه
-              -- نشان داده شود، مشتری که ترافیک خریده عدد قدیمی می‌بیند و
-              -- فکر می‌کند شارژش اعمال نشده.
+              -- ترافیک پیش‌خرید: مشتری باید همان عددی را ببیند که مبنای
+              -- هشدارها و صورتحساب است، وگرنه فکر می‌کند خریدش ثبت نشده.
               tp.purchased::float8                 AS traffic_purchased_gb,
               (tp.used_bytes / 1073741824 + s.traffic_used_before_gb)::float8
                 AS traffic_used_gb,
@@ -44,8 +43,10 @@ export async function GET() {
                 AS traffic_balance_gb,
               s.location, s.last_seen_at, s.renews_at,
               m.cpu_percent::float8       AS cpu_percent,
-              m.mem_used_bytes::float8    AS mem_used_bytes,
-              m.mem_total_bytes::float8   AS mem_total_bytes,
+              -- نام ستون در جدول ram_* است نه mem_*. رابط پرتال mem_*
+              -- می‌خواند، پس همین‌جا نام‌گردانی می‌شود.
+              m.ram_used_bytes::float8    AS mem_used_bytes,
+              m.ram_total_bytes::float8   AS mem_total_bytes,
               m.disk_used_bytes::float8   AS disk_used_bytes,
               m.disk_total_bytes::float8  AS disk_total_bytes,
               m.rx_bps::float8            AS rx_bps,
