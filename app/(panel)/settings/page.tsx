@@ -322,6 +322,20 @@ export default function SettingsPage() {
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4">
+          <Field
+            label="آدرس عمومی پنل"
+            hint="برای قلم و دکمه «باز کردن پنل» در ایمیل. خالی یعنی هر دو حذف شوند."
+          >
+            <input
+              className="input ltr"
+              value={form.panel_url ?? ''}
+              onChange={set('panel_url')}
+              placeholder="https://panel.example.com"
+            />
+          </Field>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
           <Field label="آدرس سرور SMTP">
             <input
               className="input ltr"

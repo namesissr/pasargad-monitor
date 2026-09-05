@@ -1,6 +1,7 @@
 import { query } from '@/lib/db';
 import { getSettings } from '@/lib/settings';
 import { sendMail, type SmtpConfig, type SendResult } from '@/worker/smtp.mjs';
+import { renderEmail, type MailKind } from '@/worker/mail-template.mjs';
 
 /**
  * ارسال ایمیل هشدار — نسخه اپ وب.
@@ -12,7 +13,13 @@ import { sendMail, type SmtpConfig, type SendResult } from '@/worker/smtp.mjs';
  */
 
 /** تنظیمات SMTP از جدول settings — نه از .env، تا تغییرش بیلد نخواهد */
-export async function smtpConfig(): Promise<SmtpConfig> {
+export interface PanelSmtpConfig extends SmtpConfig {
+  /** برای قالب لازم است، نه برای اتصال */
+  panelUrl: string;
+  brand: string;
+}
+
+export async function smtpConfig(): Promise<PanelSmtpConfig> {
   const s = await getSettings(true);
   return {
     host: s.smtp_host || '',
@@ -23,6 +30,8 @@ export async function smtpConfig(): Promise<SmtpConfig> {
     from: s.smtp_from || '',
     fromName: s.smtp_from_name || 'پاسارگاد میزبان',
     insecure: String(s.smtp_insecure || 'false') === 'true',
+    panelUrl: s.panel_url || '',
+    brand: s.smtp_from_name || 'پاسارگاد میزبان',
   };
 }
 
@@ -67,6 +76,7 @@ export async function sendEmailTo(
   to: string,
   subject: string,
   body: string,
+  kind: MailKind = 'info',
   incidentId: number | null = null,
 ): Promise<SendResult> {
   const s = await getSettings();
@@ -75,7 +85,12 @@ export async function sendEmailTo(
   const cfg = await smtpConfig();
   if (!smtpConfigured(cfg)) return { ok: false, error: 'تنظیمات SMTP کامل نیست' };
 
-  const r = await sendMail(cfg, { to, subject, text: body });
+  const r = await sendMail(cfg, {
+    to,
+    subject,
+    text: body,
+    html: renderEmail({ subject, text: body, kind, panelUrl: cfg.panelUrl, brand: cfg.brand }),
+  });
   await record(incidentId, to, subject, body, r);
   return r;
 }
@@ -109,8 +124,16 @@ export async function emailAll(
 
   let sent = 0;
   let failed = 0;
+  const html = renderEmail({
+    subject,
+    text: message,
+    kind: 'warn',
+    panelUrl: cfg.panelUrl,
+    brand: cfg.brand,
+  });
+
   for (const to of addresses) {
-    const r = await sendMail(cfg, { to, subject, text: message });
+    const r = await sendMail(cfg, { to, subject, text: message, html });
     if (r.ok) sent++;
     else {
       failed++;

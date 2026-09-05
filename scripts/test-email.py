@@ -176,6 +176,7 @@ def main():
     wemail = read("worker", "email.mjs")
     lemail = read("lib", "email.ts")
     settings = read("app", "api", "settings", "route.ts")
+    tpl = read("worker", "mail-template.mjs")
     alerts = read("worker", "customer-alerts.mjs")
     wnotify = read("worker", "notify.mjs")
     lnotify = read("lib", "notify.ts")
@@ -206,6 +207,13 @@ def main():
          "هشدار مشتری ایمیل هم می‌رود"),
         (wnotify, "worker/notify", "emailAll(message, incidentId)", "ورکر ایمیل هم می‌فرستد"),
         (lnotify, "lib/notify", "emailAll(message, incidentId)", "اپ وب ایمیل هم می‌فرستد"),
+        (smtp, "smtp", "multipart/alternative", "هر دو نسخه متنی و اچ‌تی‌ام‌ال فرستاده می‌شود"),
+        (smtp, "smtp", "part('text/plain', text) +", "نسخه متنی اول می‌آید"),
+        (tpl, "قالب", "role=\"presentation\"", "چیدمان با جدول است، نه flex"),
+        (tpl, "قالب", "YekanBakh", "قلم سایت اعلام می‌شود"),
+        (tpl, "قالب", "Tahoma", "قلم جایگزین برای کلاینتی که font-face را حذف می‌کند"),
+        (tpl, "قالب", 'dir="rtl"', "راست‌به‌چپ"),
+        (tpl, "قالب", "export function esc", "متن از دیتابیس خنثی می‌شود"),
         (mig, "مهاجرت ۰۳۲", "smtp_security", "روش امنیتی در تنظیمات است"),
         (mig, "مهاجرت ۰۳۲", "ALTER TABLE users ADD COLUMN IF NOT EXISTS email",
          "ایمیل کاربران پنل"),
@@ -217,6 +225,25 @@ def main():
         else:
             failures += 1
             print("شکست  کد واقعی (%s): %s پیدا نشد" % (label, why))
+
+    # ترتیب بخش‌ها در multipart: ساده‌ترین اول، بهترین آخر. کلاینت از
+    # آخر به اول اولین چیزی که می‌فهمد را نشان می‌دهد؛ برعکسش یعنی همه
+    # اچ‌تی‌ام‌ال را رها می‌کنند و متن خام می‌بینند.
+    plain_at = smtp.find("part('text/plain'")
+    html_at = smtp.find("part('text/html'")
+    if plain_at != -1 and html_at != -1 and plain_at < html_at:
+        print("گذشت  کد واقعی (smtp): متن ساده پیش از اچ‌تی‌ام‌ال")
+    else:
+        failures += 1
+        print("شکست  کد واقعی (smtp): ترتیب بخش‌های multipart برعکس است")
+
+    # نام سرور از دیتابیس می‌آید؛ یک علامت کوچک‌تر در آن، کل قالب را
+    # از هم می‌پاشد
+    if "esc(subject)" in tpl and "esc(brand)" in tpl:
+        print("گذشت  کد واقعی (قالب): موضوع و نام برند خنثی می‌شوند")
+    else:
+        failures += 1
+        print("شکست  کد واقعی (قالب): متن بدون خنثی‌سازی در اچ‌تی‌ام‌ال می‌رود")
 
     # رمز نباید در پاسخ ای‌پی‌آی برگردد: بررسی می‌کند که raw و settings
     # قاطی نشده باشند. اگر روزی کسی settings را با raw عوض کند، رمز از

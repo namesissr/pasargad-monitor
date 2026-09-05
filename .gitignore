@@ -18,3 +18,6 @@ tsconfig.tsbuildinfo
 # می‌شدند.
 __pycache__/
 *.pyc
+
+# خروجی پیش‌نمایش قالب ایمیل — ساختنی است، نه ماندنی
+email-preview.html

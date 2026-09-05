@@ -6,6 +6,7 @@ import { sendSms } from '@/lib/sms';
 import { sendTelegram } from '@/lib/telegram';
 import { smtpConfig, smtpConfigured } from '@/lib/email';
 import { sendMail } from '@/worker/smtp.mjs';
+import { renderEmail } from '@/worker/mail-template.mjs';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,7 @@ const ALLOWED = [
   'smtp_from',
   'smtp_from_name',
   'smtp_insecure',
+  'panel_url',
 ];
 
 /**
@@ -161,10 +163,23 @@ export async function POST(req: Request) {
       const subject = 'آزمایش ارسال ایمیل — پاسارگاد میزبان';
       const text =
         'این یک ایمیل آزمایشی از پنل مانیتورینگ پاسارگاد میزبان است.\n\n' +
-        'اگر این پیام را می‌بینید، تنظیمات سرور ایمیل درست است.';
+        'اگر این پیام را می‌بینید، تنظیمات سرور ایمیل درست است و قالب هم درست ساخته شده.\n\n' +
+        'اگر قلم متن با پنل فرق دارد، طبیعی است: جی‌میل و اوت‌لوک قلم سفارشی را ' +
+        'حذف می‌کنند و قلم جایگزین را نشان می‌دهند.';
       // ارسال آزمایشی عمداً به تنظیم email_enabled نگاه نمی‌کند: باید
       // بشود پیش از روشن‌کردن، اتصال را سنجید.
-      const r = await sendMail(cfg, { to: mailTo, subject, text });
+      const r = await sendMail(cfg, {
+        to: mailTo,
+        subject,
+        text,
+        html: renderEmail({
+          subject,
+          text,
+          kind: 'ok',
+          panelUrl: cfg.panelUrl,
+          brand: cfg.brand,
+        }),
+      });
       await query(
         `INSERT INTO notifications (channel, recipient, body, ok, error)
          VALUES ('email', $1, $2, $3, $4)`,

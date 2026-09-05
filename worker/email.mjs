@@ -1,5 +1,6 @@
 import { q, settings, log, logErr } from './db.mjs';
 import { sendMail } from './smtp.mjs';
+import { renderEmail } from './mail-template.mjs';
 
 /**
  * ارسال ایمیل هشدار — نسخه ورکر.
@@ -23,6 +24,9 @@ export async function smtpConfig(force = false) {
     from: s.smtp_from || '',
     fromName: s.smtp_from_name || 'پاسارگاد میزبان',
     insecure: String(s.smtp_insecure || 'false') === 'true',
+    // برای قالب لازم است، نه برای اتصال: آدرس فایل قلم و دکمه پنل
+    panelUrl: s.panel_url || '',
+    brand: s.smtp_from_name || 'پاسارگاد میزبان',
   };
 }
 
@@ -63,14 +67,19 @@ async function record(incidentId, to, subject, body, result) {
 }
 
 /** ارسال به یک نشانی مشخص — برای هشدار مشتری */
-export async function sendEmailTo(to, subject, body, incidentId = null) {
+export async function sendEmailTo(to, subject, body, kind = 'info', incidentId = null) {
   const s = await settings();
   if (s.email_enabled !== 'true') return { ok: false, error: 'ارسال ایمیل غیرفعال است' };
 
   const cfg = await smtpConfig();
   if (!smtpConfigured(cfg)) return { ok: false, error: 'تنظیمات SMTP کامل نیست' };
 
-  const r = await sendMail(cfg, { to, subject, text: body });
+  const r = await sendMail(cfg, {
+    to,
+    subject,
+    text: body,
+    html: renderEmail({ subject, text: body, kind, panelUrl: cfg.panelUrl, brand: cfg.brand }),
+  });
   await record(incidentId, to, subject, body, r);
   if (!r.ok) logErr('ارسال ایمیل ناموفق:', to, r.error);
   return r;
@@ -106,8 +115,16 @@ export async function emailAll(message, incidentId = null) {
 
   let sent = 0;
   let failed = 0;
+  const html = renderEmail({
+    subject,
+    text: message,
+    kind: 'warn',
+    panelUrl: cfg.panelUrl,
+    brand: cfg.brand,
+  });
+
   for (const to of addresses) {
-    const r = await sendMail(cfg, { to, subject, text: message });
+    const r = await sendMail(cfg, { to, subject, text: message, html });
     if (r.ok) sent++;
     else {
       failed++;

@@ -45,13 +45,13 @@ async function claim(serverId, kind, periodKey, detail) {
  * است اعتبار پیامک تمام شده باشد یا شماره عوض شده باشد. مشتری‌ای که
  * خبردار نشود، همان مشتری‌ای است که بعداً شاکی می‌شود.
  */
-async function dispatch(srv, subject, message, alsoAdmin) {
+async function dispatch(srv, subject, message, alsoAdmin, kind = 'warn') {
   if (srv.customer_phone) {
     const r = await sendSms(srv.customer_phone, message);
     if (!r.ok) logErr('پیامک مشتری ارسال نشد:', srv.customer_phone, r.error);
   }
   if (srv.customer_email) {
-    const r = await sendEmailTo(srv.customer_email, subject, message);
+    const r = await sendEmailTo(srv.customer_email, subject, message, kind);
     if (!r.ok) logErr('ایمیل مشتری ارسال نشد:', srv.customer_email, r.error);
   }
   if (alsoAdmin) {
@@ -111,6 +111,7 @@ export async function checkCustomerAlerts() {
               `پاسارگاد میزبان: ترافیک سرور «${srv.name}» تمام شد ` +
                 `(${detail}). برای خرید ترافیک با پشتیبانی تماس بگیرید.`,
               false,
+              'danger',
             );
             await notify(
               `پاسارگاد میزبان — ترافیک سرور «${srv.name}» تمام شد. ` +

@@ -23,7 +23,10 @@ export interface SmtpConfig {
 export interface MailInput {
   to: string;
   subject: string;
+  /** نسخه متنی — همیشه لازم است، حتی وقتی html هم هست */
   text: string;
+  /** نسخه اچ‌تی‌ام‌ال؛ نبودش یعنی پیام فقط متنی */
+  html?: string;
 }
 
 export interface SendResult {
@@ -44,6 +47,7 @@ export declare function buildMessage(input: {
   to: string;
   subject: string;
   text: string;
+  html?: string;
   messageId?: string;
 }): string;
 export declare function sendMail(config: SmtpConfig, mail: MailInput): Promise<SendResult>;

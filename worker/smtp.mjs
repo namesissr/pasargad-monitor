@@ -90,7 +90,7 @@ export function bareAddress(input) {
  * خام تغییر دادید، آن قاعده را باید اضافه کنید — وگرنه پیامی که خطی با
  * نقطه دارد وسط راه بریده می‌شود.
  */
-export function buildMessage({ from, fromName, to, subject, text, messageId }) {
+export function buildMessage({ from, fromName, to, subject, text, html, messageId }) {
   const address = bareAddress(from);
   const fromHeader = fromName ? `${encodeHeader(fromName)} <${address}>` : address;
   const id = messageId || `<${crypto.randomUUID()}@${address.split('@')[1] || 'localhost'}>`;
@@ -102,11 +102,44 @@ export function buildMessage({ from, fromName, to, subject, text, messageId }) {
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: ${id}`,
     'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: base64',
   ];
 
-  return headers.join(CRLF) + CRLF + CRLF + encodeBody(text) + CRLF;
+  if (!html) {
+    headers.push('Content-Type: text/plain; charset=UTF-8', 'Content-Transfer-Encoding: base64');
+    return headers.join(CRLF) + CRLF + CRLF + encodeBody(text) + CRLF;
+  }
+
+  // multipart/alternative: هر دو نسخه فرستاده می‌شوند و کلاینت خودش
+  // انتخاب می‌کند. **ترتیب معنا دارد** — ساده‌ترین نسخه اول، بهترین
+  // نسخه آخر؛ کلاینت از آخر به اول اولین چیزی که می‌فهمد را نشان
+  // می‌دهد. برعکسش یعنی همه اچ‌تی‌ام‌ال را رها می‌کنند و متن خام
+  // می‌بینند.
+  //
+  // نسخه متنی حذف نمی‌شود: کلاینت متنی، خواننده صفحه، و فیلترهای
+  // هرزنامه به آن نگاه می‌کنند. ایمیلی که فقط اچ‌تی‌ام‌ال دارد بیشتر
+  // در پوشه هرزنامه می‌افتد.
+  const boundary = `----pasargad-${crypto.randomUUID().replace(/-/g, '')}`;
+  headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+
+  const part = (type, body) =>
+    [
+      `--${boundary}`,
+      `Content-Type: ${type}; charset=UTF-8`,
+      'Content-Transfer-Encoding: base64',
+      '',
+      encodeBody(body),
+      '',
+    ].join(CRLF);
+
+  return (
+    headers.join(CRLF) +
+    CRLF +
+    CRLF +
+    part('text/plain', text) +
+    part('text/html', html) +
+    `--${boundary}--` +
+    CRLF
+  );
 }
 
 /**
@@ -251,7 +284,7 @@ function upgrade(socket, options) {
  * برمی‌گرداند { ok, error } — مثل sendSms و sendTelegram، تا کد فراخوان
  * یکسان بماند و خطا در لاگ اعلان‌ها ثبت شود.
  */
-export async function sendMail(config, { to, subject, text }) {
+export async function sendMail(config, { to, subject, text, html }) {
   const host = String(config.host || '').trim();
   const from = bareAddress(config.from);
   if (!host) return { ok: false, error: 'آدرس سرور SMTP تنظیم نشده است' };
@@ -329,7 +362,7 @@ export async function sendMail(config, { to, subject, text }) {
     await session.cmd('DATA', [354]);
 
     session.socket.write(
-      buildMessage({ from, fromName: config.fromName, to: recipient, subject, text }),
+      buildMessage({ from, fromName: config.fromName, to: recipient, subject, text, html }),
     );
     const done = await session.cmd('.', [250]);
 
