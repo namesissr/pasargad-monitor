@@ -42,6 +42,7 @@ export async function GET(req: Request) {
               i.amount_toman::float8 AS amount_toman,
               i.period_from, i.period_to, i.due_at, i.paid_at, i.created_at,
               i.payment_ref, i.card_number, i.gateway, i.note,
+              i.payment_error, i.last_attempt_at,
               c.id AS customer_id, c.name AS customer_name,
               s.id AS server_id, s.name AS server_name
          FROM invoices i

@@ -71,7 +71,7 @@ function paragraphs(text) {
  * اگر تنظیم نشده باشد هر دو حذف می‌شوند و ایمیل باز هم درست است — فقط
  * ساده‌تر.
  */
-export function renderEmail({ subject, text, kind = 'info', panelUrl = '', brand = 'پاسارگاد میزبان' }) {
+export function renderEmail({ subject, text, kind = 'info', panelUrl = '', brand = 'پاسارگاد میزبان', htmlBlock = '' }) {
   const color = KIND_COLOR[kind] || KIND_COLOR.info;
   const label = KIND_LABEL[kind] || KIND_LABEL.info;
   const base = String(panelUrl || '').replace(/\/+$/, '');
@@ -179,7 +179,8 @@ export function renderEmail({ subject, text, kind = 'info', panelUrl = '', brand
                   <td>
                     ${paragraphs(text)}
                   </td>
-                </tr>${cta}
+                </tr>
+                ${htmlBlock ? `<tr><td>${htmlBlock}</td></tr>` : ''}${cta}
               </table>
             </td>
           </tr>

@@ -78,6 +78,7 @@ export async function sendEmailTo(
   body: string,
   kind: MailKind = 'info',
   incidentId: number | null = null,
+  htmlBlock = '',
 ): Promise<SendResult> {
   const s = await getSettings();
   if (s.email_enabled !== 'true') return { ok: false, error: 'ارسال ایمیل غیرفعال است' };
@@ -89,7 +90,7 @@ export async function sendEmailTo(
     to,
     subject,
     text: body,
-    html: renderEmail({ subject, text: body, kind, panelUrl: cfg.panelUrl, brand: cfg.brand }),
+    html: renderEmail({ subject, text: body, kind, panelUrl: cfg.panelUrl, brand: cfg.brand, htmlBlock }),
   });
   await record(incidentId, to, subject, body, r);
   return r;

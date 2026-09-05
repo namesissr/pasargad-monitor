@@ -68,6 +68,7 @@ export async function settleInvoice(
     const { rows } = await client.query(
       `SELECT i.id, i.number, i.status, i.amount_toman::float8 AS amount_toman, i.title,
               i.kind, i.server_id, i.customer_id, i.period_to,
+              i.traffic_gb::float8 AS traffic_gb, i.order_id,
               c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
               s.name AS server_name, s.renewal_months
          FROM invoices i
@@ -137,6 +138,68 @@ export async function settleInvoice(
       ]);
     }
 
+    // ── بسته ترافیک ──────────────────────────────────────────
+    //
+    // مقدار گیگ از خود فاکتور می‌آید نه از بسته: اگر ادمین بسته را
+    // ویرایش کند، فاکتوری که مشتری دیده و پرداخت کرده نباید عوض شود.
+    //
+    // این داخل همان تراکنش قفل‌شده است، پس دقیقا یک بار اجرا می‌شود.
+    // رفرش صفحه بازگشت دو بار ترافیک نمی‌دهد.
+    if (inv.kind === 'traffic' && inv.server_id && Number(inv.traffic_gb) > 0) {
+      await client.query(
+        `INSERT INTO traffic_topups (server_id, gb, price_toman, note)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          inv.server_id,
+          Number(inv.traffic_gb),
+          Math.round(Number(inv.amount_toman)),
+          `خرید آنلاین — فاکتور ${inv.number}`,
+        ],
+      );
+
+      // شروع شمارش مصرف، اگر اولین خرید این سرور است
+      await client.query(
+        `UPDATE servers SET traffic_counted_from = CURRENT_DATE
+          WHERE id = $1 AND traffic_counted_from IS NULL`,
+        [inv.server_id],
+      );
+
+      // هشدارهای اتمام ترافیک پاک می‌شوند تا از نو مسلح شوند. بدون
+      // این، مشتری‌ای که بسته خریده و باز تمام کرده هیچ خبری نمی‌گیرد.
+      await client.query(
+        `DELETE FROM customer_notices
+          WHERE server_id = $1 AND kind IN ('quota_90', 'quota_100')`,
+        [inv.server_id],
+      );
+    }
+
+    // ── سفارش محصول ─────────────────────────────────────────
+    //
+    // تحویل دستی است: سرور اختصاصی خودکار ساخته نمی‌شود. سفارش به
+    // حالت paid می‌رود و در صف تحویل ادمین می‌نشیند.
+    if (inv.kind === 'order' && inv.order_id) {
+      await client.query(
+        `UPDATE orders SET status = 'paid', paid_at = now(), updated_at = now()
+          WHERE id = $1 AND status = 'pending'`,
+        [inv.order_id],
+      );
+
+      // موجودی هنگام پرداخت کم می‌شود، نه هنگام صدور فاکتور: فاکتور
+      // رهاشده نباید موجودی را تا ابد قفل کند.
+      //
+      // GREATEST با صفر لازم است چون دو نفر می‌توانند همزمان فاکتور یک
+      // محصول تک‌موجودی را ساخته باشند. موجودی منفی بی‌معنی است؛ آن
+      // حالت با هشدار به ادمین مدیریت می‌شود نه با رد کردن پولی که
+      // گرفته شده.
+      await client.query(
+        `UPDATE products p
+            SET stock = GREATEST(p.stock - 1, 0), updated_at = now()
+           FROM orders o
+          WHERE o.id = $1 AND p.id = o.product_id AND p.stock IS NOT NULL`,
+        [inv.order_id],
+      );
+    }
+
     await client.query('COMMIT');
 
     // اطلاع‌رسانی بیرون از تراکنش: پیامک کند است و نباید قفل را نگه دارد
@@ -179,11 +242,14 @@ async function announcePaid(inv: Record<string, unknown>) {
     await sendEmailTo(String(inv.customer_email), `پرداخت فاکتور ${number} ثبت شد`, forCustomer, 'ok');
   }
 
+  // سفارش محصول کار دارد و باید از بقیه پرداخت‌ها جدا دیده شود
+  const needsAction = inv.kind === 'order' ? '\n\n⚠ این سفارش منتظر تحویل است.' : '';
+
   await notify(
     `پاسارگاد میزبان — پرداخت تازه.\n` +
       `فاکتور ${number} · ${title}\n` +
       `مشتری: ${inv.customer_name}\n` +
-      `مبلغ: ${amount} تومان`,
+      `مبلغ: ${amount} تومان${needsAction}`,
   );
 }
 
@@ -251,7 +317,7 @@ export async function customerInvoices(customerId: number) {
     `SELECT i.id, i.number, i.title, i.kind, i.status,
             i.amount_toman::float8 AS amount_toman,
             i.period_from, i.period_to, i.due_at, i.paid_at, i.created_at,
-            i.payment_ref, i.card_number,
+            i.payment_ref, i.card_number, i.payment_error,
             s.id AS server_id, s.name AS server_name
        FROM invoices i
        LEFT JOIN servers s ON s.id = i.server_id

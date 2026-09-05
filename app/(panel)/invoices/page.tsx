@@ -20,6 +20,8 @@ interface Invoice {
   payment_ref: string | null;
   card_number: string | null;
   gateway: string | null;
+  payment_error: string | null;
+  last_attempt_at: string | null;
   customer_id: number;
   customer_name: string;
   server_id: number | null;
@@ -83,6 +85,10 @@ export default function InvoicesPage() {
     return <LoadState loading={loading} error={error} onRetry={reload}>{null}</LoadState>;
   }
 
+  const failedCount = data.invoices.filter(
+    (i) => i.status === 'unpaid' && i.payment_error,
+  ).length;
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -98,6 +104,15 @@ export default function InvoicesPage() {
       </div>
 
       {msg && <Notice type={msg.type}>{msg.text}</Notice>}
+
+      {/* فاکتوری که تلاش پرداخت ناموفق داشته، ممکن است پولش کم شده
+          باشد. این باید بالای صفحه دیده شود، نه لای جدول. */}
+      {failedCount > 0 && (
+        <Notice type="error">
+          {faNum(failedCount)} فاکتور تلاش پرداخت ناموفق داشته‌اند. اگر مبلغ از حساب مشتری کم
+          شده، شماره پیگیری را از او بگیرید و فاکتور را دستی ثبت کنید.
+        </Notice>
+      )}
 
       <div className="grid sm:grid-cols-2 gap-3">
         <div className="card p-4">
@@ -176,6 +191,12 @@ export default function InvoicesPage() {
                         >
                           {inv.server_name}
                         </Link>
+                      )}
+                      {/* پول ممکن است کم شده باشد؛ این باید دیده شود */}
+                      {inv.status === 'unpaid' && inv.payment_error && (
+                        <span className="text-danger block text-[11px] mt-1 leading-relaxed">
+                          ⚠ تلاش ناموفق: {inv.payment_error}
+                        </span>
                       )}
                     </td>
                     <td className="text-xs font-medium sm:whitespace-nowrap">

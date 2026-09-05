@@ -137,6 +137,9 @@ def main():
     admin = read("app", "api", "invoices", "route.ts")
     worker = read("worker", "invoices.mjs")
     mig = read("db", "migrations", "035_invoices.sql")
+    ret = read("app", "api", "pay", "return", "[id]", "route.ts")
+    orders = read("app", "api", "orders", "route.ts")
+    delivery = read("lib", "delivery-email.ts")
 
     source_checks = [
         # ── قاعده ۱: مبلغ از دیتابیس ──────────────────────────
@@ -176,6 +179,19 @@ def main():
         (mig, "مهاجرت ۰۳۵", "invoices_renewal_once", "ایندکس یکتای فاکتور تمدید"),
         (mig, "مهاجرت ۰۳۵", "renewal_price_toman", "قیمت فروش، جدا از هزینه ما"),
         (admin, "admin", "settleInvoice(id,", "ثبت دستی پرداخت از همان مسیر می‌گذرد"),
+
+        # ── رد تلاش ناموفق ────────────────────────────────────
+        #
+        # پول کم‌شده و فاکتور بازمانده، بدترین حالت ممکن است. نسخه اول
+        # فقط یک خط در لاگ کانتینر می‌گذاشت، یعنی بی‌سروصدا اتفاق
+        # می‌افتاد.
+        (ret, "return", "recordFailure(", "هر شکست روی فاکتور ثبت می‌شود"),
+        (ret, "return", "payment_error = $2", "علت شکست ذخیره می‌شود"),
+        (ret, "return", "callback_raw = $3",
+         "پارامترهای خام درگاه ذخیره می‌شوند تا نام ناشناخته قابل تشخیص باشد"),
+        (ret, "return", "await notify(", "شکست پرداخت فورا به ادمین خبر می‌دهد"),
+        (ret, "return", "if (inv.status === 'paid') return to('already')",
+         "بازگشت دوباره روی فاکتور پرداخت‌شده چیزی را خراب نمی‌کند"),
     ]
 
     for src, label, needle, why in source_checks:
@@ -215,6 +231,51 @@ def main():
     else:
         failures += 1
         print("شکست  کد واقعی (invoices): اطلاع‌رسانی داخل تراکنش است و قفل را نگه می‌دارد")
+
+    print("")
+
+    # ── رمز سرور هرگز ذخیره نمی‌شود ──────────────────────────
+    #
+    # ادمین رمز را در فرم تحویل می‌نویسد و همان لحظه در ایمیل می‌رود.
+    # نگهداری‌اش یعنی یک دامپ دیتابیس، رمز همه سرورهای تحویل‌شده را لو
+    # می‌دهد.
+    #
+    # این بررسی به کوئری‌های نوشتن نگاه می‌کند، نه به وجود کلمه: خود
+    # متغیر password باید باشد، ولی نباید در هیچ INSERT یا UPDATE برود.
+    writes = re.findall(r"(INSERT INTO[^`]*|UPDATE\s+\w+[^`]*)", orders)
+    leaked = [w for w in writes if "password" in w.lower()]
+    if leaked:
+        failures += 1
+        print("شکست  کد واقعی (orders): رمز در کوئری نوشتن می‌رود — %s" % leaked[0][:70])
+    else:
+        print("گذشت  کد واقعی (orders): رمز در هیچ کوئری نوشتنی نمی‌رود")
+
+    if "const password = String(body.password" in orders:
+        print("گذشت  کد واقعی (orders): رمز از فرم خوانده و فقط ایمیل می‌شود")
+    else:
+        failures += 1
+        print("شکست  کد واقعی (orders): رمز از فرم خوانده نمی‌شود")
+
+    # پیامک نباید رمز داشته باشد: رمزنگاری نمی‌شود و روی صفحه قفل گوشی
+    # پیش‌نمایش می‌شود
+    sms_calls = re.findall(r"sendSms\(([^;]*?)\);", orders, re.S)
+    if any("password" in c for c in sms_calls):
+        failures += 1
+        print("شکست  کد واقعی (orders): رمز در پیامک می‌رود")
+    else:
+        print("گذشت  کد واقعی (orders): پیامک رمز ندارد")
+
+    for needle, why in (
+        ("گذرواژه", "رمز در ایمیل تحویل می‌آید"),
+        ("آی‌پی", "آی‌پی در ایمیل تحویل می‌آید"),
+        ("سیستم عامل", "سیستم عامل در ایمیل تحویل می‌آید"),
+        ("esc(v)", "مقادیر مشخصات خنثی می‌شوند"),
+    ):
+        if needle in delivery:
+            print("گذشت  کد واقعی (تحویل): %s" % why)
+        else:
+            failures += 1
+            print("شکست  کد واقعی (تحویل): %s پیدا نشد" % why)
 
     print("")
     if failures:

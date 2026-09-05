@@ -15,6 +15,7 @@ import { usePathname } from 'next/navigation';
 
 const NAV = [
   { href: '/portal', label: 'سرورها' },
+  { href: '/portal/shop', label: 'فروشگاه' },
   { href: '/portal/usage', label: 'گزارش مصرف' },
   { href: '/portal/invoices', label: 'فاکتورها' },
   { href: '/portal/topups', label: 'خرید ترافیک' },

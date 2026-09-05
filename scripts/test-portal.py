@@ -159,9 +159,15 @@ def main():
             for m in re.finditer(r"FROM\s+(servers|ip_addresses|server_metrics_daily)\b", src):
                 table = m.group(1)
                 tail = src[m.start(): m.start() + 900]
+                # شماره پارامتر مهم نیست، وجود قید مهم است. نسخه اول
+                # فقط $1 را می‌پذیرفت و کوئری درستی که customer_id را
+                # در $2 داشت هشدار کاذب می‌گرفت.
+                #
+                # «s.id» برای زیرکوئری‌های همبسته است: آن‌ها با شناسه
+                # سروری کار می‌کنند که خودِ کوئری بیرونی به مشتری مقید
+                # کرده.
                 scoped = (
-                    "customer_id = $1" in tail
-                    or "s.customer_id = $1" in tail
+                    re.search(r"customer_id\s*=\s*\$\d", tail) is not None
                     or "s.id" in tail
                 )
                 check(

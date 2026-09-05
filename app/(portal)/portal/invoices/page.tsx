@@ -21,6 +21,7 @@ interface Invoice {
   created_at: string;
   payment_ref: string | null;
   card_number: string | null;
+  payment_error: string | null;
   server_id: number | null;
   server_name: string | null;
 }
@@ -127,6 +128,14 @@ export default function PortalInvoicesPage() {
                         </>
                       )}
                     </p>
+                    {/* اگر تلاش پرداختی ناموفق بوده، مشتری باید بداند —
+                        شاید پولش کم شده و منتظر است */}
+                    {inv.payment_error && (
+                      <p className="text-[11px] mt-1.5 text-amber leading-relaxed">
+                        آخرین تلاش پرداخت ناموفق بود. اگر مبلغ از حسابتان کم شده، شماره پیگیری
+                        بانک را به پشتیبانی بدهید.
+                      </p>
+                    )}
                     {inv.due_at && (
                       <p className={`text-[11px] mt-1 ${overdue ? 'text-danger' : 'text-muted'}`}>
                         مهلت: {formatJalaliDay(inv.due_at)}

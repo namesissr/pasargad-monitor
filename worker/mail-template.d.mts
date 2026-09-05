@@ -16,6 +16,8 @@ export interface RenderEmailInput {
   /** آدرس عمومی پنل؛ برای فایل قلم و دکمه «باز کردن پنل» */
   panelUrl?: string;
   brand?: string;
+  /** بلوک اچ‌تی‌ام‌ال دلخواه، پس از متن — مثلا جدول مشخصات سرور */
+  htmlBlock?: string;
 }
 
 export declare function esc(value: unknown): string;
