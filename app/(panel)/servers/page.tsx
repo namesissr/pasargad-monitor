@@ -9,6 +9,7 @@ import { UsageBar } from '@/components/Chart';
 import { api, ApiError } from '@/lib/api';
 import {
   faNum,
+  formatFromGb,
   formatBytes,
   formatDuration,
   formatMbps,
@@ -269,7 +270,7 @@ export default function ServersPage() {
                                   : 'text-muted'
                             }`}
                           >
-                            {faNum(Math.max(0, Number(s.traffic_balance_gb)).toFixed(0))} گیگ باقی‌مانده
+                            {formatFromGb(Math.max(0, Number(s.traffic_balance_gb)))} باقی‌مانده
                           </span>
                         </>
                       ) : quota > 0 ? (

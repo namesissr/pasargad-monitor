@@ -48,6 +48,23 @@ export function formatTB(bytes: number | string | null | undefined, digits = 3):
   return `${faNum((b / Math.pow(1024, 4)).toFixed(digits))} ترابایت`;
 }
 
+/**
+ * عددی که واحدش گیگابایت است، به شکل خوانا.
+ *
+ * ترافیک پیش‌خرید به ترابایت فروخته می‌شود و «۱۰۲۴۰۰ گیگ» را کسی
+ * نمی‌خواند. بالای هزار گیگ به ترابایت نشان داده می‌شود.
+ */
+export function formatFromGb(gb: number | string | null | undefined): string {
+  const v = typeof gb === 'string' ? Number(gb) : gb;
+  if (v === null || v === undefined || !Number.isFinite(v)) return '—';
+  if (Math.abs(v) >= 1024) {
+    const tb = v / 1024;
+    // زیر ده ترابایت یک رقم اعشار معنی دارد؛ بالاتر، عدد گرد کافی است
+    return `${faNum(tb.toFixed(Math.abs(tb) < 10 ? 1 : 0))} ترابایت`;
+  }
+  return `${faNum(v.toFixed(0))} گیگابایت`;
+}
+
 /** حجم همیشه به گیگابایت */
 export function formatGB(bytes: number | string | null | undefined, digits = 2): string {
   const b = typeof bytes === 'string' ? Number(bytes) : bytes;

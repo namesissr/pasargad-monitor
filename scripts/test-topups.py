@@ -6,7 +6,7 @@
 سرور اختصاصی سهمیه ماهانه ندارد. مشترک از همان اول ترافیک می‌خرد، و هر
 وقت تمام شد دوباره می‌خرد. ترافیک خریداری‌شده انقضا ندارد.
 
-    موجودی = مجموع خریدها − مصرف از تاریخ شروع شمارش
+    موجودی = مجموع خریدها − (مصرف پیش از پنل + مصرف اندازه‌گیری‌شده)
 
 بازسازی تصمیم‌های app/api/topups/route.ts و worker/customer-alerts.mjs.
 
@@ -35,22 +35,24 @@ except Exception:
     pass
 
 
-def balance(purchases, daily_usage, counted_from):
+def balance(purchases, daily_usage, counted_from, used_before=0):
     """
     موجودی ترافیک.
 
     purchases    فهرست عددهای خرید (منفی هم مجاز است، برای اصلاح)
     daily_usage  فهرست (روز، گیگ مصرف) — روز به شکل رشته قابل مقایسه
     counted_from روز شروع شمارش؛ None یعنی هنوز خریدی نبوده
+    used_before  مصرفی که پیش از پنل انجام شده و اندازه‌گیری نشده
 
-    مصرف پیش از counted_from شمرده نمی‌شود.
+    مصرف پیش از counted_from شمرده نمی‌شود؛ به‌جایش used_before که یک
+    عدد صریح است به مصرف اضافه می‌شود.
     """
     purchased = sum(purchases)
     if counted_from is None:
-        used = 0.0
+        measured = 0.0
     else:
-        used = sum(g for day, g in daily_usage if day >= counted_from)
-    return round(purchased - used, 2)
+        measured = sum(g for day, g in daily_usage if day >= counted_from)
+    return round(purchased - measured - used_before, 2)
 
 
 def alert(purchased_gb, used_gb):
@@ -110,6 +112,35 @@ REBUY = [
     ([1000, 1000], 2000, "quota_100", "خرید دوم هم تمام شد"),
 ]
 
+# مهاجرت مشتری موجود — (خریدها، مصرف اندازه‌گیری‌شده، تاریخ شروع، مصرف پیش از پنل، موجودی)
+#
+# سناریوی واقعی: مشتری صد ترابایت خریده و هفتادویک ترابایت پیش از
+# اضافه‌شدن به پنل مصرف کرده. ۱۰۰ ترابایت = ۱۰۲۴۰۰ گیگ، ۷۱ = ۷۲۷۰۴.
+MIGRATION_CASES = [
+    ([102400], [], "1404-06-01", 72704, 29696,
+     "صد ترابایت خرید، هفتادویک ترابایت مصرف پیش از پنل"),
+    ([102400], [("1404-06-10", 500)], "1404-06-01", 72704, 29196,
+     "مصرف تازه از موجودی کم می‌شود"),
+    # اگر ایجنت روزهای پیش از تاریخ شروع را هم داشته باشد، نباید دو بار
+    # شمرده شود — یک بار در used_before و یک بار در اندازه‌گیری
+    ([102400], [("1404-05-20", 9999)], "1404-06-01", 72704, 29696,
+     "مصرف پیش از تاریخ شروع دو بار شمرده نمی‌شود"),
+    ([102400], [], "1404-06-01", 0, 102400, "بدون مصرف گذشته"),
+    ([102400, 51200], [], "1404-06-01", 72704, 80896, "خرید دوم روی همان می‌نشیند"),
+
+    # ── تله ──────────────────────────────────────────────────
+    # دو راه برای ثبت مصرف گذشته هست و هر دو درست‌اند:
+    #   الف) ردیف روزانه دستی + تاریخ شروع عقب‌تر
+    #   ب) عدد «مصرف پیش از پنل»
+    # ولی با هم، همان مصرف دو بار کم می‌شود. فرمول جمعی است و این را
+    # نمی‌گیرد؛ محافظش هشدار صریح در فرم است.
+    ([102400], [("1404-05-20", 72704)], "1404-05-01", 72704, -43008,
+     "هر دو راه با هم — مصرف دو بار شمرده می‌شود"),
+    # همان داده، فقط با راه الف: درست
+    ([102400], [("1404-05-20", 72704)], "1404-05-01", 0, 29696,
+     "فقط ردیف روزانه، مصرف پیش از پنل صفر"),
+]
+
 VALIDATE_CASES = [
     (0, None, "مقدار ترافیک را وارد کنید", "صفر پذیرفته نمی‌شود"),
     (None, None, "مقدار ترافیک را وارد کنید", "خالی پذیرفته نمی‌شود"),
@@ -141,6 +172,11 @@ def main():
 
     print("")
 
+    for buys, usage, start, before, expected, name in MIGRATION_CASES:
+        check("مهاجرت: %s" % name, balance(buys, usage, start, before), expected)
+
+    print("")
+
     for buys, used, expected, name in REBUY:
         check("هشدار: %s" % name, alert(sum(buys), used), expected)
 
@@ -163,6 +199,7 @@ def main():
     srv_list = read("app", "api", "servers", "route.ts")
     srv_one = read("app", "api", "servers", "[id]", "route.ts")
     mig = read("db", "migrations", "031_prepaid_traffic.sql")
+    mig33 = read("db", "migrations", "033_opening_usage.sql")
 
     source_checks = [
         (route, "topups", "await requireUser()", "فقط ادمین ثبت می‌کند"),
@@ -171,7 +208,11 @@ def main():
         (route, "topups", "DELETE FROM customer_notices", "هشدار پس از خرید تازه از نو مسلح می‌شود"),
         (route, "topups", "kind IN ('quota_90', 'quota_100')", "فقط هشدار ترافیک پاک می‌شود، نه تمدید"),
         (route, "topups", "if (gb > 0)", "اصلاح منفی هشدار را از نو مسلح نمی‌کند"),
+        (route, "topups", "traffic_used_before_gb = $2", "وضعیت اولیه از پنل قابل ثبت است"),
+        (route, "topups", "usedBefore < 0", "مصرف پیش از پنل منفی پذیرفته نمی‌شود"),
         (alerts, "هشدار", "if (srv.purchased_gb > 0)", "سروری که خریدی ندارد هشدار نمی‌گیرد"),
+        (alerts, "هشدار", "+ s.traffic_used_before_gb",
+         "مصرف پیش از پنل در هشدار هم حساب می‌شود"),
         (alerts, "هشدار", "if (pct >= 100) {", "اتمام پیش از نود درصد بررسی می‌شود"),
         (alerts, "هشدار", "} else if (pct >= 90) {", "نود درصد فقط وقتی هنوز تمام نشده"),
         (alerts, "هشدار", "srv.counted_from, detail)", "کلید یکتایی تاریخ شروع است، نه ماه"),
@@ -180,6 +221,7 @@ def main():
         (mig, "مهاجرت ۰۳۱", "DROP COLUMN IF EXISTS kind", "ماشین‌آلات تسویه برچیده شد"),
         (mig, "مهاجرت ۰۳۱", "DELETE FROM traffic_topups WHERE kind = 'settlement'",
          "ردیف‌های تسویه پاک می‌شوند وگرنه مصرف دو بار کم می‌شود"),
+        (mig33, "مهاجرت ۰۳۳", "traffic_used_before_gb", "ستون مصرف پیش از پنل"),
     ]
 
     for src, label, needle, why in source_checks:
@@ -209,11 +251,14 @@ def main():
         if "server_metrics_daily" not in src or "traffic_topups" not in src:
             failures += 1
             print("شکست  کد واقعی (%s): موجودی پیش‌خرید خوانده نمی‌شود" % label)
-        elif "d.day >= s.traffic_counted_from" in src:
-            print("گذشت  کد واقعی (%s): مصرف فقط از تاریخ شروع شمارش" % label)
-        else:
+        elif "d.day >= s.traffic_counted_from" not in src:
             failures += 1
             print("شکست  کد واقعی (%s): مصرف بدون تاریخ شروع شمرده می‌شود" % label)
+        elif "s.traffic_used_before_gb" not in src:
+            failures += 1
+            print("شکست  کد واقعی (%s): مصرف پیش از پنل حساب نمی‌شود" % label)
+        else:
+            print("گذشت  کد واقعی (%s): تاریخ شروع و مصرف پیش از پنل، هر دو" % label)
 
     # ماشین‌آلات تسویه نباید جایی مانده باشد
     if os.path.exists(os.path.join(ROOT, "worker", "topup-settle.mjs")):

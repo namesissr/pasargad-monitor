@@ -2,7 +2,15 @@
 
 import { useLoad, LoadState } from '@/components/useLoad';
 import { Notice } from '@/components/ui';
-import { faNum, formatBytes, formatBps, formatJalaliDay, formatPercent, timeAgo } from '@/lib/format';
+import {
+  faNum,
+  formatBytes,
+  formatBps,
+  formatFromGb,
+  formatJalaliDay,
+  formatPercent,
+  timeAgo,
+} from '@/lib/format';
 
 interface PortalServer {
   id: number;
@@ -145,7 +153,7 @@ export default function PortalPage() {
                     <div className="flex items-center justify-between text-xs mb-1">
                       <span className="text-muted">ترافیک باقی‌مانده</span>
                       <span className={pct >= 90 ? 'text-danger' : pct >= 75 ? 'text-amber' : 'text-muted'}>
-                        {faNum(remaining.toFixed(0))} گیگ از {faNum(purchased.toFixed(0))} گیگ
+                        {formatFromGb(remaining)} از {formatFromGb(purchased)}
                       </span>
                     </div>
                     <div className="h-2 rounded-full bg-line overflow-hidden">

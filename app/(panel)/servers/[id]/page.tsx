@@ -15,6 +15,7 @@ import {
   faNum,
   formatBps,
   formatBytes,
+  formatFromGb,
   formatJalaliDay,
   formatDuration,
   formatJalaliTime,
@@ -43,6 +44,7 @@ interface Detail {
     port_mbps: number | null;
     traffic_quota_gb: number | null;
     traffic_counted_from: string | null;
+    traffic_used_before_gb: number;
     traffic_purchased_gb: number;
     traffic_used_gb: number;
     traffic_balance_gb: number;
@@ -329,7 +331,7 @@ export default function ServerDetailPage() {
           <UsageBar
             percent={(Number(s.traffic_used_gb) / purchasedGb) * 100}
             label="ترافیک پیش‌خرید"
-            right={`${faNum(Math.max(0, Number(s.traffic_balance_gb)).toFixed(0))} گیگ باقی‌مانده از ${faNum(purchasedGb.toFixed(0))} گیگ`}
+            right={`${formatFromGb(Math.max(0, Number(s.traffic_balance_gb)))} باقی‌مانده از ${formatFromGb(purchasedGb)}`}
           />
         ) : quotaBytes > 0 ? (
           <UsageBar
@@ -968,9 +970,18 @@ function EditServerModal({
 function ServerTopups({ serverId, onChange }: { serverId: number; onChange: () => void }) {
   const { data, loading, error, reload } = useLoad<{
     topups: { id: number; gb: number; note: string | null; created_at: string }[];
-    totals: { purchased: number; used: number; balance: number } | null;
+    totals: {
+      purchased: number;
+      used: number;
+      balance: number;
+      usedBefore: number;
+      countedFrom: string | null;
+      firstDataDay: string | null;
+      allMeasuredGb: number;
+    } | null;
   }>(`/api/topups?server_id=${serverId}&limit=20`);
   const [adding, setAdding] = useState(false);
+  const [opening, setOpening] = useState(false);
 
   return (
     <section className="card overflow-hidden">
@@ -979,14 +990,29 @@ function ServerTopups({ serverId, onChange }: { serverId: number; onChange: () =
           <h2 className="text-sm font-bold">ترافیک پیش‌خرید</h2>
           {data && (
             <p className="text-[11px] text-muted mt-0.5">
-              موجودی {faNum(Math.max(0, data.totals?.balance ?? 0).toFixed(0))} گیگ از{' '}
-              {faNum((data.totals?.purchased ?? 0).toFixed(0))} گیگ خرید — بدون انقضا
+              {formatFromGb(data.totals?.purchased ?? 0)} خرید ·{' '}
+              {formatFromGb(data.totals?.used ?? 0)} مصرف ·{' '}
+              <span className={(data.totals?.balance ?? 0) <= 0 ? 'text-danger' : 'text-ok'}>
+                {formatFromGb(Math.max(0, data.totals?.balance ?? 0))} باقی‌مانده
+              </span>
+              {(data.totals?.usedBefore ?? 0) > 0 && (
+                <span> · شامل {formatFromGb(data.totals?.usedBefore ?? 0)} پیش از پنل</span>
+              )}
             </p>
           )}
         </div>
-        <button type="button" className="text-xs text-cyan hover:underline" onClick={() => setAdding(true)}>
-          + شارژ
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            className="text-xs text-muted hover:text-cyan"
+            onClick={() => setOpening(true)}
+          >
+            وضعیت اولیه
+          </button>
+          <button type="button" className="text-xs text-cyan hover:underline" onClick={() => setAdding(true)}>
+            + خرید
+          </button>
+        </div>
       </div>
 
       <div className="p-4">
@@ -1000,7 +1026,7 @@ function ServerTopups({ serverId, onChange }: { serverId: number; onChange: () =
               <li key={t.id} className="flex items-center justify-between gap-2">
                 <span className={t.gb < 0 ? 'text-danger' : 'text-ok'}>
                   {t.gb > 0 ? '+' : ''}
-                  {faNum(t.gb.toFixed(0))} گیگ
+                  {formatFromGb(t.gb)}
                 </span>
                 <span className="text-muted truncate flex-1 mx-2" title={t.note || undefined}>
                   {t.note || ''}
@@ -1019,11 +1045,158 @@ function ServerTopups({ serverId, onChange }: { serverId: number; onChange: () =
           onDone={() => {
             setAdding(false);
             reload();
-            // سهمیه مؤثر سرور عوض شده، پس نوار مصرف هم باید تازه شود
+            // موجودی سرور عوض شده، پس نوار مصرف هم باید تازه شود
+            onChange();
+          }}
+        />
+      )}
+
+      {opening && (
+        <OpeningUsageForm
+          serverId={serverId}
+          usedBefore={data?.totals?.usedBefore ?? 0}
+          countedFrom={data?.totals?.countedFrom ?? null}
+          firstDataDay={data?.totals?.firstDataDay ?? null}
+          allMeasuredGb={data?.totals?.allMeasuredGb ?? 0}
+          onClose={() => setOpening(false)}
+          onDone={() => {
+            setOpening(false);
+            reload();
             onChange();
           }}
         />
       )}
     </section>
+  );
+}
+
+
+/**
+ * وضعیت اولیه ترافیک — برای مشتری‌ای که پیش از پنل ترافیک داشته.
+ *
+ * دو عدد که فقط با هم معنی دارند: مصرف گذشته، و تاریخی که اندازه‌گیری
+ * پنل از آن شروع می‌شود. مصرف گذشته یعنی «تا آن تاریخ»، و اندازه‌گیری
+ * از همان تاریخ رویش سوار می‌شود. اگر تاریخ عقب‌تر از واقعیت باشد،
+ * بخشی از مصرف دو بار شمرده می‌شود.
+ */
+function OpeningUsageForm({
+  serverId,
+  usedBefore,
+  countedFrom,
+  firstDataDay,
+  allMeasuredGb,
+  onClose,
+  onDone,
+}: {
+  serverId: number;
+  usedBefore: number;
+  countedFrom: string | null;
+  firstDataDay: string | null;
+  allMeasuredGb: number;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [amount, setAmount] = useState(
+    usedBefore ? String(Number((usedBefore / 1024).toFixed(2))) : '',
+  );
+  const [unit, setUnit] = useState('TB');
+  const [from, setFrom] = useState(countedFrom ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const gb = Number(amount) * (unit === 'TB' ? 1024 : 1);
+
+  async function save() {
+    setErr(null);
+    setBusy(true);
+    try {
+      await api.put('/api/topups', {
+        server_id: serverId,
+        used_before_gb: gb,
+        counted_from: from,
+      });
+      onDone();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'ذخیره وضعیت اولیه ناموفق بود');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open title="وضعیت اولیه ترافیک" onClose={onClose}>
+      <div className="space-y-4">
+        <Notice type="info">
+          اگر این مشتری پیش از اضافه‌شدن به پنل ترافیک مصرف کرده، مجموعش را اینجا وارد کنید.
+          خودِ خرید را با دکمه «خرید» ثبت کنید؛ این فیلد فقط مصرف گذشته است.
+        </Notice>
+
+        {/*
+          دو راه برای همان کار وجود دارد و هر دو درست‌اند — ولی با هم
+          مصرف را دو بار می‌شمارند. اگر داده روزانه هست، نشانش می‌دهیم و
+          راه دوم را یک کلیک می‌کنیم تا کسی هر دو را پر نکند.
+        */}
+        {firstDataDay && (
+          <Notice type="warn">
+            برای این سرور از {formatJalaliDay(firstDataDay)} داده روزانه ثبت شده، جمعاً{' '}
+            {formatFromGb(allMeasuredGb)}. اگر مصرف گذشته را همان‌جا وارد کرده‌اید، این فیلد را
+            صفر بگذارید و فقط تاریخ شروع را عقب ببرید:{' '}
+            <button
+              type="button"
+              className="text-cyan underline"
+              onClick={() => {
+                setAmount('0');
+                setFrom(firstDataDay);
+              }}
+            >
+              تاریخ را روی {firstDataDay} بگذار
+            </button>
+            <br />
+            هر دو را با هم پر نکنید — مصرف دو بار شمرده می‌شود.
+          </Notice>
+        )}
+
+        <Field label="مصرف پیش از پنل" hint={amount ? `${gb.toLocaleString('fa-IR')} گیگابایت` : undefined}>
+          <div className="flex gap-2">
+            <input
+              className="input ltr flex-1"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="71"
+            />
+            <select className="input w-24" value={unit} onChange={(e) => setUnit(e.target.value)}>
+              <option value="TB">ترابایت</option>
+              <option value="GB">گیگابایت</option>
+            </select>
+          </div>
+        </Field>
+
+        <Field
+          label="اندازه‌گیری پنل از این تاریخ"
+          hint="میلادی، مثل ۲۰۲۶-۰۹-۰۵. معمولاً روزی که ایجنت نصب شد."
+        >
+          <input
+            className="input ltr"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            placeholder="2026-09-05"
+          />
+        </Field>
+
+        <Notice type="warn">
+          مصرفی که ایجنت پیش از این تاریخ ثبت کرده به حساب نمی‌آید. اگر تاریخ را عقب‌تر از
+          واقعیت بگذارید، بخشی از مصرف دو بار شمرده می‌شود.
+        </Notice>
+
+        {err && <Notice type="error">{err}</Notice>}
+
+        <div className="flex gap-2 justify-end">
+          <button type="button" className="btn-ghost" onClick={onClose}>انصراف</button>
+          <button type="button" className="btn" onClick={save} disabled={busy}>
+            {busy ? 'در حال ذخیره…' : 'ذخیره'}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }

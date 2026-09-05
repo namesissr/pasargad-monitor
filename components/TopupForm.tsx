@@ -24,9 +24,12 @@ export function TopupForm({
   const [form, setForm] = useState({
     server_id: serverId ? String(serverId) : '',
     gb: '',
+    unit: 'TB',
     price_toman: '',
     note: '',
   });
+
+  const amountGb = Number(form.gb) * (form.unit === 'TB' ? 1024 : 1);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -36,7 +39,7 @@ export function TopupForm({
     try {
       await api.post('/api/topups', {
         server_id: Number(form.server_id),
-        gb: Number(form.gb),
+        gb: amountGb,
         price_toman: form.price_toman,
         note: form.note,
       });
@@ -67,13 +70,30 @@ export function TopupForm({
         )}
 
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="مقدار (گیگابایت)" hint="برای اصلاح اشتباه، عدد منفی بزنید">
-            <input
-              className="input ltr"
-              value={form.gb}
-              onChange={(e) => setForm((f) => ({ ...f, gb: e.target.value }))}
-              placeholder="500"
-            />
+          <Field
+            label="مقدار"
+            hint={
+              form.gb && form.unit === 'TB'
+                ? `${amountGb.toLocaleString('fa-IR')} گیگابایت`
+                : 'برای اصلاح اشتباه، عدد منفی بزنید'
+            }
+          >
+            <div className="flex gap-2">
+              <input
+                className="input ltr flex-1"
+                value={form.gb}
+                onChange={(e) => setForm((f) => ({ ...f, gb: e.target.value }))}
+                placeholder="100"
+              />
+              <select
+                className="input w-24"
+                value={form.unit}
+                onChange={(e) => setForm((f) => ({ ...f, unit: e.target.value }))}
+              >
+                <option value="TB">ترابایت</option>
+                <option value="GB">گیگابایت</option>
+              </select>
+            </div>
           </Field>
           <Field label="مبلغ (تومان)" hint="اختیاری">
             <input
@@ -106,7 +126,7 @@ export function TopupForm({
             type="button"
             className="btn"
             onClick={save}
-            disabled={busy || !form.server_id || !form.gb}
+            disabled={busy || !form.server_id || !Number(form.gb)}
           >
             {busy ? 'در حال ثبت…' : 'ثبت خرید'}
           </button>

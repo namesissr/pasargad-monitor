@@ -38,8 +38,10 @@ export async function GET() {
               -- نشان داده شود، مشتری که ترافیک خریده عدد قدیمی می‌بیند و
               -- فکر می‌کند شارژش اعمال نشده.
               tp.purchased::float8                 AS traffic_purchased_gb,
-              (tp.used_bytes / 1073741824)::float8 AS traffic_used_gb,
-              (tp.purchased - tp.used_bytes / 1073741824)::float8 AS traffic_balance_gb,
+              (tp.used_bytes / 1073741824 + s.traffic_used_before_gb)::float8
+                AS traffic_used_gb,
+              (tp.purchased - tp.used_bytes / 1073741824 - s.traffic_used_before_gb)::float8
+                AS traffic_balance_gb,
               s.location, s.last_seen_at, s.renews_at,
               m.cpu_percent::float8       AS cpu_percent,
               m.mem_used_bytes::float8    AS mem_used_bytes,

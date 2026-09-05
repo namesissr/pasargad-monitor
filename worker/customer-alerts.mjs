@@ -69,8 +69,8 @@ export async function checkCustomerAlerts() {
             -- ترافیک پیش‌خرید: سرور اختصاصی سهمیه ماهانه ندارد. مشترک
             -- ترافیک می‌خرد و هر وقت تمام شد دوباره می‌خرد.
             to_char(s.traffic_counted_from, 'YYYY-MM-DD') AS counted_from,
-            tp.purchased::float8                 AS purchased_gb,
-            (tp.used_bytes / 1073741824)::float8 AS used_gb,
+            tp.purchased::float8 AS purchased_gb,
+            (tp.used_bytes / 1073741824 + s.traffic_used_before_gb)::float8 AS used_gb,
             s.renews_at, s.renew_notice_days,
             c.id AS customer_id, c.name AS customer_name,
             c.phone AS customer_phone, c.email AS customer_email

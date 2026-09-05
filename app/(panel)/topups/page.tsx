@@ -5,7 +5,7 @@ import { useLoad, LoadState } from '@/components/useLoad';
 import { Notice } from '@/components/ui';
 import { TopupForm } from '@/components/TopupForm';
 import { api, ApiError } from '@/lib/api';
-import { faNum, formatJalaliDay, formatToman, timeAgo } from '@/lib/format';
+import { faNum, formatFromGb, formatJalaliDay, formatToman, timeAgo } from '@/lib/format';
 
 interface TopupRow {
   id: number;
@@ -71,7 +71,7 @@ export default function TopupsPage() {
       <div className="card p-4">
         <div className="text-xs text-muted">مجموع ترافیک فروخته‌شده</div>
         <div className="text-2xl font-bold mt-1">
-          {faNum((data.totals?.purchased ?? 0).toFixed(0))} گیگ
+          {formatFromGb(data.totals?.purchased ?? 0)}
         </div>
         <div className="text-[11px] text-muted mt-0.5">
           موجودی باقی‌مانده هر سرور در صفحه خودش دیده می‌شود
@@ -107,7 +107,7 @@ export default function TopupsPage() {
                   {/* عدد منفی یعنی اصلاح اشتباه و باید از خرید جدا دیده شود */}
                   <td className={`text-xs font-bold ${t.gb < 0 ? 'text-danger' : 'text-ok'}`}>
                     {t.gb > 0 ? '+' : ''}
-                    {faNum(t.gb.toFixed(0))} گیگ
+                    {formatFromGb(t.gb)}
                   </td>
                   <td className="col-sm text-xs">{t.price_toman ? formatToman(t.price_toman) : '—'}</td>
                   <td className="col-md text-xs text-muted">{t.created_by_name || '—'}</td>
