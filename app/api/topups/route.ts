@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { fail, handle, ok, readJson } from '@/lib/http';
+import { fail, handle, idParam, ok, readJson } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -79,7 +79,7 @@ export async function PUT(req: Request) {
     const body = await readJson<Record<string, unknown>>(req);
 
     const serverId = Number(body.server_id);
-    if (!Number.isInteger(serverId)) return fail('سرور را انتخاب کنید', 400);
+    if (!serverId !== null) return fail('سرور را انتخاب کنید', 400);
 
     const usedBefore = Number(body.used_before_gb);
     if (!Number.isFinite(usedBefore) || usedBefore < 0) {
@@ -120,8 +120,11 @@ export async function GET(req: Request) {
     await requireUser();
     const url = new URL(req.url);
 
-    const serverId = Number(url.searchParams.get('server_id'));
-    const one = Number.isInteger(serverId);
+    // بدون server_id یعنی «همه سرورها». با Number ساده، نبودِ پارامتر
+    // صفر می‌شد و روی سرور شماره صفر فیلتر می‌کرد — فهرست خالی و جمع
+    // صفر، بدون هیچ خطایی.
+    const serverId = idParam(url, 'server_id');
+    const one = serverId !== null;
     const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 100, 1), 500);
 
     const params: unknown[] = [];
@@ -166,7 +169,7 @@ export async function POST(req: Request) {
     const body = await readJson<Record<string, unknown>>(req);
 
     const serverId = Number(body.server_id);
-    if (!Number.isInteger(serverId)) return fail('سرور را انتخاب کنید', 400);
+    if (!serverId !== null) return fail('سرور را انتخاب کنید', 400);
 
     const gb = Number(body.gb);
     if (!Number.isFinite(gb) || gb === 0) return fail('مقدار ترافیک را وارد کنید', 400);
@@ -221,8 +224,8 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   return handle(async () => {
     await requireUser();
-    const id = Number(new URL(req.url).searchParams.get('id'));
-    if (!Number.isInteger(id)) return fail('شناسه نامعتبر است', 400);
+    const id = idParam(new URL(req.url), 'id');
+    if (id === null) return fail('شناسه نامعتبر است', 400);
 
     // برای اصلاح اشتباه بهتر است ترافیک منفی ثبت شود تا هر دو ردیف در
     // تاریخچه بمانند؛ ولی حذف هم ممکن است، برای ردیفی که اشتباهی ثبت شده.

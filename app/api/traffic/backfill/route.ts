@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { fail, handle, ok, readJson } from '@/lib/http';
+import { fail, handle, idParam, ok, readJson } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -86,7 +86,7 @@ export async function POST(req: Request) {
     const b = await readJson<Body>(req);
 
     const serverId = Number(b.server_id);
-    if (!Number.isInteger(serverId)) return fail('سرور را انتخاب کنید', 400);
+    if (serverId === null) return fail('سرور را انتخاب کنید', 400);
 
     if (b.mode === 'range') return handleRange(serverId, b);
 
@@ -246,11 +246,11 @@ export async function GET(req: Request) {
     await requireUser();
     const url = new URL(req.url);
 
-    const serverId = Number(url.searchParams.get('server_id'));
+    const serverId = idParam(url, 'server_id');
     const from = String(url.searchParams.get('from') || '');
     const to = String(url.searchParams.get('to') || '');
 
-    if (!Number.isInteger(serverId)) return fail('سرور را انتخاب کنید', 400);
+    if (serverId === null) return fail('سرور را انتخاب کنید', 400);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
       return fail('بازه تاریخ نامعتبر است', 400);
     }

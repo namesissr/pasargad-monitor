@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { fail, handle, ok } from '@/lib/http';
+import { fail, handle, idParam, ok } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,8 +41,8 @@ export async function GET(req: Request) {
     await requireUser();
     const url = new URL(req.url);
 
-    const serverId = Number(url.searchParams.get('server_id'));
-    if (!Number.isInteger(serverId)) return fail('سرور را انتخاب کنید', 400);
+    const serverId = idParam(url, 'server_id');
+    if (serverId === null) return fail('سرور را انتخاب کنید', 400);
 
     const from = String(url.searchParams.get('from') || '');
     const to = String(url.searchParams.get('to') || from);

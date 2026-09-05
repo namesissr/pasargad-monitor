@@ -469,6 +469,39 @@ def check_unterminated_strings():
                 )
 
 
+# ── ۲۸) شناسه از کوئری باید با idParam خوانده شود ───────────────────────
+# Number(null) در جاوااسکریپت صفر است نه NaN، و Number.isInteger(0) هم
+# درست است. پس این الگو وقتی پارامتر اصلا فرستاده نشده، روی «شناسه صفر»
+# فیلتر می‌کند: نتیجه خالی، جمع صفر، و هیچ خطایی.
+#
+# این یک بار در صفحه خرید ترافیک رخ داد و تشخیصش سخت بود چون همه‌چیز
+# سالم به‌نظر می‌رسید. idParam در lib/http.ts نبودِ پارامتر را از مقدار
+# معتبر جدا می‌کند.
+ID_PARAM_RE = re.compile(
+    r"Number\(\s*(?:new URL\(req\.url\)|url)\.searchParams\.get\(\s*['\"](\w+)['\"]"
+)
+
+# پارامترهایی که شناسه نیستند و مقدار پیش‌فرض دارند
+NOT_AN_ID = {"limit", "page", "per_page", "days", "hours", "count", "offset"}
+
+
+def check_id_params():
+    for path in walk({".ts"}):
+        r = rel(path)
+        if not (r.startswith("app/api/") and r.endswith("route.ts")):
+            continue
+        src = read(path)
+        for m in ID_PARAM_RE.finditer(src):
+            name = m.group(1)
+            if name in NOT_AN_ID:
+                continue
+            problems.append(
+                "%s:%d — شناسه «%s» با Number خوانده شده. نبودِ پارامتر صفر می‌شود "
+                "و کوئری بی‌صدا خالی برمی‌گردد؛ از idParam در lib/http استفاده کنید."
+                % (r, line_of(src, m.start()), name)
+            )
+
+
 def main():
     check_non_null_assertion()
     check_empty_catch()
@@ -477,6 +510,7 @@ def main():
     check_query_generics()
     check_hidden_columns()
     check_unterminated_strings()
+    check_id_params()
     check_undefined_names()
     check_union_props()
     check_route_auth()

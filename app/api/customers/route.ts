@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { hashPassword, requireUser } from '@/lib/auth';
-import { fail, handle, ok, readJson } from '@/lib/http';
+import { fail, handle, idParam, ok, readJson } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -119,7 +119,7 @@ export async function PATCH(req: Request) {
     await requireUser();
     const body = await readJson<Record<string, unknown>>(req);
     const id = Number(body.id);
-    if (!Number.isInteger(id)) return fail('شناسه مشتری نامعتبر است', 400);
+    if (id === null) return fail('شناسه مشتری نامعتبر است', 400);
 
     const parsed = clean(body);
     if (!parsed.ok) return fail(parsed.error, 400);
@@ -150,8 +150,8 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   return handle(async () => {
     await requireUser();
-    const id = Number(new URL(req.url).searchParams.get('id'));
-    if (!Number.isInteger(id)) return fail('شناسه مشتری نامعتبر است', 400);
+    const id = idParam(new URL(req.url), 'id');
+    if (id === null) return fail('شناسه مشتری نامعتبر است', 400);
 
     // سرورها می‌مانند و فقط تخصیصشان پاک می‌شود؛ حساب ورود با مشتری
     // می‌رود چون حساب بی‌صاحب یعنی دسترسی بدون مالک.
@@ -167,7 +167,7 @@ export async function PUT(req: Request) {
     const body = await readJson<{ id?: number; username?: string; password?: string; is_active?: boolean }>(req);
 
     const id = Number(body.id);
-    if (!Number.isInteger(id)) return fail('شناسه مشتری نامعتبر است', 400);
+    if (id === null) return fail('شناسه مشتری نامعتبر است', 400);
 
     const customer = await queryOne<{ id: number; name: string }>(
       `SELECT id, name FROM customers WHERE id = $1`,

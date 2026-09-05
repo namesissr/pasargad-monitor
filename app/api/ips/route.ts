@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { fail, handle, num, ok, readJson } from '@/lib/http';
+import { fail, handle, idParam, num, ok, readJson } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -272,8 +272,8 @@ export async function DELETE(req: Request) {
     await requireUser();
     const url = new URL(req.url);
 
-    const subnetId = Number(url.searchParams.get('subnetId'));
-    if (!Number.isInteger(subnetId)) return fail('بلوک را مشخص کنید', 400);
+    const subnetId = idParam(url, 'subnetId');
+    if (subnetId === null) return fail('بلوک را مشخص کنید', 400);
 
     const dryRun = url.searchParams.get('dryRun') === '1';
     const force = url.searchParams.get('force') === '1';

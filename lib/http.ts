@@ -43,3 +43,28 @@ export function num(v: string | null, fallback: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
+
+/**
+ * شناسه عددی از کوئری، یا null اگر نبود یا نامعتبر بود.
+ *
+ * چرا لازم است: `Number(null)` در جاوااسکریپت **صفر** است نه NaN، و
+ * `Number.isInteger(0)` هم درست است. پس این الگوی رایج
+ *
+ *     const id = Number(url.searchParams.get('server_id'));
+ *     if (Number.isInteger(id)) where = 'WHERE server_id = $1';
+ *
+ * وقتی پارامتر اصلا فرستاده نشده باشد، روی «سرور شماره صفر» فیلتر
+ * می‌کند — یعنی فهرست خالی و جمع صفر، بدون هیچ خطایی. این دقیقا یک بار
+ * در صفحه خرید ترافیک رخ داد و تشخیصش سخت بود چون همه‌چیز سالم به‌نظر
+ * می‌رسید.
+ *
+ * نبودِ پارامتر از مقدار نامعتبر جدا نمی‌شود، چون هر دو یک معنی دارند:
+ * شناسه‌ای در کار نیست. شناسه‌ها در این پروژه SERIAL اند، پس صفر و منفی
+ * هم نامعتبرند.
+ */
+export function idParam(url: URL, name: string): number | null {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw.trim() === '') return null;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}

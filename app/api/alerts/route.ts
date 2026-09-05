@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { fail, handle, ok, readJson } from '@/lib/http';
+import { fail, handle, idParam, ok, readJson } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,7 +56,7 @@ export async function PATCH(req: Request) {
     await requireUser();
     const b = await readJson<Record<string, unknown>>(req);
     const id = Number(b.id);
-    if (!Number.isInteger(id)) return fail('شناسه قانون نامعتبر است', 400);
+    if (id === null) return fail('شناسه قانون نامعتبر است', 400);
 
     const sets: string[] = [];
     const v: unknown[] = [];
@@ -92,8 +92,8 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   return handle(async () => {
     await requireUser();
-    const id = Number(new URL(req.url).searchParams.get('id'));
-    if (!Number.isInteger(id)) return fail('شناسه قانون نامعتبر است', 400);
+    const id = idParam(new URL(req.url), 'id');
+    if (id === null) return fail('شناسه قانون نامعتبر است', 400);
     await query('DELETE FROM alert_rules WHERE id = $1', [id]);
     return ok({ ok: true });
   });

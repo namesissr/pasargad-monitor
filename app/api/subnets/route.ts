@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { fail, handle, ok, readJson } from '@/lib/http';
+import { fail, handle, idParam, ok, readJson } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -119,7 +119,7 @@ export async function PATCH(req: Request) {
     await requireUser();
     const body = await readJson<{ id?: number; anchor_id?: number | null }>(req);
     const id = Number(body.id);
-    if (!Number.isInteger(id)) return fail('شناسه بلوک نامعتبر است', 400);
+    if (id === null) return fail('شناسه بلوک نامعتبر است', 400);
 
     const anchorId = body.anchor_id ? Number(body.anchor_id) : null;
     if (anchorId !== null && !Number.isInteger(anchorId)) {
@@ -143,8 +143,8 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   return handle(async () => {
     await requireUser();
-    const id = Number(new URL(req.url).searchParams.get('id'));
-    if (!Number.isInteger(id)) return fail('شناسه بلوک نامعتبر است', 400);
+    const id = idParam(new URL(req.url), 'id');
+    if (id === null) return fail('شناسه بلوک نامعتبر است', 400);
 
     // آدرس‌ها می‌مانند و فقط ارجاعشان به بلوک خالی می‌شود
     await query('DELETE FROM ip_subnets WHERE id = $1', [id]);

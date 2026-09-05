@@ -43,10 +43,19 @@ export async function verifySessionToken(token: string | undefined | null): Prom
   try {
     const { payload } = await jwtVerify(token, secretKey());
     if (typeof payload.uid !== 'number') return null;
+
+    // cid باید همراه بقیه برگردد، وگرنه requireCustomer هیچ‌وقت آن را
+    // نمی‌بیند و هر مشتری با «به این بخش دسترسی ندارید» روبه‌رو می‌شود.
+    // توکن امضا شده است، ولی نوعش باز هم بررسی می‌شود: هرچه از بیرون
+    // می‌آید حتی وقتی امضا دارد، خام استفاده نمی‌شود.
+    const cid = payload.cid;
+    const validCid = typeof cid === 'number' && Number.isInteger(cid) && cid > 0;
+
     return {
       uid: payload.uid,
       username: String(payload.username ?? ''),
       role: String(payload.role ?? 'admin'),
+      ...(validCid ? { cid } : {}),
     };
   } catch {
     return null;

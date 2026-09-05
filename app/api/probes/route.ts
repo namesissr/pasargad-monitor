@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { generateAgentToken, requireUser } from '@/lib/auth';
-import { fail, handle, ok, readJson } from '@/lib/http';
+import { fail, handle, idParam, ok, readJson } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,8 +39,8 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   return handle(async () => {
     await requireUser();
-    const id = Number(new URL(req.url).searchParams.get('id'));
-    if (!Number.isInteger(id)) return fail('شناسه دیدبان نامعتبر است', 400);
+    const id = idParam(new URL(req.url), 'id');
+    if (id === null) return fail('شناسه دیدبان نامعتبر است', 400);
     await query('DELETE FROM probes WHERE id = $1', [id]);
     return ok({ ok: true });
   });

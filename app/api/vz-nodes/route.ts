@@ -1,6 +1,6 @@
 import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
-import { fail, handle, ok, readJson } from '@/lib/http';
+import { fail, handle, idParam, ok, readJson } from '@/lib/http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -138,7 +138,7 @@ export async function PATCH(req: Request) {
     await requireUser();
     const body = await readJson<Record<string, unknown>>(req);
     const id = Number(body.id);
-    if (!Number.isInteger(id)) return fail('شناسه نود نامعتبر است', 400);
+    if (id === null) return fail('شناسه نود نامعتبر است', 400);
 
     const parsed = clean(body);
     if (!parsed.ok) return fail(parsed.error, 400);
@@ -166,8 +166,8 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   return handle(async () => {
     await requireUser();
-    const id = Number(new URL(req.url).searchParams.get('id'));
-    if (!Number.isInteger(id)) return fail('شناسه نود نامعتبر است', 400);
+    const id = idParam(new URL(req.url), 'id');
+    if (id === null) return fail('شناسه نود نامعتبر است', 400);
 
     // آی‌پی‌ها می‌مانند و فقط پیوندشان با نود پاک می‌شود — موجودی آی‌پی
     // نباید با حذف یک نود از بین برود
