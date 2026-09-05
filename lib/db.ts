@@ -9,7 +9,15 @@ import { Pool, type QueryResultRow } from 'pg';
  */
 let pool: Pool | null = null;
 
-function getPool(): Pool {
+/**
+ * استخر، برای کارهایی که یک کوئری تنها کافی نیست.
+ *
+ * تنها کاربردش گرفتن کلاینت اختصاصی برای تراکنش است — مثل تأیید پرداخت
+ * که باید ردیف فاکتور را با FOR UPDATE قفل کند. برای کوئری معمولی از
+ * query و queryOne استفاده کنید؛ آن‌ها کلاینت را خودشان برمی‌گردانند و
+ * نشت اتصال ندارند.
+ */
+export function getPool(): Pool {
   if (!pool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error('متغیر DATABASE_URL تنظیم نشده است');

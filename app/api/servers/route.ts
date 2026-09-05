@@ -28,6 +28,7 @@ SELECT
     AS traffic_balance_gb,
   s.monthly_cost::float8 AS monthly_cost, s.customer,
   s.status, s.last_seen_at, s.boot_time, s.is_active, s.notes, s.created_at,
+  s.customer_id,
   m.ts                       AS metric_ts,
   m.cpu_percent,
   m.ram_used_bytes::float8   AS ram_used_bytes,

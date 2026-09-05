@@ -23,6 +23,7 @@ const NAV = [
   { group: 'گزارش', items: [
     { href: '/reports', label: 'گزارش مصرف', icon: '▨' },
     { href: '/traffic', label: 'لاگ ترافیک', icon: '⇅' },
+    { href: '/invoices', label: 'فاکتورها', icon: '❑' },
     { href: '/billing', label: 'حسابداری', icon: '₮' },
     { href: '/topups', label: 'خرید ترافیک', icon: '⊕' },
   ]},

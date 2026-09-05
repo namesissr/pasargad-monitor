@@ -5,6 +5,7 @@ import { evaluateThresholds } from './alerts.mjs';
 import { rollupHourly, rollupDaily, purgeOld } from './rollup.mjs';
 import { discoverAll, drainQueue } from './vz-sync.mjs';
 import { checkCustomerAlerts } from './customer-alerts.mjs';
+import { issueRenewalInvoices } from './invoices.mjs';
 import { hashPassword } from './hash.mjs';
 
 /**
@@ -30,6 +31,9 @@ const CYCLE = {
   // هشدار سهمیه و تمدید. تکرارشان با جدول یکتا گرفته می‌شود، پس فاصله
   // کوتاه فقط یعنی زودتر خبردار می‌شوید، نه پیامک بیشتر.
   customerAlerts: 1_800_000,
+  // صدور فاکتور تمدید. ایندکس یکتا جلوی تکرار را می‌گیرد، پس اجرای
+  // مکرر فقط یعنی زودتر صادر می‌شود نه بیشتر.
+  invoices: 3_600_000,
 };
 
 let stopping = false;
@@ -126,6 +130,7 @@ async function main() {
   schedule('پاک‌سازی', purgeOld, async () => CYCLE.purge);
 
   schedule('هشدار مشتری', checkCustomerAlerts, async () => CYCLE.customerAlerts);
+  schedule('صدور فاکتور', issueRenewalInvoices, async () => CYCLE.invoices);
   schedule('صف ویژالیزور', drainQueue, async () => CYCLE.vzQueue);
   schedule('کشف ویژالیزور', discoverAll, async () => CYCLE.vzDiscover);
 }

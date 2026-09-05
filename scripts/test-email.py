@@ -20,6 +20,7 @@ worker/smtp.mjs پروتکل SMTP و کدگذاری MIME را خودش پیاد�
 
 import base64
 import io
+import re
 import os
 import sys
 
@@ -198,7 +199,7 @@ def main():
          "ارسال ایمیل در همان لاگ اعلان‌ها ثبت می‌شود"),
         (wemail, "worker/email", "'email'", "کانال email"),
         (lemail, "lib/email", "@/worker/smtp.mjs", "پروتکل تکرار نشده؛ یک پیاده‌سازی"),
-        (settings, "settings", "const SECRET = ['smtp_pass']", "رمز SMTP هرگز برنمی‌گردد"),
+
         (settings, "settings", "for (const key of SECRET) delete settings[key]",
          "رمز از پاسخ حذف می‌شود"),
         (settings, "settings", "if (SECRET.includes(key) && value === '') continue",
@@ -244,6 +245,22 @@ def main():
     else:
         failures += 1
         print("شکست  کد واقعی (قالب): متن بدون خنثی‌سازی در اچ‌تی‌ام‌ال می‌رود")
+
+    # محتوای خود آرایه SECRET خوانده می‌شود، نه اینکه نام کلید جایی در
+    # فایل باشد. نسخه اول این بررسی فقط دنبال «smtp_pass» می‌گشت و چون
+    # آن نام در فهرست ALLOWED هم هست، حذف‌شدنش از SECRET را نمی‌گرفت —
+    # بررسی‌ای که همیشه سبز است، بررسی نیست.
+    secret_block = re.search(r"const SECRET = \[([^\]]*)\]", settings)
+    secret_keys = (
+        [x.strip().strip("'\"") for x in secret_block.group(1).split(",") if x.strip()]
+        if secret_block else []
+    )
+    for key, why in (("smtp_pass", "رمز سرور ایمیل"), ("payping_token", "توکن درگاه پرداخت")):
+        if key in secret_keys:
+            print("گذشت  کد واقعی (settings): %s در فهرست محرمانه است" % why)
+        else:
+            failures += 1
+            print("شکست  کد واقعی (settings): %s در فهرست محرمانه نیست" % why)
 
     # رمز نباید در پاسخ ای‌پی‌آی برگردد: بررسی می‌کند که raw و settings
     # قاطی نشده باشند. اگر روزی کسی settings را با raw عوض کند، رمز از

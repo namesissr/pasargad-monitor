@@ -43,6 +43,8 @@ interface Detail {
     disk_total_bytes: number | null;
     port_mbps: number | null;
     traffic_quota_gb: number | null;
+    renewal_price_toman: number | null;
+    renewal_months: number | null;
     traffic_counted_from: string | null;
     traffic_used_before_gb: number;
     traffic_purchased_gb: number;
@@ -792,6 +794,8 @@ function EditServerModal({
     customer: server.customer ?? '',
     port_mbps: String(server.port_mbps ?? 1000),
     traffic_quota_gb: String(server.traffic_quota_gb ?? 0),
+    renewal_price_toman: String(server.renewal_price_toman ?? 0),
+    renewal_months: String(server.renewal_months ?? 1),
     monthly_cost: String(server.monthly_cost ?? 0),
     notes: server.notes ?? '',
     status: server.status,
@@ -824,6 +828,8 @@ function EditServerModal({
         ssh_port: Number(form.ssh_port) || 22,
         port_mbps: Number(form.port_mbps) || 1000,
         traffic_quota_gb: Number(form.traffic_quota_gb) || 0,
+        renewal_price_toman: Number(form.renewal_price_toman) || 0,
+        renewal_months: Number(form.renewal_months) || 1,
         monthly_cost: Number(form.monthly_cost) || 0,
         // رشته خالی به null تبدیل می‌شود تا دوباره از دیتاسنتر ارث ببرد
         price_per_tb: form.price_per_tb === '' ? null : Number(form.price_per_tb),
@@ -875,7 +881,26 @@ function EditServerModal({
           >
             <input className="input ltr" value={form.traffic_quota_gb} onChange={set('traffic_quota_gb')} />
           </Field>
-          <Field label="هزینه ماهانه (تومان)"><input className="input ltr" value={form.monthly_cost} onChange={set('monthly_cost')} /></Field>
+          <Field label="هزینه ماهانه (تومان)" hint="هزینه ما، نه قیمت مشتری">
+            <input className="input ltr" value={form.monthly_cost} onChange={set('monthly_cost')} />
+          </Field>
+          <Field
+            label="قیمت تمدید مشتری (تومان)"
+            hint="مبلغ فاکتور تمدید. صفر یعنی فاکتور خودکار صادر نشود."
+          >
+            <input
+              className="input ltr"
+              value={form.renewal_price_toman}
+              onChange={set('renewal_price_toman')}
+            />
+          </Field>
+          <Field label="طول دوره تمدید (ماه)" hint="یک، سه، شش یا دوازده">
+            <input
+              className="input ltr"
+              value={form.renewal_months}
+              onChange={set('renewal_months')}
+            />
+          </Field>
           <Field label="وضعیت" hint="حالت تعمیرات هشدار قطعی نمی‌فرستد">
             <select className="input" value={form.status} onChange={set('status')}>
               <option value="up">در دسترس</option>

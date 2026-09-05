@@ -23,6 +23,8 @@ interface SettingsData {
   emailConfigured: boolean;
   /** رمز SMTP هرگز برنمی‌گردد؛ فقط اینکه تنظیم شده یا نه */
   smtpPassSet: boolean;
+  /** توکن درگاه هم همین‌طور */
+  paypingTokenSet: boolean;
   recentSms: { id: number; recipient: string; body: string; ok: boolean; error: string | null; created_at: string }[];
 }
 
@@ -453,6 +455,107 @@ export default function SettingsPage() {
           اول ذخیره کنید، بعد آزمایشی بفرستید — ارسال آزمایشی از تنظیمات ذخیره‌شده می‌خواند نه از
           آنچه در فرم تایپ شده.
         </p>
+      </section>
+
+      {/* درگاه پرداخت */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">درگاه پرداخت و فاکتور</h2>
+
+        <Notice type="info">
+          فاکتور تمدید خودکار صادر می‌شود و مشتری از پرتال پرداخت می‌کند. پس از پرداخت، سرور
+          تمدید و به مشتری و شما اطلاع داده می‌شود.
+        </Notice>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="صدور خودکار فاکتور">
+            <select
+              className="input"
+              value={form.invoices_enabled ?? 'true'}
+              onChange={set('invoices_enabled')}
+            >
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+          <Field label="چند روز پیش از موعد" hint="فاکتور تمدید این‌قدر زودتر صادر شود">
+            <input
+              className="input ltr"
+              value={form.invoice_days_before ?? ''}
+              onChange={set('invoice_days_before')}
+              placeholder="7"
+            />
+          </Field>
+        </div>
+
+        <Notice type="warn">
+          قیمت تمدید هر سرور را در صفحه همان سرور بگذارید. سروری که قیمتش صفر باشد فاکتور
+          خودکار نمی‌گیرد — این عمدی است تا فاکتور صفر تومانی صادر نشود.
+        </Notice>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="درگاه پی‌پینگ">
+            <select
+              className="input"
+              value={form.payping_enabled ?? 'false'}
+              onChange={set('payping_enabled')}
+            >
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+          <Field
+            label="توکن پی‌پینگ"
+            hint={data.paypingTokenSet ? 'تنظیم شده — خالی یعنی همان قبلی بماند' : 'هنوز تنظیم نشده'}
+          >
+            <input
+              className="input ltr"
+              type="password"
+              value={form.payping_token ?? ''}
+              onChange={set('payping_token')}
+              autoComplete="new-password"
+              placeholder={data.paypingTokenSet ? '••••••••' : ''}
+            />
+          </Field>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field
+            label="نسخه ای‌پی‌آی"
+            hint="اگر پرداخت آزمایشی با خطای «کد پرداخت نداد» شکست خورد، دیگری را امتحان کنید"
+          >
+            <select
+              className="input"
+              value={form.payping_version ?? 'v2'}
+              onChange={set('payping_version')}
+            >
+              <option value="v2">v2</option>
+              <option value="v3">v3</option>
+            </select>
+          </Field>
+          <Field label="واحد مبلغ" hint="پنل همیشه تومان است؛ این فقط واحدی است که درگاه می‌خواهد">
+            <select
+              className="input"
+              value={form.payping_unit ?? 'toman'}
+              onChange={set('payping_unit')}
+            >
+              <option value="toman">تومان</option>
+              <option value="rial">ریال</option>
+            </select>
+          </Field>
+        </div>
+
+        <Notice type="warn">
+          <b>واحد را با یک پرداخت کوچک بسنجید.</b> اگر اشتباه باشد مبلغ ده برابر یا یک‌دهم به
+          درگاه می‌رود و درگاه هم آن را می‌پذیرد — خرابی‌ای که فقط با نگاه‌کردن به رسید معلوم
+          می‌شود. یک فاکتور دستی هزار تومانی بسازید و پرداختش کنید.
+        </Notice>
+
+        {!form.panel_url && (
+          <Notice type="error">
+            «آدرس عمومی پنل» در بخش ایمیل خالی است. بدون آن، درگاه نمی‌داند کاربر را به کجا
+            برگرداند و پرداخت شروع نمی‌شود.
+          </Notice>
+        )}
       </section>
 
       {/* ویژالیزور */}

@@ -394,8 +394,11 @@ def check_route_auth():
         # requireCustomer هم نگهبان معتبری است — مسیرهای پرتال مشتری با
         # آن محافظت می‌شوند. requireUser عمدا نقش مشتری را رد می‌کند، پس
         # این دو جای هم را نمی‌گیرند.
+        # requireOwnedServer هم نگهبان معتبری است: خودش requireCustomer
+        # را صدا می‌زند و علاوه بر آن مالکیت سرور را هم تأیید می‌کند.
         src = read(path)
-        if "requireUser" not in src and "requireCustomer" not in src:
+        guards = ("requireUser", "requireCustomer", "requireOwnedServer")
+        if not any(g in src for g in guards):
             problems.append("%s — مسیر API بدون نگهبان احراز هویت. عمدی است؟" % r)
 
 
@@ -482,7 +485,7 @@ ID_PARAM_RE = re.compile(
 )
 
 # پارامترهایی که شناسه نیستند و مقدار پیش‌فرض دارند
-NOT_AN_ID = {"limit", "page", "per_page", "days", "hours", "count", "offset"}
+NOT_AN_ID = {"limit", "page", "per_page", "days", "hours", "months", "count", "offset"}
 
 
 def check_id_params():
@@ -494,6 +497,13 @@ def check_id_params():
         for m in ID_PARAM_RE.finditer(src):
             name = m.group(1)
             if name in NOT_AN_ID:
+                continue
+            # الگوی «|| مقدار پیش‌فرض» بی‌خطر است: صفرِ ناشی از نبودِ
+            # پارامتر همان‌جا با عدد پیش‌فرض جایگزین می‌شود و هیچ‌وقت به
+            # کوئری نمی‌رسد. بدون این استثنا، هر شمارنده‌ای هشدار کاذب
+            # می‌گرفت.
+            after = src[m.end(): m.end() + 60]
+            if re.search(r"^\s*\)\s*\|\|\s*\d", after):
                 continue
             problems.append(
                 "%s:%d — شناسه «%s» با Number خوانده شده. نبودِ پارامتر صفر می‌شود "

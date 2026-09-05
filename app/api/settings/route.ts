@@ -36,6 +36,12 @@ const ALLOWED = [
   'smtp_from_name',
   'smtp_insecure',
   'panel_url',
+  'invoice_days_before',
+  'invoices_enabled',
+  'payping_enabled',
+  'payping_token',
+  'payping_version',
+  'payping_unit',
 ];
 
 /**
@@ -46,7 +52,7 @@ const ALLOWED = [
  * می‌کند، رمز از شبکه رد می‌شود و در تاریخچه مرورگر و لاگ‌ها می‌نشیند.
  * پنل فقط می‌داند تنظیم شده یا نه.
  */
-const SECRET = ['smtp_pass'];
+const SECRET = ['smtp_pass', 'payping_token'];
 
 export async function GET() {
   return handle(async () => {
@@ -62,6 +68,7 @@ export async function GET() {
     const telegramConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN);
     const emailConfigured = Boolean(raw.smtp_host && raw.smtp_from);
     const smtpPassSet = Boolean(raw.smtp_pass);
+    const paypingTokenSet = Boolean(raw.payping_token);
     const recent = await query(
       `SELECT id, recipient, body, ok, error, created_at FROM notifications ORDER BY created_at DESC LIMIT 20`,
     );
@@ -72,6 +79,7 @@ export async function GET() {
       telegramConfigured,
       emailConfigured,
       smtpPassSet,
+      paypingTokenSet,
       recentSms: recent,
     });
   });
@@ -99,6 +107,16 @@ export async function PATCH(req: Request) {
 
     if ('smtp_security' in patch && !['none', 'starttls', 'tls'].includes(patch.smtp_security)) {
       return fail('روش امنیتی باید none یا starttls یا tls باشد', 400);
+    }
+
+    if ('payping_version' in patch && !['v2', 'v3'].includes(patch.payping_version)) {
+      return fail('نسخه درگاه باید v2 یا v3 باشد', 400);
+    }
+
+    // واحد اشتباه یعنی مبلغ ده برابر یا یک‌دهم به درگاه می‌رود و درگاه
+    // هم می‌پذیردش. این بررسی جلوی مقدار بی‌معنا را می‌گیرد.
+    if ('payping_unit' in patch && !['toman', 'rial'].includes(patch.payping_unit)) {
+      return fail('واحد مبلغ باید toman یا rial باشد', 400);
     }
 
     if ('smtp_port' in patch && patch.smtp_port !== '') {

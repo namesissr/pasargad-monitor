@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useLoad, LoadState } from '@/components/useLoad';
 import { Notice } from '@/components/ui';
 import {
@@ -96,7 +97,11 @@ export default function PortalPage() {
             const remaining = Math.max(0, s.traffic_balance_gb);
 
             return (
-              <section key={s.id} className="card p-5 space-y-4">
+              <Link
+                key={s.id}
+                href={`/portal/servers/${s.id}`}
+                className="card p-4 sm:p-5 space-y-4 block hover:border-cyan/40 transition-colors"
+              >
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div>
                     <h2 className="text-sm font-bold">
@@ -173,7 +178,7 @@ export default function PortalPage() {
                     </p>
                   </div>
                 )}
-              </section>
+              </Link>
             );
           })}
         </div>

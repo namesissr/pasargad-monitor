@@ -22,6 +22,9 @@ const EDITABLE: Record<string, 'text' | 'int' | 'bigint' | 'inet' | 'bool' | 'nu
   port_mbps: 'int',
   traffic_quota_gb: 'bigint',
   monthly_cost: 'num',
+  // قیمت فروش مشتری، جدا از monthly_cost که هزینه ماست
+  renewal_price_toman: 'bigint',
+  renewal_months: 'int',
   datacenter_id: 'ref',
   price_per_tb: 'num',
   price_per_ip: 'num',
@@ -55,6 +58,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
               s.ram_total_bytes::float8 AS ram_total_bytes,
               s.disk_total_bytes::float8 AS disk_total_bytes,
               s.port_mbps, s.traffic_quota_gb::float8 AS traffic_quota_gb,
+              s.renewal_price_toman::float8 AS renewal_price_toman,
+              s.renewal_months,
               to_char(s.traffic_counted_from, 'YYYY-MM-DD') AS traffic_counted_from,
               s.traffic_used_before_gb::float8     AS traffic_used_before_gb,
               tp.purchased::float8                 AS traffic_purchased_gb,

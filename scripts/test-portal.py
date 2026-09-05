@@ -106,11 +106,27 @@ def main():
 
     check("مسیر پرتال وجود دارد", bool(routes))
 
+    # دو الگوی مجاز، و فقط همین دو:
+    #
+    #   الف) مسیرهایی که شناسه سرور نمی‌گیرند: requireCustomer و هر کوئری
+    #        مستقیماً به customer_id مقید.
+    #
+    #   ب) مسیرهایی که شناسه سرور می‌گیرند: requireOwnedServer که اول
+    #        مالکیت را تأیید می‌کند و شناسه تأییدشده برمی‌گرداند. بعد از
+    #        آن، قید server_id کافی است.
+    #
+    # الگوی «ب» سست‌تر نیست، سخت‌گیرتر است: به‌جای اینکه هر کوئری یادش
+    # باشد customer_id را بگذارد، یک دروازه پیش از همه‌شان است. کوئری‌ای
+    # که یادش برود، آن یکی است که هیچ خطایی نمی‌دهد.
     for path in routes:
         rel = os.path.relpath(path, ROOT).replace("\\", "/")
         src = io.open(path, encoding="utf-8").read()
 
-        check("%s: نگهبان مشتری دارد" % rel, "requireCustomer()" in src)
+        owned = "requireOwnedServer(" in src
+        check(
+            "%s: نگهبان مشتری دارد" % rel,
+            "requireCustomer()" in src or owned,
+        )
 
         # هیچ کوئری‌ای نباید شناسه مشتری را از پارامتر درخواست بگیرد
         bad = re.search(r"searchParams\.get\(\s*['\"](customer_id|customerId|cid)['\"]", src)
@@ -120,16 +136,52 @@ def main():
             "شناسه باید فقط از نشست بیاید",
         )
 
-        # هر کوئری روی جدول‌های داده باید به مشتری مقید باشد
-        for m in re.finditer(r"FROM\s+(servers|ip_addresses|server_metrics_daily)\b", src):
-            table = m.group(1)
-            tail = src[m.start(): m.start() + 900]
-            scoped = "customer_id = $1" in tail or "s.customer_id = $1" in tail or "s.id" in tail
-            check(
-                "%s: کوئری روی %s به مشتری مقید است" % (rel, table),
-                scoped,
-                "بدون قید، داده همه مشتریان برمی‌گردد",
+        if owned:
+            # دروازه باید **پیش از** هر کوئری باشد. اگر بعدش بیاید، یک
+            # کوئری روی شناسه تأییدنشده اجرا شده و داده رفته است.
+            guard_at = src.index("requireOwnedServer(")
+            first_query = min(
+                [i for i in (src.find("query("), src.find("queryOne(")) if i != -1] or [-1]
             )
+            check(
+                "%s: تأیید مالکیت پیش از هر کوئری" % rel,
+                first_query == -1 or guard_at < first_query,
+                "کوئری روی شناسه تأییدنشده یعنی داده سرور دیگری برمی‌گردد",
+            )
+            # شناسه خام از آدرس نباید مستقیم در کوئری برود
+            check(
+                "%s: شناسه خام آدرس در کوئری نمی‌رود" % rel,
+                "params.id]" not in src and "[params.id" not in src,
+                "فقط شناسه تأییدشده باید در کوئری برود",
+            )
+        else:
+            # هر کوئری روی جدول‌های داده باید مستقیماً به مشتری مقید باشد
+            for m in re.finditer(r"FROM\s+(servers|ip_addresses|server_metrics_daily)\b", src):
+                table = m.group(1)
+                tail = src[m.start(): m.start() + 900]
+                scoped = (
+                    "customer_id = $1" in tail
+                    or "s.customer_id = $1" in tail
+                    or "s.id" in tail
+                )
+                check(
+                    "%s: کوئری روی %s به مشتری مقید است" % (rel, table),
+                    scoped,
+                    "بدون قید، داده همه مشتریان برمی‌گردد",
+                )
+
+    # خودِ دروازه باید مالکیت را واقعا بررسی کند
+    guard = read("lib", "portal-guard.ts")
+    check(
+        "دروازه مالکیت، سرور را با شناسه مشتری می‌سنجد",
+        "WHERE id = $1 AND customer_id = $2" in guard,
+        "بدون این شرط، هر مشتری با عوض‌کردن عدد آدرس، سرور دیگری را می‌بیند",
+    )
+    check(
+        "دروازه از requireCustomer شروع می‌کند",
+        "await requireCustomer()" in guard,
+        "بدون آن، حساب ادمین یا نشست بی‌مشتری هم رد می‌شود",
+    )
 
     print("")
 
@@ -152,7 +204,11 @@ def main():
             if rel in open_routes:
                 continue
             src = io.open(path, encoding="utf-8").read()
-            if "requireUser" not in src and "requireCustomer" not in src:
+            # requireOwnedServer هم نگهبان است و خودش requireCustomer را
+            # صدا می‌زند؛ بالاتر جداگانه بررسی شد که واقعا این کار را کند.
+            if not any(
+                g in src for g in ("requireUser", "requireCustomer", "requireOwnedServer")
+            ):
                 unguarded.append(rel)
 
     check(

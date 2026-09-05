@@ -1,6 +1,6 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/auth';
+import { PortalNav } from '@/components/PortalNav';
 
 /**
  * چیدمان پرتال مشتری.
@@ -18,20 +18,9 @@ export default async function PortalLayout({ children }: { children: React.React
   if (user.role !== 'customer') redirect('/');
 
   return (
-    <div className="min-h-screen bg-bg">
-      <header className="border-b border-line">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
-          <Link href="/portal" className="font-bold text-sm">
-            پاسارگاد میزبان
-          </Link>
-          <form action="/api/auth/logout" method="post">
-            <button type="submit" className="text-xs text-muted hover:text-white">
-              خروج
-            </button>
-          </form>
-        </div>
-      </header>
-      <main className="max-w-5xl mx-auto px-4 py-6">{children}</main>
+    <div className="min-h-screen">
+      <PortalNav />
+      <main className="max-w-6xl mx-auto px-3 sm:px-4 py-5 sm:py-6">{children}</main>
     </div>
   );
 }
