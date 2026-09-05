@@ -379,9 +379,15 @@ def check_union_props():
 # ── ۸) هر مسیر API پنل باید requireUser داشته باشد ───────────────────────
 # مسیرهای باز عمدی: ingest با توکن ایجنت، ورود، خروج، سلامت
 # probe و bind با توکن خودشان احراز می‌شوند، مثل ingest
+# app/api/pay/return بازگشت از درگاه پرداخت است. کوکی نشست در POST
+# بین‌سایتی فرستاده نمی‌شود، پس نمی‌تواند پشت نگهبان باشد. امنیتش از
+# جای دیگری می‌آید: شناسه پرداخت را فقط درگاه می‌دهد، مبلغ از دیتابیس
+# خوانده می‌شود، شماره فاکتور بازگشتی با فاکتور سنجیده می‌شود، و خود
+# مسیر هیچ داده‌ای نشان نمی‌دهد — فقط ریدایرکت می‌کند.
 OPEN_ROUTES = {"app/api/ingest/route.ts", "app/api/auth/login/route.ts",
                "app/api/auth/logout/route.ts", "app/api/health/route.ts",
-               "app/api/probe/route.ts", "app/api/bind/route.ts"}
+               "app/api/probe/route.ts", "app/api/bind/route.ts",
+               "app/api/pay/return/[id]/route.ts"}
 
 
 def check_route_auth():
@@ -619,6 +625,76 @@ def check_sql_columns():
                     )
 
 
+# ── ۳۰) useSearchParams بدون Suspense ────────────────────────────────────
+# نکست هنگام بیلد خطای «should be wrapped in a suspense boundary» می‌دهد،
+# یا در حالت پویا کل صفحه را به رندر سمت کلاینت می‌اندازد. هیچ‌کدام
+# هنگام نوشتن کد معلوم نیست.
+def check_search_params_suspense():
+    for path in walk({".tsx"}):
+        src = read(path)
+        if "useSearchParams" not in src:
+            continue
+        if "Suspense" in src:
+            continue
+        problems.append(
+            "%s — useSearchParams بدون Suspense. نکست هنگام بیلد یا اجرا "
+            "خطا می‌دهد؛ کامپوننت را داخل <Suspense> بگذارید." % rel(path)
+        )
+
+
+# ── ۳۱) آدرس بازگشت درگاه نباید به یک صفحه باشد ─────────────────────────
+# درگاه با POST برمی‌گردد و صفحه نکست POST نمی‌پذیرد. ضمنا کوکی نشست
+# sameSite=lax در POST بین‌سایتی فرستاده نمی‌شود، پس مقصد باید یک مسیر
+# ای‌پی‌آی عمومی باشد که با ۳۰۳ ریدایرکت کند.
+#
+# این یک بار واقعا رخ داد: پرداخت موفق بود و بازگشت خطای ۵۰۰ می‌داد.
+RETURN_URL_RE = re.compile(r"returnUrl:\s*`\$\{[^}]+\}(/[^`]*)`")
+
+
+def check_gateway_return_url():
+    for path in walk({".ts"}):
+        src = read(path)
+        for m in RETURN_URL_RE.finditer(src):
+            target = m.group(1)
+            if not target.startswith("/api/"):
+                problems.append(
+                    "%s:%d — آدرس بازگشت درگاه «%s» یک صفحه است نه مسیر ای‌پی‌آی. "
+                    "درگاه با POST برمی‌گردد و صفحه POST نمی‌پذیرد."
+                    % (rel(path), line_of(src, m.start()), target)
+                )
+
+
+# ── ۳۲) فرم ساده به مسیری که ریدایرکت نمی‌کند ───────────────────────────
+# فرم HTML بدون جاوااسکریپت، مرورگر را به پاسخ می‌برد. اگر آن مسیر جیسون
+# برگرداند، کاربر روی متن خام می‌ماند و هیچ‌جا نمی‌رود.
+#
+# این یک بار در دکمه خروج پرتال مشتری رخ داد: کلیک می‌کرد و به صفحه ورود
+# برنمی‌گشت. خطایش فقط با کلیک‌کردن معلوم می‌شود، نه با کامپایل.
+FORM_ACTION_RE = re.compile(r"""<form[^>]*action=["']((/api/[^"']+))["']""")
+
+
+def check_form_actions():
+    for path in walk({".tsx"}):
+        src = read(path)
+        for m in FORM_ACTION_RE.finditer(src):
+            # مسیر ای‌پی‌آی زیر پوشه app است؛ بدون این پیشوند هر فرمی
+            # هشدار کاذب می‌گرفت
+            parts = [x for x in m.group(1).strip("/").split("/") if x]
+            route = os.path.join(ROOT, "app", *parts, "route.ts")
+            if not os.path.isfile(route):
+                problems.append(
+                    "%s:%d — فرم به «%s» می‌فرستد ولی چنین مسیری نیست."
+                    % (rel(path), line_of(src, m.start()), m.group(1))
+                )
+                continue
+            if "NextResponse.redirect" not in read(route):
+                problems.append(
+                    "%s:%d — فرم ساده به «%s» می‌فرستد ولی آن مسیر ریدایرکت نمی‌کند. "
+                    "کاربر روی پاسخ خام می‌ماند و هیچ‌جا نمی‌رود."
+                    % (rel(path), line_of(src, m.start()), m.group(1))
+                )
+
+
 def main():
     check_non_null_assertion()
     check_empty_catch()
@@ -629,6 +705,9 @@ def main():
     check_unterminated_strings()
     check_id_params()
     check_sql_columns()
+    check_search_params_suspense()
+    check_gateway_return_url()
+    check_form_actions()
     check_undefined_names()
     check_union_props()
     check_route_auth()

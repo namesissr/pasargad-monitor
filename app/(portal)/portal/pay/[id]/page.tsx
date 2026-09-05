@@ -2,128 +2,133 @@
 
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { Suspense } from 'react';
+import { useLoad, LoadState } from '@/components/useLoad';
 import { Notice } from '@/components/ui';
-import { api, ApiError } from '@/lib/api';
 import { formatToman } from '@/lib/format';
 
 /**
- * صفحه بازگشت از درگاه.
+ * صفحه نتیجه پرداخت.
  *
- * درگاه کاربر را با پارامترهایی به اینجا برمی‌گرداند و این صفحه آن‌ها را
- * به مسیر تأیید می‌فرستد. خود تأیید سمت سرور انجام می‌شود — هرگز اینجا،
- * چون هرچه در مرورگر باشد قابل دستکاری است.
+ * **این صفحه پرداخت را تأیید نمی‌کند.** تأیید در
+ * app/api/pay/return/[id] انجام شده — پیش از اینکه کاربر به اینجا
+ * برسد.
  *
- * **رفرش این صفحه بی‌خطر است.** مسیر تأیید اید‌مپوتنت است: اگر فاکتور از
- * قبل پرداخت شده باشد، همان نتیجه برمی‌گردد و چیزی دو بار انجام نمی‌شود.
+ * دلیلش این است که درگاه با POST برمی‌گردد و کوکی نشست در POST
+ * بین‌سایتی فرستاده نمی‌شود. اگر تأیید را به این صفحه می‌سپردیم و نشست
+ * مشتری در فاصله پرداخت منقضی شده بود، او به صفحه ورود می‌رفت و
+ * **پرداخت هرگز ثبت نمی‌شد** — پول رفته و سرویس تمدید نشده.
  *
- * ref جلوی اجرای دوباره در حالت توسعه نکست را می‌گیرد؛ آنجا هر افکت دو
- * بار اجرا می‌شود و بدون این، دو درخواست تأیید همزمان می‌رفت.
+ * پس اینجا فقط نتیجه نشان داده می‌شود: وضعیت از پارامتر آدرس می‌آید و
+ * جزئیات فاکتور از ای‌پی‌آی. اگر کسی پارامتر را دستکاری کند، فاکتور
+ * واقعی وضعیت درست را نشان می‌دهد.
  */
 
-interface VerifyResult {
-  ok: boolean;
-  canceled?: boolean;
-  alreadyPaid?: boolean;
-  message?: string;
-  error?: string;
-  invoice?: { id: number; number: string; amount_toman: number; title: string };
+interface Invoice {
+  id: number;
+  number: string;
+  title: string;
+  status: 'unpaid' | 'paid' | 'canceled';
+  amount_toman: number;
+  payment_ref: string | null;
 }
 
-export default function PayReturnPage() {
+const MESSAGES: Record<string, { icon: string; title: string; tone: 'ok' | 'warn' | 'error' }> = {
+  paid: { icon: '✓', title: 'پرداخت با موفقیت انجام شد', tone: 'ok' },
+  already: { icon: '✓', title: 'این فاکتور قبلا پرداخت شده بود', tone: 'ok' },
+  canceled: { icon: '↩', title: 'پرداخت انجام نشد', tone: 'warn' },
+  failed: { icon: '⚠', title: 'پرداخت تأیید نشد', tone: 'error' },
+  mismatch: { icon: '⚠', title: 'اطلاعات بازگشتی با فاکتور نمی‌خواند', tone: 'error' },
+  notfound: { icon: '⚠', title: 'فاکتور پیدا نشد', tone: 'error' },
+};
+
+function PayResult() {
   const { id } = useParams<{ id: string }>();
-  const search = useSearchParams();
-  const [state, setState] = useState<'working' | 'done'>('working');
-  const [result, setResult] = useState<VerifyResult | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  const started = useRef(false);
+  const status = useSearchParams().get('status') || 'failed';
+  const info = MESSAGES[status] || MESSAGES.failed;
 
-  useEffect(() => {
-    if (!id || started.current) return;
-    started.current = true;
+  // فهرست فاکتورها خوانده می‌شود تا وضعیت واقعی — نه پارامتر آدرس —
+  // نشان داده شود
+  const { data, loading, error, reload } = useLoad<{ invoices: Invoice[] }>(
+    '/api/portal/invoices',
+  );
 
-    const qs = search.toString();
-
-    async function verify() {
-      try {
-        const res = await api.get<VerifyResult>(
-          `/api/portal/invoices/${id}/verify${qs ? `?${qs}` : ''}`,
-        );
-        setResult(res);
-      } catch (e) {
-        setFailed(e instanceof ApiError ? e.message : 'تأیید پرداخت انجام نشد');
-      } finally {
-        setState('done');
-      }
-    }
-
-    void verify();
-  }, [id, search]);
+  const invoice = data?.invoices.find((i) => String(i.id) === String(id));
 
   return (
     <div className="max-w-lg mx-auto space-y-4 py-6">
-      {state === 'working' && (
-        <div className="card p-8 text-center">
-          <p className="text-sm">در حال تأیید پرداخت…</p>
-          <p className="text-xs text-muted mt-2">این صفحه را نبندید.</p>
-        </div>
-      )}
+      <div className="card p-6 sm:p-8 text-center space-y-4">
+        <div className="text-3xl">{info.icon}</div>
+        <h1
+          className={`text-base font-bold ${
+            info.tone === 'ok' ? 'text-ok' : info.tone === 'error' ? 'text-danger' : ''
+          }`}
+        >
+          {info.title}
+        </h1>
 
-      {state === 'done' && (
-        <div className="card p-6 sm:p-8 text-center space-y-4">
-          {failed ? (
-            <>
-              <div className="text-3xl">⚠</div>
-              <h1 className="text-base font-bold">تأیید پرداخت انجام نشد</h1>
-              <Notice type="error">{failed}</Notice>
-              <p className="text-xs text-muted leading-relaxed">
-                اگر مبلغ از حسابتان کم شده، نگران نباشید — تا ۷۲ ساعت به‌صورت خودکار
-                برمی‌گردد. شماره پیگیری را به پشتیبانی بدهید تا سریع‌تر بررسی شود.
-              </p>
-            </>
-          ) : result?.canceled ? (
-            <>
-              <div className="text-3xl">↩</div>
-              <h1 className="text-base font-bold">پرداخت انجام نشد</h1>
+        {loading || error || !data ? (
+          <LoadState loading={loading} error={error} onRetry={reload}>{null}</LoadState>
+        ) : invoice ? (
+          <div className="text-sm space-y-1">
+            <p>{invoice.title}</p>
+            <p className="font-bold">{formatToman(invoice.amount_toman)}</p>
+            <p className="text-xs text-muted ltr">{invoice.number}</p>
+            {invoice.payment_ref && (
               <p className="text-xs text-muted">
-                {result.message || 'پرداخت لغو شد یا ناتمام ماند. فاکتور همچنان باز است.'}
+                شماره پیگیری: <span className="ltr">{invoice.payment_ref}</span>
               </p>
-            </>
-          ) : result?.ok ? (
-            <>
-              <div className="text-3xl">✓</div>
-              <h1 className="text-base font-bold text-ok">
-                {result.alreadyPaid ? 'این فاکتور قبلا پرداخت شده بود' : 'پرداخت با موفقیت انجام شد'}
-              </h1>
-              {result.invoice && (
-                <div className="text-sm space-y-1">
-                  <p>{result.invoice.title}</p>
-                  <p className="font-bold">{formatToman(result.invoice.amount_toman)}</p>
-                  <p className="text-xs text-muted ltr">{result.invoice.number}</p>
-                </div>
-              )}
-              {!result.alreadyPaid && (
-                <p className="text-xs text-muted">رسید پرداخت برای شما پیامک و ایمیل شد.</p>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="text-3xl">⚠</div>
-              <h1 className="text-base font-bold">پرداخت تأیید نشد</h1>
-              <Notice type="error">{result?.error || 'علت نامشخص'}</Notice>
-            </>
-          )}
+            )}
 
-          <div className="flex gap-2 justify-center pt-2">
-            <Link href="/portal/invoices" className="btn-ghost text-xs">
-              فاکتورها
-            </Link>
-            <Link href="/portal" className="btn text-xs">
-              پرتال
-            </Link>
+            {/* وضعیت واقعی فاکتور، مستقل از پارامتر آدرس */}
+            {invoice.status === 'paid' ? (
+              <p className="text-xs text-ok pt-2">
+                این فاکتور پرداخت‌شده ثبت است. رسید برای شما پیامک و ایمیل شد.
+              </p>
+            ) : (
+              <p className="text-xs text-amber pt-2">این فاکتور هنوز باز است.</p>
+            )}
           </div>
+        ) : (
+          <p className="text-xs text-muted">فاکتور در فهرست شما پیدا نشد.</p>
+        )}
+
+        {(status === 'failed' || status === 'mismatch') && (
+          <Notice type="error">
+            اگر مبلغ از حسابتان کم شده، نگران نباشید — تا ۷۲ ساعت به‌صورت خودکار برمی‌گردد.
+            شماره پیگیری بانک را به پشتیبانی بدهید تا سریع‌تر بررسی شود.
+          </Notice>
+        )}
+
+        <div className="flex gap-2 justify-center pt-2">
+          <Link href="/portal/invoices" className="btn-ghost text-xs">
+            فاکتورها
+          </Link>
+          <Link href="/portal" className="btn text-xs">
+            پرتال
+          </Link>
         </div>
-      )}
+      </div>
     </div>
+  );
+}
+
+/**
+ * useSearchParams باید داخل Suspense باشد.
+ *
+ * بدون آن، نکست هنگام بیلد خطای «should be wrapped in a suspense
+ * boundary» می‌دهد یا کل صفحه را به رندر سمت کلاینت می‌اندازد.
+ */
+export default function PayReturnPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="card p-8 text-center max-w-lg mx-auto my-6">
+          <p className="text-sm">در حال بارگذاری…</p>
+        </div>
+      }
+    >
+      <PayResult />
+    </Suspense>
   );
 }

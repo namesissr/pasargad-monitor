@@ -193,6 +193,10 @@ def main():
         "app/api/health/route.ts",
         "app/api/probe/route.ts",
         "app/api/bind/route.ts",
+        # بازگشت درگاه پرداخت. کوکی در POST بین‌سایتی نمی‌آید، پس
+        # نمی‌تواند پشت نگهبان باشد؛ امنیتش از شناسه پرداخت درگاه و
+        # مبلغ دیتابیس می‌آید و هیچ داده‌ای هم نشان نمی‌دهد.
+        "app/api/pay/return/[id]/route.ts",
     }
     unguarded = []
     for base, _dirs, files in os.walk(os.path.join(ROOT, "app", "api")):

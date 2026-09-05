@@ -65,9 +65,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       amountToman: Number(inv.amount_toman),
       invoiceNumber: inv.number,
       description: `${inv.title} — فاکتور ${inv.number}`,
-      // شناسه فاکتور در آدرس بازگشت می‌آید تا حتی اگر درگاه clientRefId
-      // را پس ندهد، بدانیم کدام فاکتور بوده
-      returnUrl: `${base}/portal/pay/${inv.id}`,
+      // بازگشت به یک مسیر ای‌پی‌آی می‌رود نه به صفحه: درگاه با POST
+      // برمی‌گردد و صفحه نکست POST نمی‌پذیرد. آن مسیر تأیید می‌کند و
+      // بعد با ۳۰۳ به صفحه نتیجه می‌فرستد.
+      returnUrl: `${base}/api/pay/return/${inv.id}`,
       payerName: customer?.name ?? null,
       payerIdentity: customer?.phone ?? null,
     });
