@@ -353,7 +353,7 @@ export default function IpsPage() {
                   </td>
                   <td className="text-xs text-muted truncate max-w-[180px]">{ip.ptr || '—'}</td>
                   <td><Mono className="text-muted">{ip.subnet || '—'}</Mono></td>
-                  <td className="text-xs whitespace-nowrap">
+                  <td className="text-xs sm:whitespace-nowrap">
                     {ip.subnet_prefix ? (
                       <Mono className="text-muted">/{ip.subnet_prefix}</Mono>
                     ) : (
@@ -366,7 +366,7 @@ export default function IpsPage() {
                       </>
                     )}
                   </td>
-                  <td className="text-xs whitespace-nowrap">
+                  <td className="text-xs sm:whitespace-nowrap">
                     {!ip.access_watch && ip.iran_access_status !== 'released' ? (
                       <span className="text-muted/60">—</span>
                     ) : ip.vz_locked ? (
@@ -442,7 +442,7 @@ export default function IpsPage() {
                       </span>
                     )}
                   </td>
-                  <td className="text-xs whitespace-nowrap">
+                  <td className="text-xs sm:whitespace-nowrap">
                     {!ip.is_monitored ? (
                       <span className="text-muted/60">خاموش</span>
                     ) : ip.ping_ok === null ? (
@@ -491,7 +491,7 @@ export default function IpsPage() {
           <p className="p-6 text-center text-xs text-muted">بلوکی ثبت نشده است.</p>
         ) : (
           <div className="table-wrap">
-            <table className="tbl min-w-[620px]">
+            <table className="tbl sm:min-w-[620px]">
               <thead>
                 <tr>
                   <th>بلوک</th>
@@ -536,7 +536,7 @@ export default function IpsPage() {
                       const cap = n.vz_total_ips ?? (n.vz_poolid ? null : n.capacity);
                       const short = cap !== null && n.total < cap;
                       return (
-                        <td className="text-xs whitespace-nowrap">
+                        <td className="text-xs sm:whitespace-nowrap">
                           <span className={short ? 'text-amber' : ''}>{faNum(n.total)}</span>
                           {cap !== null && <span className="text-muted"> از {faNum(cap)}</span>}
                           {n.foreign_count > 0 && (

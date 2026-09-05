@@ -82,23 +82,23 @@ export default function TopupsPage() {
         <Notice type="warn">هنوز ترافیکی فروخته نشده.</Notice>
       ) : (
         <div className="card table-wrap">
-          <table className="tbl min-w-[760px]">
+          <table className="tbl sm:min-w-[760px]">
             <thead>
               <tr>
                 <th>تاریخ</th>
                 <th>سرور</th>
                 <th>مشتری</th>
                 <th>مقدار</th>
-                <th>مبلغ</th>
-                <th>ثبت‌کننده</th>
-                <th>توضیح</th>
+                <th className="col-sm">مبلغ</th>
+                <th className="col-md">ثبت‌کننده</th>
+                <th className="col-md">توضیح</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {data.topups.map((t) => (
                 <tr key={t.id}>
-                  <td className="text-xs whitespace-nowrap" title={t.created_at}>
+                  <td className="text-xs sm:whitespace-nowrap" title={t.created_at}>
                     {formatJalaliDay(t.created_at)}
                     <span className="text-muted block text-[11px]">{timeAgo(t.created_at)}</span>
                   </td>
@@ -109,9 +109,9 @@ export default function TopupsPage() {
                     {t.gb > 0 ? '+' : ''}
                     {faNum(t.gb.toFixed(0))} گیگ
                   </td>
-                  <td className="text-xs">{t.price_toman ? formatToman(t.price_toman) : '—'}</td>
-                  <td className="text-xs text-muted">{t.created_by_name || '—'}</td>
-                  <td className="text-xs max-w-[180px]">
+                  <td className="col-sm text-xs">{t.price_toman ? formatToman(t.price_toman) : '—'}</td>
+                  <td className="col-md text-xs text-muted">{t.created_by_name || '—'}</td>
+                  <td className="col-md text-xs max-w-[180px]">
                     <span className="truncate block" title={t.note || undefined}>
                       {t.note || '—'}
                     </span>

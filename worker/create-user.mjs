@@ -14,13 +14,14 @@ import { hashPassword } from './hash.mjs';
  */
 
 async function main() {
-  let [username, password, phone, fullName] = process.argv.slice(2);
+  let [username, password, phone, fullName, email] = process.argv.slice(2);
 
   if (!username || !password) {
     const rl = readline.createInterface({ input: stdin, output: stdout });
     username = username || (await rl.question('نام کاربری: ')).trim();
     password = password || (await rl.question('گذرواژه: ')).trim();
     phone = phone || (await rl.question('شماره موبایل برای هشدار (اختیاری): ')).trim();
+    email = email || (await rl.question('ایمیل برای هشدار (اختیاری): ')).trim();
     fullName = fullName || (await rl.question('نام و نام خانوادگی (اختیاری): ')).trim();
     rl.close();
   }
@@ -41,17 +42,18 @@ async function main() {
     await q(
       `UPDATE users SET password_hash = $2,
                         phone = COALESCE(NULLIF($3, ''), phone),
+                        email = COALESCE(NULLIF($5, ''), email),
                         full_name = COALESCE(NULLIF($4, ''), full_name),
                         is_active = TRUE
         WHERE id = $1`,
-      [existing.id, hash, phone || '', fullName || ''],
+      [existing.id, hash, phone || '', fullName || '', email || ''],
     );
     console.log(`گذرواژه کاربر «${username}» به‌روزرسانی شد`);
   } else {
     await q(
-      `INSERT INTO users (username, password_hash, phone, full_name, role)
-       VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), 'admin')`,
-      [username, hash, phone || '', fullName || ''],
+      `INSERT INTO users (username, password_hash, phone, full_name, email, role)
+       VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), NULLIF($5, ''), 'admin')`,
+      [username, hash, phone || '', fullName || '', email || ''],
     );
     console.log(`کاربر «${username}» ساخته شد`);
   }

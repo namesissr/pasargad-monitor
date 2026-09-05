@@ -162,12 +162,12 @@ export default function ServersPage() {
                 <th>سرور</th>
                 <th>وضعیت</th>
                 <th>پردازنده</th>
-                <th>حافظه</th>
-                <th>دیسک</th>
-                <th>ترافیک لحظه‌ای</th>
+                <th className="col-md">حافظه</th>
+                <th className="col-md">دیسک</th>
+                <th className="col-sm">ترافیک لحظه‌ای</th>
                 <th>مصرف دوره</th>
-                <th>آپ‌تایم</th>
-                <th>آی‌پی</th>
+                <th className="col-md">آپ‌تایم</th>
+                <th className="col-sm">آی‌پی</th>
               </tr>
             </thead>
             {groups.map((group) => (
@@ -230,7 +230,7 @@ export default function ServersPage() {
                         <span className="text-muted">—</span>
                       )}
                     </td>
-                    <td className="w-28">
+                    <td className="w-28 col-md">
                       {s.status === 'up' ? (
                         <>
                           <UsageBar percent={ramPct} right={formatPercent(ramPct, 0)} label=" " />
@@ -240,7 +240,7 @@ export default function ServersPage() {
                         <span className="text-muted">—</span>
                       )}
                     </td>
-                    <td className="w-28">
+                    <td className="w-28 col-md">
                       {s.status === 'up' ? (
                         <>
                           <UsageBar percent={diskPct} right={formatPercent(diskPct, 0)} label=" " />
@@ -250,12 +250,12 @@ export default function ServersPage() {
                         <span className="text-muted">—</span>
                       )}
                     </td>
-                    <td className="whitespace-nowrap text-xs">
+                    <td className="sm:whitespace-nowrap text-xs col-sm">
                       <span className="text-cyan">↓</span> {formatMbps(s.rx_bps)}
                       <br />
                       <span className="text-amber">↑</span> {formatMbps(s.tx_bps)}
                     </td>
-                    <td className="whitespace-nowrap text-xs">
+                    <td className="sm:whitespace-nowrap text-xs">
                       {formatTB(used)}
                       {prepaidGb > 0 ? (
                         <>
@@ -281,10 +281,10 @@ export default function ServersPage() {
                         </>
                       ) : null}
                     </td>
-                    <td className="text-xs whitespace-nowrap">
+                    <td className="text-xs sm:whitespace-nowrap col-md">
                       {s.status === 'up' ? formatDuration(s.uptime_sec) : timeAgo(s.last_seen_at)}
                     </td>
-                    <td className="text-xs">{faNum(s.ip_count)}</td>
+                    <td className="text-xs col-sm">{faNum(s.ip_count)}</td>
                   </tr>
                 );
               })}

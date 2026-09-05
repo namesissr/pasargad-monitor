@@ -67,15 +67,15 @@ export default function CustomersPage() {
         <Notice type="warn">هنوز مشتری‌ای ثبت نشده.</Notice>
       ) : (
         <div className="card table-wrap">
-          <table className="tbl min-w-[820px]">
+          <table className="tbl sm:min-w-[820px]">
             <thead>
               <tr>
                 <th>نام</th>
-                <th>شرکت</th>
+                <th className="col-md">شرکت</th>
                 <th>تماس</th>
-                <th>سرور</th>
+                <th className="col-sm">سرور</th>
                 <th>حساب ورود</th>
-                <th>آخرین ورود</th>
+                <th className="col-md">آخرین ورود</th>
                 <th></th>
               </tr>
             </thead>
@@ -86,13 +86,13 @@ export default function CustomersPage() {
                     {c.name}
                     {!c.is_active && <span className="badge bg-line text-muted ms-2">غیرفعال</span>}
                   </td>
-                  <td className="text-xs">{c.company || '—'}</td>
+                  <td className="col-md text-xs">{c.company || '—'}</td>
                   <td className="text-xs">
                     {c.phone && <span className="ltr block">{c.phone}</span>}
                     {c.email && <span className="ltr block text-muted">{c.email}</span>}
                     {!c.phone && !c.email && '—'}
                   </td>
-                  <td className="text-xs">{faNum(c.server_count)}</td>
+                  <td className="col-sm text-xs">{faNum(c.server_count)}</td>
                   <td className="text-xs">
                     {c.username ? (
                       <>
@@ -105,10 +105,10 @@ export default function CustomersPage() {
                       <span className="text-muted">ندارد</span>
                     )}
                   </td>
-                  <td className="text-xs text-muted">
+                  <td className="col-md text-xs text-muted">
                     {c.last_login_at ? timeAgo(c.last_login_at) : '—'}
                   </td>
-                  <td className="text-end whitespace-nowrap">
+                  <td className="text-end sm:whitespace-nowrap">
                     <button
                       type="button"
                       className="text-xs text-muted hover:text-cyan"

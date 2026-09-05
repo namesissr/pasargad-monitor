@@ -114,9 +114,9 @@ export default function IncidentsPage() {
                 <th>نوع</th>
                 <th>سرور</th>
                 <th>شرح</th>
-                <th>شروع</th>
-                <th>مدت</th>
-                <th>پیامک</th>
+                <th className="col-sm">شروع</th>
+                <th className="col-md">مدت</th>
+                <th className="col-md">پیامک</th>
                 <th>وضعیت</th>
                 <th></th>
               </tr>
@@ -124,7 +124,7 @@ export default function IncidentsPage() {
             <tbody>
               {(data?.incidents ?? []).map((inc) => (
                 <tr key={inc.id}>
-                  <td className="whitespace-nowrap">
+                  <td className="sm:whitespace-nowrap">
                     <span className={`badge border ${inc.severity === 'critical' ? 'bg-danger/15 text-danger border-danger/30' : 'bg-amber/15 text-amber border-amber/30'}`}>
                       {INCIDENT_KIND_LABEL[inc.kind] ?? inc.kind}
                     </span>
@@ -141,14 +141,14 @@ export default function IncidentsPage() {
                     )}
                   </td>
                   <td className="text-xs max-w-[280px] truncate" title={inc.message}>{inc.message}</td>
-                  <td className="text-xs whitespace-nowrap" title={formatJalaliTime(inc.started_at)}>
+                  <td className="col-sm text-xs sm:whitespace-nowrap" title={formatJalaliTime(inc.started_at)}>
                     {timeAgo(inc.started_at)}
                   </td>
-                  <td className="text-xs whitespace-nowrap">{formatDuration(inc.duration_sec)}</td>
-                  <td className="text-xs">
+                  <td className="col-md text-xs sm:whitespace-nowrap">{formatDuration(inc.duration_sec)}</td>
+                  <td className="col-md text-xs">
                     {inc.notified_at ? <span className="text-ok">ارسال شد</span> : <span className="text-muted">—</span>}
                   </td>
-                  <td className="text-xs whitespace-nowrap">
+                  <td className="text-xs sm:whitespace-nowrap">
                     {inc.resolved_at ? (
                       <span className="text-ok">برطرف شد</span>
                     ) : inc.ack_at ? (
@@ -157,7 +157,7 @@ export default function IncidentsPage() {
                       <span className="text-danger">باز</span>
                     )}
                   </td>
-                  <td className="text-end whitespace-nowrap">
+                  <td className="text-end sm:whitespace-nowrap">
                     {!inc.resolved_at && (
                       <>
                         {!inc.ack_at && (

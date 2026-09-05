@@ -597,7 +597,7 @@ export default function ServerDetailPage() {
             <p className="p-6 text-center text-xs text-muted">آی‌پی‌ای به این سرور تخصیص نیافته است.</p>
           ) : (
             <div className="table-wrap">
-              <table className="tbl min-w-[520px]">
+              <table className="tbl sm:min-w-[520px]">
                 <thead>
                   <tr>
                     <th>آی‌پی</th>

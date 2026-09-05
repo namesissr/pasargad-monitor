@@ -298,16 +298,16 @@ export default function VirtualizorPage() {
               <tbody>
                 {data.runs.map((r) => (
                   <tr key={r.id} className="border-t border-line">
-                    <td className="py-1.5 whitespace-nowrap">{timeAgo(r.started_at)}</td>
+                    <td className="py-1.5 sm:whitespace-nowrap">{timeAgo(r.started_at)}</td>
                     <td className="py-1.5">{r.node_name || '—'}</td>
-                    <td className="py-1.5 whitespace-nowrap">
+                    <td className="py-1.5 sm:whitespace-nowrap">
                       {KIND_LABEL[r.kind] || r.kind}
                       {r.kind === 'apply' && r.dry_run && ' (آزمایشی)'}
                     </td>
                     <td className="py-1.5">{faNum(r.discovered)}</td>
                     <td className="py-1.5">{faNum(r.attached)}</td>
                     <td className="py-1.5">{faNum(r.detached)}</td>
-                    <td className="py-1.5 whitespace-nowrap">
+                    <td className="py-1.5 sm:whitespace-nowrap">
                       {r.ok ? (
                         <span className="text-ok">موفق</span>
                       ) : (

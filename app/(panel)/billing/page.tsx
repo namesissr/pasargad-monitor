@@ -188,7 +188,7 @@ export default function BillingPage() {
                   <h2 className="text-sm font-bold">تفکیک دیتاسنتری</h2>
                 </div>
                 <div className="table-wrap">
-                  <table className="tbl min-w-[640px]">
+                  <table className="tbl sm:min-w-[640px]">
                     <thead>
                       <tr>
                         <th>دیتاسنتر</th>
@@ -252,7 +252,7 @@ function MonthTable({ rows, grand, periodLabel }: { rows: Row[]; grand: Totals; 
           <h2 className="text-sm font-bold">هزینه هر سرور — {periodLabel}</h2>
         </div>
         <div className="table-wrap">
-          <table className="tbl min-w-[980px]">
+          <table className="tbl sm:min-w-[980px]">
             <thead>
               <tr>
                 <th>سرور</th>
@@ -288,7 +288,7 @@ function MonthTable({ rows, grand, periodLabel }: { rows: Row[]; grand: Totals; 
                       </>
                     )}
                   </td>
-                  <td className="text-xs whitespace-nowrap">
+                  <td className="text-xs sm:whitespace-nowrap">
                     {faFloat(r.cost.used_tb, 3)} ترابایت
                     <br />
                     <span className="text-[10px] text-muted">{DIRECTION_LABEL[r.rates.billing_direction]}</span>
@@ -306,7 +306,7 @@ function MonthTable({ rows, grand, periodLabel }: { rows: Row[]; grand: Totals; 
                   </td>
                   <td className="text-xs">{faFloat(r.cost.billable_tb, 3)}</td>
                   <td className="text-xs">{formatToman(r.cost.traffic_cost)}</td>
-                  <td className="text-xs whitespace-nowrap">
+                  <td className="text-xs sm:whitespace-nowrap">
                     {faNum(r.cost.ip_count)}
                     {r.cost.billable_ips > 0 && (
                       <span className="text-muted"> ({faNum(r.cost.billable_ips)} پولی)</span>
@@ -361,7 +361,7 @@ function DayView({ data }: { data: Data }) {
           </span>
         </div>
         <div className="table-wrap">
-          <table className="tbl min-w-[620px]">
+          <table className="tbl sm:min-w-[620px]">
             <thead>
               <tr>
                 <th>روز</th>
@@ -375,7 +375,7 @@ function DayView({ data }: { data: Data }) {
             <tbody>
               {data.days.slice().reverse().map((d) => (
                 <tr key={d.day}>
-                  <td className="whitespace-nowrap">{d.label}</td>
+                  <td className="sm:whitespace-nowrap">{d.label}</td>
                   <td className="text-xs">{formatBytes(d.bytes, 1)}</td>
                   <td className="text-xs">{formatToman(d.traffic_cost)}</td>
                   <td className="text-xs text-muted">{formatToman(d.ip_cost)}</td>

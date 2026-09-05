@@ -61,6 +61,21 @@ html,
 body {
   background: var(--rack);
   color: var(--text);
+  /*
+    هیچ چیز نباید صفحه را افقی بکشد. clip به‌جای hidden عمدی است: hidden
+    یک ظرف اسکرول می‌سازد و position:sticky داخلش می‌شکند — سرآیند چسبان
+    پنل دقیقا همان است.
+  */
+  overflow-x: clip;
+}
+
+/*
+  رشته‌های بلند بدون فاصله — توکن ایجنت، آدرس، شناسه — روی صفحه باریک
+  ظرفشان را پهن می‌کنند و کل چیدمان را به هم می‌ریزند.
+*/
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 body {
@@ -123,14 +138,30 @@ body {
   .table-wrap {
     @apply overflow-x-auto;
   }
+  /*
+    عرض حداقلی فقط از تبلت به بالا.
+    روی موبایل جدول به عرض صفحه جمع می‌شود و ستون‌های کم‌اهمیت با
+    کلاس col-sm/col-md پنهان می‌شوند؛ وگرنه کاربر باید هر جدول را
+    افقی بکشد تا چیزی ببیند — و همان چیزی است که «به هم ریخته» دیده
+    می‌شود.
+  */
   .tbl {
-    @apply w-full text-sm min-w-[720px];
+    @apply w-full text-sm sm:min-w-[720px];
   }
   .tbl thead th {
-    @apply text-start text-xs font-medium text-muted px-3 py-2.5 border-b border-line whitespace-nowrap;
+    @apply text-start text-xs font-medium text-muted px-2 py-2 sm:px-3 sm:py-2.5
+           border-b border-line sm:whitespace-nowrap;
   }
   .tbl tbody td {
-    @apply px-3 py-2.5 border-b border-line/60 align-middle;
+    @apply px-2 py-2 sm:px-3 sm:py-2.5 border-b border-line/60 align-middle;
+  }
+
+  /* ستون‌هایی که روی صفحه باریک حذف می‌شوند */
+  .col-sm {
+    @apply hidden sm:table-cell;
+  }
+  .col-md {
+    @apply hidden md:table-cell;
   }
   .tbl tbody tr:hover {
     @apply bg-panel2/60;

@@ -13,12 +13,16 @@ interface SettingsData {
     username: string;
     full_name: string | null;
     phone: string | null;
+    email: string | null;
     role: string;
     is_active: boolean;
     last_login_at: string | null;
   }[];
   smsConfigured: boolean;
   telegramConfigured: boolean;
+  emailConfigured: boolean;
+  /** رمز SMTP هرگز برنمی‌گردد؛ فقط اینکه تنظیم شده یا نه */
+  smtpPassSet: boolean;
   recentSms: { id: number; recipient: string; body: string; ok: boolean; error: string | null; created_at: string }[];
 }
 
@@ -67,6 +71,8 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [testChat, setTestChat] = useState('');
   const [tgTesting, setTgTesting] = useState(false);
+  const [testEmail, setTestEmail] = useState('');
+  const [mailTesting, setMailTesting] = useState(false);
 
   useEffect(() => {
     if (data?.settings) setForm(data.settings);
@@ -104,6 +110,31 @@ export default function SettingsPage() {
       setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'ارسال تلگرام ناموفق بود' });
     } finally {
       setTgTesting(false);
+    }
+  }
+
+  async function saveUserEmail(userId: number, email: string) {
+    setMsg(null);
+    try {
+      await api.put('/api/settings', { userId, email });
+      setMsg({ type: 'success', text: 'ایمیل کاربر ذخیره شد.' });
+      reload();
+    } catch (e) {
+      setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'ذخیره ایمیل ناموفق بود' });
+    }
+  }
+
+  async function sendEmailTest() {
+    setMsg(null);
+    setMailTesting(true);
+    try {
+      await api.post('/api/settings', { email: testEmail });
+      setMsg({ type: 'success', text: 'ایمیل آزمایشی فرستاده شد.' });
+      reload();
+    } catch (e) {
+      setMsg({ type: 'error', text: e instanceof ApiError ? e.message : 'ارسال ایمیل ناموفق بود' });
+    } finally {
+      setMailTesting(false);
     }
   }
 
@@ -259,6 +290,155 @@ export default function SettingsPage() {
             {tgTesting ? 'در حال ارسال…' : 'ارسال'}
           </button>
         </div>
+      </section>
+
+      {/* هشدار ایمیل */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">هشدار ایمیل</h2>
+
+        {!data.emailConfigured && (
+          <Notice type="warn">
+            آدرس سرور SMTP یا نشانی فرستنده تنظیم نشده است. تا وقتی این دو پر نشوند هیچ ایمیلی
+            ارسال نمی‌شود.
+          </Notice>
+        )}
+
+        <Notice type="info">
+          برخلاف پیامک و تلگرام، این تنظیمات در دیتابیس ذخیره می‌شوند و تغییرشان نیازی به بیلد
+          ندارد. ایمیل به همان جاهایی می‌رود که پیامک می‌رود: قطعی سرور، عبور از آستانه‌ها، و
+          هشدارهای مشتری.
+        </Notice>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="ارسال ایمیل">
+            <select className="input" value={form.email_enabled ?? 'false'} onChange={set('email_enabled')}>
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+          <Field label="نام فرستنده" hint="در صندوق گیرنده همین نام دیده می‌شود">
+            <input className="input" value={form.smtp_from_name ?? ''} onChange={set('smtp_from_name')} />
+          </Field>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="آدرس سرور SMTP">
+            <input
+              className="input ltr"
+              value={form.smtp_host ?? ''}
+              onChange={set('smtp_host')}
+              placeholder="mail.example.com"
+            />
+          </Field>
+          <Field label="نشانی فرستنده" hint="بیشتر سرورها فقط نشانی حساب خودتان را می‌پذیرند">
+            <input
+              className="input ltr"
+              value={form.smtp_from ?? ''}
+              onChange={set('smtp_from')}
+              placeholder="panel@example.com"
+            />
+          </Field>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field
+            label="روش امنیتی"
+            hint="پورت ۵۸۷ معمولاً STARTTLS است و پورت ۴۶۵ رمزنگاری از ابتدا"
+          >
+            <select
+              className="input"
+              value={form.smtp_security ?? 'starttls'}
+              onChange={set('smtp_security')}
+            >
+              <option value="starttls">STARTTLS — ارتقا روی همان پورت</option>
+              <option value="tls">TLS مستقیم — رمزنگاری از ابتدا</option>
+              <option value="none">بدون رمزنگاری</option>
+            </select>
+          </Field>
+          <Field label="پورت">
+            <input className="input ltr" value={form.smtp_port ?? ''} onChange={set('smtp_port')} placeholder="587" />
+          </Field>
+        </div>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="نام کاربری" hint="خالی بگذارید اگر سرور ورود نمی‌خواهد">
+            <input
+              className="input ltr"
+              value={form.smtp_user ?? ''}
+              onChange={set('smtp_user')}
+              autoComplete="off"
+            />
+          </Field>
+          <Field
+            label="گذرواژه"
+            hint={data.smtpPassSet ? 'تنظیم شده — خالی یعنی همان قبلی بماند' : 'هنوز تنظیم نشده'}
+          >
+            <input
+              className="input ltr"
+              type="password"
+              value={form.smtp_pass ?? ''}
+              onChange={set('smtp_pass')}
+              autoComplete="new-password"
+              placeholder={data.smtpPassSet ? '••••••••' : ''}
+            />
+          </Field>
+        </div>
+
+        <Field
+          label="نشانی‌های گیرنده"
+          hint="با کاما جدا کنید. ایمیل کاربران پنل هم خودکار اضافه می‌شود."
+        >
+          <input
+            className="input ltr"
+            value={form.email_recipients ?? ''}
+            onChange={set('email_recipients')}
+            placeholder="ops@example.com,admin@example.com"
+          />
+        </Field>
+
+        <Field label="بررسی گواهی TLS">
+          <select
+            className="input"
+            value={form.smtp_insecure ?? 'false'}
+            onChange={set('smtp_insecure')}
+          >
+            <option value="false">بررسی شود (پیشنهاد)</option>
+            <option value="true">بررسی نشود — گواهی خودامضا</option>
+          </select>
+        </Field>
+
+        {form.smtp_insecure === 'true' && (
+          <Notice type="warn">
+            بررسی گواهی خاموش است. این فقط برای سرور ایمیل داخلی با گواهی خودامضا قابل قبول است؛
+            روی سرور بیرونی یعنی نام کاربری و گذرواژه قابل شنود است.
+          </Notice>
+        )}
+
+        <div className="flex items-end gap-2 flex-wrap">
+          <div className="flex-1 min-w-[200px]">
+            <Field label="ارسال ایمیل آزمایشی" hint="پیش از روشن‌کردن هم کار می‌کند">
+              <input
+                className="input ltr"
+                value={testEmail}
+                onChange={(e) => setTestEmail(e.target.value)}
+                placeholder="you@example.com"
+              />
+            </Field>
+          </div>
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={sendEmailTest}
+            disabled={mailTesting || !testEmail}
+          >
+            {mailTesting ? 'در حال ارسال…' : 'ارسال'}
+          </button>
+        </div>
+
+        <p className="text-[11px] text-muted/70">
+          اول ذخیره کنید، بعد آزمایشی بفرستید — ارسال آزمایشی از تنظیمات ذخیره‌شده می‌خواند نه از
+          آنچه در فرم تایپ شده.
+        </p>
       </section>
 
       {/* ویژالیزور */}
@@ -457,18 +637,20 @@ export default function SettingsPage() {
         <div className="px-5 py-3 border-b border-line">
           <h2 className="text-sm font-bold">کاربران پنل</h2>
           <p className="text-[11px] text-muted mt-0.5">
-            شماره هر کاربر فعال، خودکار گیرنده هشدار می‌شود. افزودن کاربر با اسکریپت
+            شماره و ایمیل هر کاربر فعال، خودکار گیرنده هشدار می‌شود. ایمیل را همین‌جا
+            می‌توانید ویرایش کنید. افزودن کاربر با اسکریپت
             <Mono className="mx-1">node worker/create-user.mjs</Mono>
             روی سرور انجام می‌شود.
           </p>
         </div>
         <div className="table-wrap">
-          <table className="tbl min-w-[560px]">
+          <table className="tbl sm:min-w-[560px]">
             <thead>
               <tr>
                 <th>نام کاربری</th>
                 <th>نام</th>
                 <th>شماره</th>
+                <th>ایمیل</th>
                 <th>نقش</th>
                 <th>آخرین ورود</th>
               </tr>
@@ -478,7 +660,12 @@ export default function SettingsPage() {
                 <tr key={u.id}>
                   <td className="text-xs"><Mono>{u.username}</Mono></td>
                   <td className="text-xs">{u.full_name || '—'}</td>
-                  <td className="text-xs"><Mono>{u.phone || '—'}</Mono></td>
+                  <td className="text-xs">
+                    <UserEmail
+                      value={u.email}
+                      onSave={(email) => saveUserEmail(u.id, email)}
+                    />
+                  </td>
                   <td className="text-xs">{u.role}</td>
                   <td className="text-xs text-muted">{u.last_login_at ? timeAgo(u.last_login_at) : 'هرگز'}</td>
                 </tr>
@@ -516,5 +703,42 @@ export default function SettingsPage() {
         نسخه پنل {faNum('1.0')} · تعداد کاربران {faNum(data.users.length)}
       </p>
     </div>
+  );
+}
+
+
+/**
+ * ویرایش درجای ایمیل کاربر.
+ *
+ * ذخیره روی blur است نه با دکمه: ردیف جدول جای دکمه ندارد و کاربر هم
+ * انتظار فرم کامل ندارد. مقدار محلی نگه داشته می‌شود تا تایپ‌کردن با
+ * هر بار تازه‌شدن فهرست از بین نرود.
+ */
+function UserEmail({
+  value,
+  onSave,
+}: {
+  value: string | null;
+  onSave: (email: string) => void;
+}) {
+  const [text, setText] = useState(value ?? '');
+  const [dirty, setDirty] = useState(false);
+
+  return (
+    <input
+      className="input ltr text-xs py-1 min-w-[160px]"
+      value={text}
+      placeholder="—"
+      onChange={(e) => {
+        setText(e.target.value);
+        setDirty(true);
+      }}
+      onBlur={() => {
+        if (!dirty) return;
+        setDirty(false);
+        onSave(text.trim());
+      }}
+      autoComplete="off"
+    />
   );
 }

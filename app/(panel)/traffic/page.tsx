@@ -282,22 +282,22 @@ function TrafficTable({ data }: { data: TrafficData }) {
         <h2 className="text-sm font-bold">جدول {hourly ? 'ساعتی' : 'روزانه'}</h2>
       </div>
       <div className="table-wrap">
-        <table className="tbl min-w-[620px]">
+        <table className="tbl sm:min-w-[620px]">
           <thead>
             <tr>
               <th>{hourly ? 'ساعت' : 'روز'}</th>
               <th>دانلود</th>
               <th>آپلود</th>
               <th>مجموع</th>
-              <th>اوج دانلود</th>
-              <th>اوج آپلود</th>
+              <th className="col-md">اوج دانلود</th>
+              <th className="col-md">اوج آپلود</th>
               {!hourly && <th>منشأ</th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((p) => (
               <tr key={p.t}>
-                <td className="whitespace-nowrap">
+                <td className="sm:whitespace-nowrap">
                   {hourly ? (
                     <>
                       <Mono>{p.t.slice(11, 16)}</Mono>
@@ -310,8 +310,8 @@ function TrafficTable({ data }: { data: TrafficData }) {
                 <td className="text-xs text-cyan">{formatBytes(p.rx, 2)}</td>
                 <td className="text-xs text-amber">{formatBytes(p.tx, 2)}</td>
                 <td className="text-xs font-medium">{formatBytes(Number(p.rx) + Number(p.tx), 2)}</td>
-                <td className="text-xs text-muted">{formatBps(p.rx_peak, 0)}</td>
-                <td className="text-xs text-muted">{formatBps(p.tx_peak, 0)}</td>
+                <td className="text-xs text-muted col-md">{formatBps(p.rx_peak, 0)}</td>
+                <td className="text-xs text-muted col-md">{formatBps(p.tx_peak, 0)}</td>
                 {!hourly && (
                   <td className="text-xs">
                     {p.source && p.source !== 'agent' ? (

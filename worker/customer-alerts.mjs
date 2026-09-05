@@ -1,6 +1,7 @@
 import { q, settings, log, logErr } from './db.mjs';
 import { sendSms } from './sms.mjs';
 import { notify } from './notify.mjs';
+import { sendEmailTo } from './email.mjs';
 
 /**
  * هشدارهای مشتری: سهمیه ترافیک و موعد تمدید.
@@ -37,11 +38,21 @@ async function claim(serverId, kind, periodKey, detail) {
   return rows.length > 0;
 }
 
-/** ارسال به مشتری و در صورت لزوم به ادمین */
-async function dispatch(customerPhone, message, alsoAdmin) {
-  if (customerPhone) {
-    const r = await sendSms(customerPhone, message);
-    if (!r.ok) logErr('پیامک مشتری ارسال نشد:', customerPhone, r.error);
+/**
+ * ارسال به مشتری از هر راهی که دارد، و در صورت لزوم به ادمین.
+ *
+ * پیامک و ایمیل هر دو می‌روند و شکست یکی جلوی دیگری را نمی‌گیرد: ممکن
+ * است اعتبار پیامک تمام شده باشد یا شماره عوض شده باشد. مشتری‌ای که
+ * خبردار نشود، همان مشتری‌ای است که بعداً شاکی می‌شود.
+ */
+async function dispatch(srv, subject, message, alsoAdmin) {
+  if (srv.customer_phone) {
+    const r = await sendSms(srv.customer_phone, message);
+    if (!r.ok) logErr('پیامک مشتری ارسال نشد:', srv.customer_phone, r.error);
+  }
+  if (srv.customer_email) {
+    const r = await sendEmailTo(srv.customer_email, subject, message);
+    if (!r.ok) logErr('ایمیل مشتری ارسال نشد:', srv.customer_email, r.error);
   }
   if (alsoAdmin) {
     await notify(message).catch((e) => logErr('هشدار ادمین ارسال نشد:', e.message));
@@ -61,7 +72,8 @@ export async function checkCustomerAlerts() {
             tp.purchased::float8                 AS purchased_gb,
             (tp.used_bytes / 1073741824)::float8 AS used_gb,
             s.renews_at, s.renew_notice_days,
-            c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone
+            c.id AS customer_id, c.name AS customer_name,
+            c.phone AS customer_phone, c.email AS customer_email
        FROM servers s
        JOIN customers c ON c.id = s.customer_id
        LEFT JOIN LATERAL (
@@ -94,7 +106,8 @@ export async function checkCustomerAlerts() {
         if (pct >= 100) {
           if (await claim(srv.id, 'quota_100', srv.counted_from, detail)) {
             await dispatch(
-              srv.customer_phone,
+              srv,
+              `ترافیک سرور «${srv.name}» تمام شد`,
               `پاسارگاد میزبان: ترافیک سرور «${srv.name}» تمام شد ` +
                 `(${detail}). برای خرید ترافیک با پشتیبانی تماس بگیرید.`,
               false,
@@ -110,7 +123,8 @@ export async function checkCustomerAlerts() {
           // درگیر نمی‌کند.
           if (await claim(srv.id, 'quota_90', srv.counted_from, detail)) {
             await dispatch(
-              srv.customer_phone,
+              srv,
+              `ترافیک سرور «${srv.name}» رو به اتمام است`,
               `پاسارگاد میزبان: ترافیک سرور «${srv.name}» رو به اتمام است ` +
                 `(${detail} مصرف، ${remaining.toFixed(0)} گیگ باقی‌مانده).`,
               false,
@@ -137,7 +151,8 @@ export async function checkCustomerAlerts() {
           const when = daysLeft === 0 ? 'امروز است' : `${daysLeft} روز دیگر است`;
           if (await claim(srv.id, 'renewal', key, `${daysLeft} روز مانده`)) {
             await dispatch(
-              srv.customer_phone,
+              srv,
+              `موعد تمدید سرور «${srv.name}» ${when}`,
               `پاسارگاد میزبان: موعد تمدید سرور «${srv.name}» ${when}. ` +
                 'برای تمدید با پشتیبانی تماس بگیرید.',
               false,

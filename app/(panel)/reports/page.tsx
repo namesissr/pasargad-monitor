@@ -162,7 +162,7 @@ export default function ReportsPage() {
                   <tbody>
                     {[...data.periods].reverse().map((p) => (
                       <tr key={p.key}>
-                        <td className="whitespace-nowrap">{p.label}</td>
+                        <td className="sm:whitespace-nowrap">{p.label}</td>
                         <td className="text-xs">{formatBytes(p.rx, 1)}</td>
                         <td className="text-xs">{formatBytes(p.tx, 1)}</td>
                         <td className="text-xs font-medium">{formatBytes(p.total, 1)}</td>

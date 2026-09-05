@@ -125,8 +125,25 @@ def resolve(path, spec):
 
 
 EXPORT_RE = re.compile(
-    r"export\s+(?:async\s+)?(?:function|const|let|var|class|interface|type|enum)\s+(\w+)"
+    r"export\s+(?:async\s+)?(?:declare\s+)?"
+    r"(?:function|const|let|var|class|interface|type|enum)\s+(\w+)"
 )
+
+
+def declaration_exports(target):
+    """
+    نام‌های صادرشده در فایل اعلان کنار یک ماژول جاوااسکریپتی.
+
+    worker/smtp.mjs پیاده‌سازی است و worker/smtp.d.mts تایپ‌هایش. بدون
+    خواندن فایل دوم، «import { SmtpConfig } from '@/worker/smtp.mjs'»
+    هشدار کاذب می‌گیرد — و هشدار کاذب از نبود بررسی بدتر است.
+    """
+    for suffix, decl in ((".mjs", ".d.mts"), (".js", ".d.ts")):
+        if target.endswith(suffix):
+            path = target[: -len(suffix)] + decl
+            if os.path.isfile(path):
+                return module_exports(read(path))
+    return set()
 
 IMPORT_RE = re.compile(r"""import\s+(?:([^'"]+?)\s+from\s+)?['"]([^'"]+)['"]""")
 
@@ -210,6 +227,11 @@ def check_imports():
             if re.search(r"export\s+\*", target_src):
                 continue  # صادرات ستاره‌دار را دنبال نمی‌کنیم
             exported = module_exports(target_src)
+
+            # فایل .mjs که از تایپ‌اسکریپت ایمپورت می‌شود، تایپ‌هایش در
+            # فایل اعلان کنارش است. بدون این، هر ایمپورت تایپ از یک ماژول
+            # جاوااسکریپتی هشدار کاذب می‌داد.
+            exported |= declaration_exports(target)
 
             for name in imported_source_names(clause):
                 if name and name not in exported:
@@ -377,12 +399,33 @@ def check_route_auth():
             problems.append("%s — مسیر API بدون نگهبان احراز هویت. عمدی است؟" % r)
 
 
+
+# ── ۲۶) ستون پنهان جدول باید در سرآیند و بدنه یکی باشد ───────────────────
+# کلاس col-sm/col-md ستون را روی صفحه باریک حذف می‌کند. اگر فقط به <th>
+# داده شود و به <td> نه (یا برعکس)، سرآیند و بدنه یکی جابه‌جا می‌شوند و
+# جدول روی موبایل داده غلط نشان می‌دهد — بدون هیچ خطایی.
+def check_hidden_columns():
+    for path in walk({".tsx"}):
+        src = read(path)
+        if "col-sm" not in src and "col-md" not in src:
+            continue
+        for cls in ("col-sm", "col-md"):
+            th = len(re.findall(r"<th[^>]*\b%s\b" % cls, src))
+            td = len(re.findall(r"<td[^>]*\b%s\b" % cls, src))
+            if th != td:
+                problems.append(
+                    "%s — کلاس %s روی %d سرآیند و %d سلول بدنه است؛ "
+                    "جدول روی موبایل جابه‌جا می‌شود."
+                    % (rel(path), cls, th, td)
+                )
+
 def main():
     check_non_null_assertion()
     check_empty_catch()
     check_async_effect()
     check_imports()
     check_query_generics()
+    check_hidden_columns()
     check_undefined_names()
     check_union_props()
     check_route_auth()
