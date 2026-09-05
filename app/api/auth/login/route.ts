@@ -15,6 +15,7 @@ type Row = {
   password_hash: string;
   role: string;
   is_active: boolean;
+  customer_id: number | null;
 };
 
 export async function POST(req: Request) {
@@ -26,7 +27,8 @@ export async function POST(req: Request) {
     }
 
     const user = await queryOne<Row>(
-      `SELECT id, username, password_hash, role, is_active FROM users WHERE lower(username) = lower($1)`,
+      `SELECT id, username, password_hash, role, is_active, customer_id
+         FROM users WHERE lower(username) = lower($1)`,
       [username.trim()],
     );
 
@@ -35,7 +37,15 @@ export async function POST(req: Request) {
       return fail('نام کاربری یا گذرواژه درست نیست', 401);
     }
 
-    const token = await createSessionToken({ uid: user.id, username: user.username, role: user.role });
+    // شناسه مشتری داخل توکن نشست می‌رود، نه در پارامتر درخواست. اگر از
+    // پارامتر خوانده می‌شد، هر مشتری با عوض‌کردن یک عدد داده بقیه را
+    // می‌دید.
+    const token = await createSessionToken({
+      uid: user.id,
+      username: user.username,
+      role: user.role,
+      ...(user.role === 'customer' && user.customer_id ? { cid: user.customer_id } : {}),
+    });
 
     cookies().set(SESSION_COOKIE, token, {
       httpOnly: true,
@@ -47,6 +57,11 @@ export async function POST(req: Request) {
 
     await query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
 
-    return ok({ username: user.username, role: user.role });
+    // رابط بر اساس نقش به بخش خودش می‌رود
+    return ok({
+      username: user.username,
+      role: user.role,
+      redirect: user.role === 'customer' ? '/portal' : '/',
+    });
   });
 }

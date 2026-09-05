@@ -22,6 +22,9 @@ SELECT
   s.ram_total_bytes::float8  AS ram_total_bytes,
   s.disk_total_bytes::float8 AS disk_total_bytes,
   s.port_mbps, s.traffic_quota_gb::float8 AS traffic_quota_gb,
+  tp.purchased::float8                      AS traffic_purchased_gb,
+  (tp.used_bytes / 1073741824)::float8      AS traffic_used_gb,
+  (tp.purchased - tp.used_bytes / 1073741824)::float8 AS traffic_balance_gb,
   s.monthly_cost::float8 AS monthly_cost, s.customer,
   s.status, s.last_seen_at, s.boot_time, s.is_active, s.notes, s.created_at,
   m.ts                       AS metric_ts,
@@ -57,6 +60,17 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
   SELECT COUNT(*) AS cnt FROM incidents x WHERE x.server_id = s.id AND x.resolved_at IS NULL
 ) inc ON TRUE
+LEFT JOIN LATERAL (
+  -- ترافیک پیش‌خرید: مجموع خریدها، و مصرف از تاریخ شروع شمارش.
+  -- تاریخ تهی یعنی هنوز خریدی نبوده، پس مصرفی هم شمرده نمی‌شود.
+  SELECT COALESCE((SELECT SUM(gb) FROM traffic_topups tt WHERE tt.server_id = s.id), 0)::float8
+           AS purchased,
+         COALESCE((SELECT SUM(d.rx_bytes) FROM server_metrics_daily d
+                    WHERE d.server_id = s.id
+                      AND s.traffic_counted_from IS NOT NULL
+                      AND d.day >= s.traffic_counted_from), 0)::float8
+           AS used_bytes
+) tp ON TRUE
 `;
 
 export async function GET(req: Request) {

@@ -31,6 +31,9 @@ const EDITABLE: Record<string, 'text' | 'int' | 'bigint' | 'inet' | 'bool' | 'nu
   status: 'text',
   is_active: 'bool',
   is_monitor: 'bool',
+  customer_id: 'int',
+  renews_at: 'text',
+  renew_notice_days: 'int',
 };
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
@@ -52,6 +55,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
               s.ram_total_bytes::float8 AS ram_total_bytes,
               s.disk_total_bytes::float8 AS disk_total_bytes,
               s.port_mbps, s.traffic_quota_gb::float8 AS traffic_quota_gb,
+              to_char(s.traffic_counted_from, 'YYYY-MM-DD') AS traffic_counted_from,
+              tp.purchased::float8                 AS traffic_purchased_gb,
+              (tp.used_bytes / 1073741824)::float8 AS traffic_used_gb,
+              (tp.purchased - tp.used_bytes / 1073741824)::float8 AS traffic_balance_gb,
               s.monthly_cost::float8 AS monthly_cost, s.customer,
               s.datacenter_id, dc.name AS datacenter_name,
               s.price_per_tb::float8 AS price_per_tb,
@@ -60,6 +67,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
               s.included_ips,
               s.agent_token, s.agent_version, s.net_iface, s.status, s.last_seen_at, s.boot_time,
               s.is_active, s.is_monitor, s.notes, s.created_at,
+              s.customer_id, cu.name AS customer_name,
+              s.renews_at, s.renew_notice_days,
               m.ts AS metric_ts, m.cpu_percent,
               m.ram_used_bytes::float8 AS ram_used_bytes,
               m.disk_used_bytes::float8 AS disk_used_bytes,
@@ -70,9 +79,21 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
               m.uptime_sec::float8 AS uptime_sec, m.process_count, m.tcp_conn_count
          FROM servers s
          LEFT JOIN datacenters dc ON dc.id = s.datacenter_id
+         LEFT JOIN customers cu ON cu.id = s.customer_id
          LEFT JOIN LATERAL (
            SELECT * FROM server_metrics sm WHERE sm.server_id = s.id ORDER BY sm.ts DESC LIMIT 1
          ) m ON TRUE
+         LEFT JOIN LATERAL (
+           -- ترافیک پیش‌خرید: مجموع خریدها، و مصرف از تاریخ شروع شمارش.
+           -- تاریخ تهی یعنی هنوز خریدی نبوده، پس مصرفی هم شمرده نمی‌شود.
+           SELECT COALESCE((SELECT SUM(gb) FROM traffic_topups tt WHERE tt.server_id = s.id), 0)::float8
+                    AS purchased,
+                  COALESCE((SELECT SUM(d.rx_bytes) FROM server_metrics_daily d
+                             WHERE d.server_id = s.id
+                               AND s.traffic_counted_from IS NOT NULL
+                               AND d.day >= s.traffic_counted_from), 0)::float8
+                    AS used_bytes
+         ) tp ON TRUE
         WHERE s.id = $1`,
       [id],
     );

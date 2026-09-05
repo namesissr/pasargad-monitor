@@ -16,6 +16,8 @@ export interface SessionPayload {
   uid: number;
   username: string;
   role: string;
+  /** فقط برای نقش «customer»: شناسه مشتری‌ای که این حساب به آن تعلق دارد */
+  cid?: number;
 }
 
 function secretKey(): Uint8Array {

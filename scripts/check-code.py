@@ -369,8 +369,12 @@ def check_route_auth():
             continue
         if r in OPEN_ROUTES:
             continue
-        if "requireUser" not in read(path):
-            problems.append("%s — مسیر API بدون requireUser. عمدی است؟" % r)
+        # requireCustomer هم نگهبان معتبری است — مسیرهای پرتال مشتری با
+        # آن محافظت می‌شوند. requireUser عمدا نقش مشتری را رد می‌کند، پس
+        # این دو جای هم را نمی‌گیرند.
+        src = read(path)
+        if "requireUser" not in src and "requireCustomer" not in src:
+            problems.append("%s — مسیر API بدون نگهبان احراز هویت. عمدی است؟" % r)
 
 
 def main():

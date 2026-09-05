@@ -8,6 +8,7 @@ import { Chart, UsageBar } from '@/components/Chart';
 import { Field, IpBadge, Modal, Mono, Notice, StatCard, StatusBadge } from '@/components/ui';
 import { InstallInstructions } from '@/components/InstallInstructions';
 import { DIRECTION_LABEL, type BillingDirection } from '@/lib/billing';
+import { TopupForm } from '@/components/TopupForm';
 import { api, ApiError } from '@/lib/api';
 import {
   faFloat,
@@ -41,6 +42,10 @@ interface Detail {
     disk_total_bytes: number | null;
     port_mbps: number | null;
     traffic_quota_gb: number | null;
+    traffic_counted_from: string | null;
+    traffic_purchased_gb: number;
+    traffic_used_gb: number;
+    traffic_balance_gb: number;
     monthly_cost: number | null;
     customer: string | null;
     agent_token: string;
@@ -56,6 +61,10 @@ interface Detail {
     last_seen_at: string | null;
     is_active: boolean;
     is_monitor: boolean;
+    customer_id: number | null;
+    customer_name: string | null;
+    renews_at: string | null;
+    renew_notice_days: number;
     notes: string | null;
     cpu_percent: number | null;
     ram_used_bytes: number | null;
@@ -165,6 +174,9 @@ export default function ServerDetailPage() {
   const ramPct = s.ram_used_bytes && s.ram_total_bytes ? (s.ram_used_bytes / s.ram_total_bytes) * 100 : 0;
   const diskPct = s.disk_used_bytes && s.disk_total_bytes ? (s.disk_used_bytes / s.disk_total_bytes) * 100 : 0;
   const quotaBytes = Number(s.traffic_quota_gb ?? 0) * Math.pow(1024, 3);
+  // ترافیک پیش‌خرید مشتری. اگر خریدی هست، نوار مصرف همین را نشان می‌دهد
+  // نه سهمیه ماهانه — سرور اختصاصی سهمیه ماهانه ندارد.
+  const purchasedGb = Number(s.traffic_purchased_gb ?? 0);
   const points = metrics.data?.points ?? [];
   const isLongRange = ['7d', '30d', '90d', '1y'].includes(range);
 
@@ -313,14 +325,22 @@ export default function ServerDetailPage() {
           ))}
         </div>
 
-        {quotaBytes > 0 ? (
+        {purchasedGb > 0 ? (
+          <UsageBar
+            percent={(Number(s.traffic_used_gb) / purchasedGb) * 100}
+            label="ترافیک پیش‌خرید"
+            right={`${faNum(Math.max(0, Number(s.traffic_balance_gb)).toFixed(0))} گیگ باقی‌مانده از ${faNum(purchasedGb.toFixed(0))} گیگ`}
+          />
+        ) : quotaBytes > 0 ? (
           <UsageBar
             percent={(monthBytes / quotaBytes) * 100}
             label={`سهمیه ${d.traffic.month.label}`}
             right={`${formatTB(monthBytes, 2)} از ${formatTB(quotaBytes, 2)}`}
           />
         ) : (
-          <p className="text-[11px] text-muted">سهمیه ترافیک برای این سرور تعریف نشده — نامحدود در نظر گرفته می‌شود.</p>
+          <p className="text-[11px] text-muted">
+            برای این سرور نه ترافیک پیش‌خرید ثبت شده نه سهمیه ماهانه — نامحدود در نظر گرفته می‌شود.
+          </p>
         )}
       </section>
 
@@ -564,6 +584,8 @@ export default function ServerDetailPage() {
           {s.notes && <p className="text-xs text-muted mt-3 pt-3 border-t border-line/60">{s.notes}</p>}
         </section>
 
+        <ServerTopups serverId={s.id} onChange={detail.reload} />
+
         <section className="card lg:col-span-2 overflow-hidden">
           <div className="px-4 py-3 border-b border-line flex items-center justify-between">
             <h2 className="text-sm font-bold">آی‌پی‌های این سرور ({faNum(d.ips.length)})</h2>
@@ -772,7 +794,13 @@ function EditServerModal({
     notes: server.notes ?? '',
     status: server.status,
     is_monitor: server.is_monitor ? 'true' : 'false',
+    customer_id: server.customer_id ? String(server.customer_id) : '',
+    // تاریخ به شکل «سال-ماه-روز» میلادی نگه داشته می‌شود چون ورودی
+    // تاریخ مرورگر همین را می‌خواهد؛ نمایشش در پرتال شمسی است.
+    renews_at: server.renews_at ? String(server.renews_at).slice(0, 10) : '',
+    renew_notice_days: String(server.renew_notice_days ?? 3),
   });
+  const customers = useLoad<{ customers: { id: number; name: string }[] }>('/api/customers');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -787,6 +815,9 @@ function EditServerModal({
       await api.patch(`/api/servers/${server.id}`, {
         ...form,
         is_monitor: form.is_monitor === 'true',
+        customer_id: form.customer_id ? Number(form.customer_id) : null,
+        renews_at: form.renews_at || null,
+        renew_notice_days: Number(form.renew_notice_days) || 0,
         datacenter_id: form.datacenter_id ? Number(form.datacenter_id) : null,
         ssh_port: Number(form.ssh_port) || 22,
         port_mbps: Number(form.port_mbps) || 1000,
@@ -836,7 +867,10 @@ function EditServerModal({
           <Field label="موقعیت"><input className="input" value={form.location} onChange={set('location')} /></Field>
           <Field label="مشتری"><input className="input" value={form.customer} onChange={set('customer')} /></Field>
           <Field label="ظرفیت پورت (مگابیت)"><input className="input ltr" value={form.port_mbps} onChange={set('port_mbps')} /></Field>
-          <Field label="سهمیه ترافیک ماهانه (گیگابایت)" hint="صفر یعنی نامحدود">
+          <Field
+            label="سهمیه ترافیک ماهانه (گیگابایت)"
+            hint="فقط برای سرورهای خودمان؛ سرور اختصاصی مشتری با ترافیک پیش‌خرید کار می‌کند. صفر یعنی نامحدود"
+          >
             <input className="input ltr" value={form.traffic_quota_gb} onChange={set('traffic_quota_gb')} />
           </Field>
           <Field label="هزینه ماهانه (تومان)"><input className="input ltr" value={form.monthly_cost} onChange={set('monthly_cost')} /></Field>
@@ -847,6 +881,27 @@ function EditServerModal({
               <option value="unknown">نامشخص</option>
               <option value="maintenance">تعمیرات</option>
             </select>
+          </Field>
+          <Field
+            label="مشتری"
+            hint="مشتری فقط سرورهای تخصیص‌یافته به خودش را در پرتال می‌بیند"
+          >
+            <select
+              className="input"
+              value={form.customer_id}
+              onChange={(e) => setForm((f) => ({ ...f, customer_id: e.target.value }))}
+            >
+              <option value="">— بدون مشتری —</option>
+              {(customers.data?.customers ?? []).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="موعد تمدید" hint="خالی یعنی هشدار تمدید فرستاده نشود">
+            <input className="input ltr" type="date" value={form.renews_at} onChange={set('renews_at')} />
+          </Field>
+          <Field label="هشدار چند روز قبل" hint="صفر یعنی فقط روز موعد">
+            <input className="input ltr" value={form.renew_notice_days} onChange={set('renew_notice_days')} />
           </Field>
           <Field
             label="نوع سرور"
@@ -900,5 +955,75 @@ function EditServerModal({
         </div>
       </form>
     </Modal>
+  );
+}
+
+
+/**
+ * شارژ ترافیک این سرور.
+ *
+ * روی همان صفحه‌ای است که مصرف دیده می‌شود — وقتی سهمیه تمام شده، همان
+ * جا باید بشود شارژ کرد، نه اینکه کاربر جای دیگری را بگردد.
+ */
+function ServerTopups({ serverId, onChange }: { serverId: number; onChange: () => void }) {
+  const { data, loading, error, reload } = useLoad<{
+    topups: { id: number; gb: number; note: string | null; created_at: string }[];
+    totals: { purchased: number; used: number; balance: number } | null;
+  }>(`/api/topups?server_id=${serverId}&limit=20`);
+  const [adding, setAdding] = useState(false);
+
+  return (
+    <section className="card overflow-hidden">
+      <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-bold">ترافیک پیش‌خرید</h2>
+          {data && (
+            <p className="text-[11px] text-muted mt-0.5">
+              موجودی {faNum(Math.max(0, data.totals?.balance ?? 0).toFixed(0))} گیگ از{' '}
+              {faNum((data.totals?.purchased ?? 0).toFixed(0))} گیگ خرید — بدون انقضا
+            </p>
+          )}
+        </div>
+        <button type="button" className="text-xs text-cyan hover:underline" onClick={() => setAdding(true)}>
+          + شارژ
+        </button>
+      </div>
+
+      <div className="p-4">
+        {loading || error || !data ? (
+          <LoadState loading={loading} error={error} onRetry={reload}>{null}</LoadState>
+        ) : !data.topups.length ? (
+          <p className="text-xs text-muted">هنوز ترافیکی خریداری نشده.</p>
+        ) : (
+          <ul className="space-y-2 text-xs">
+            {data.topups.map((t) => (
+              <li key={t.id} className="flex items-center justify-between gap-2">
+                <span className={t.gb < 0 ? 'text-danger' : 'text-ok'}>
+                  {t.gb > 0 ? '+' : ''}
+                  {faNum(t.gb.toFixed(0))} گیگ
+                </span>
+                <span className="text-muted truncate flex-1 mx-2" title={t.note || undefined}>
+                  {t.note || ''}
+                </span>
+                <span className="text-muted whitespace-nowrap">{formatJalaliDay(t.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {adding && (
+        <TopupForm
+          serverId={serverId}
+          onClose={() => setAdding(false)}
+          onDone={() => {
+            setAdding(false);
+            reload();
+            // سهمیه مؤثر سرور عوض شده، پس نوار مصرف هم باید تازه شود
+            onChange();
+          }}
+        />
+      )}
+    </section>
   );
 }

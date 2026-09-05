@@ -4,6 +4,7 @@ import { dispatchNotifications } from './incidents.mjs';
 import { evaluateThresholds } from './alerts.mjs';
 import { rollupHourly, rollupDaily, purgeOld } from './rollup.mjs';
 import { discoverAll, drainQueue } from './vz-sync.mjs';
+import { checkCustomerAlerts } from './customer-alerts.mjs';
 import { hashPassword } from './hash.mjs';
 
 /**
@@ -26,6 +27,9 @@ const CYCLE = {
   // کشف نودها. خود discoverAll فاصله واقعی هر نود را از تنظیمات می‌خواند؛
   // این فقط تناوب بررسی است.
   vzDiscover: 600_000,
+  // هشدار سهمیه و تمدید. تکرارشان با جدول یکتا گرفته می‌شود، پس فاصله
+  // کوتاه فقط یعنی زودتر خبردار می‌شوید، نه پیامک بیشتر.
+  customerAlerts: 1_800_000,
 };
 
 let stopping = false;
@@ -121,6 +125,7 @@ async function main() {
 
   schedule('پاک‌سازی', purgeOld, async () => CYCLE.purge);
 
+  schedule('هشدار مشتری', checkCustomerAlerts, async () => CYCLE.customerAlerts);
   schedule('صف ویژالیزور', drainQueue, async () => CYCLE.vzQueue);
   schedule('کشف ویژالیزور', discoverAll, async () => CYCLE.vzDiscover);
 }

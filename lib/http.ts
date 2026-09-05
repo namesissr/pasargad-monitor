@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { UnauthorizedError } from './auth';
+import { ForbiddenError, UnauthorizedError } from './auth';
 
 /** پاسخ موفق */
 export function ok<T>(data: T, init?: ResponseInit) {
@@ -20,6 +20,9 @@ export async function handle(fn: () => Promise<Response>): Promise<Response> {
     return await fn();
   } catch (err) {
     if (err instanceof UnauthorizedError) return fail(err.message, 401);
+    // ۴۰۳ از ۴۰۱ جداست: کاربر وارد شده ولی این بخش مال او نیست. با ۴۰۱،
+    // رابط او را به صفحه ورود می‌فرستاد و حلقه بی‌پایان می‌ساخت.
+    if (err instanceof ForbiddenError) return fail(err.message, 403);
     const message = err instanceof Error ? err.message : 'خطای ناشناخته';
     console.error('[api]', message, err);
     return fail(message.startsWith('خطا') ? message : `خطای سرور: ${message}`, 500);

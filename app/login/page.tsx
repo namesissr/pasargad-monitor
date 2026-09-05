@@ -15,9 +15,15 @@ export default function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      await api.post('/api/auth/login', { username, password });
+      const res = await api.post<{ redirect?: string }>('/api/auth/login', { username, password });
+      // مقصد از پاسخ سرور می‌آید، چون نقش را فقط سرور می‌داند. «next»
+      // فقط وقتی رعایت می‌شود که با نقش کاربر بخواند — وگرنه مشتری به
+      // صفحه‌ای می‌رفت که ای‌پی‌آی‌اش ۴۰۳ می‌دهد و صفحه خالی می‌ماند.
       const next = new URLSearchParams(window.location.search).get('next');
-      window.location.href = next && next.startsWith('/') ? next : '/';
+      const home = res?.redirect === '/portal' ? '/portal' : '/';
+      const useNext =
+        next && next.startsWith('/') && (home === '/' || next.startsWith('/portal'));
+      window.location.href = useNext ? next : home;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'ورود انجام نشد');
       setBusy(false);

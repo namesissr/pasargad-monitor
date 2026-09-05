@@ -32,6 +32,8 @@ interface ServerRow {
   disk_total_bytes: number | null;
   port_mbps: number | null;
   traffic_quota_gb: number | null;
+  traffic_purchased_gb: number;
+  traffic_balance_gb: number;
   customer: string | null;
   status: string;
   last_seen_at: string | null;
@@ -201,6 +203,9 @@ export default function ServersPage() {
                 const diskPct = pct(s.disk_used_bytes, s.disk_total_bytes);
                 const used = Number(s.period_rx ?? 0) + Number(s.period_tx ?? 0);
                 const quota = Number(s.traffic_quota_gb ?? 0) * Math.pow(1024, 3);
+                // سرور اختصاصی مشتری ترافیک پیش‌خرید دارد نه سهمیه ماهانه؛
+                // ادمین باید در همین فهرست ببیند چقدر باقی مانده.
+                const prepaidGb = Number(s.traffic_purchased_gb ?? 0);
 
                 return (
                   <tr key={s.id}>
@@ -252,14 +257,29 @@ export default function ServersPage() {
                     </td>
                     <td className="whitespace-nowrap text-xs">
                       {formatTB(used)}
-                      {quota > 0 && (
+                      {prepaidGb > 0 ? (
+                        <>
+                          <br />
+                          <span
+                            className={`text-[10px] ${
+                              Number(s.traffic_balance_gb) <= 0
+                                ? 'text-danger'
+                                : Number(s.traffic_balance_gb) / prepaidGb < 0.1
+                                  ? 'text-amber'
+                                  : 'text-muted'
+                            }`}
+                          >
+                            {faNum(Math.max(0, Number(s.traffic_balance_gb)).toFixed(0))} گیگ باقی‌مانده
+                          </span>
+                        </>
+                      ) : quota > 0 ? (
                         <>
                           <br />
                           <span className={`text-[10px] ${used / quota > 0.9 ? 'text-danger' : 'text-muted'}`}>
                             از {formatTB(quota, 1)} · {formatPercent((used / quota) * 100, 0)}
                           </span>
                         </>
-                      )}
+                      ) : null}
                     </td>
                     <td className="text-xs whitespace-nowrap">
                       {s.status === 'up' ? formatDuration(s.uptime_sec) : timeAgo(s.last_seen_at)}

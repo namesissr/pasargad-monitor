@@ -17,10 +17,14 @@ const NAV = [
     { href: '/ips', label: 'آی‌پی‌ها', icon: '◈' },
     { href: '/virtualizor', label: 'هایپروایزرها', icon: '⧉' },
   ]},
+  { group: 'مشتریان', items: [
+    { href: '/customers', label: 'مشتریان', icon: '☺' },
+  ]},
   { group: 'گزارش', items: [
     { href: '/reports', label: 'گزارش مصرف', icon: '▨' },
     { href: '/traffic', label: 'لاگ ترافیک', icon: '⇅' },
     { href: '/billing', label: 'حسابداری', icon: '₮' },
+    { href: '/topups', label: 'خرید ترافیک', icon: '⊕' },
   ]},
   { group: 'سامانه', items: [
     { href: '/settings', label: 'تنظیمات', icon: '⚙' },

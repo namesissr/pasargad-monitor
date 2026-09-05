@@ -61,5 +61,29 @@ export class UnauthorizedError extends Error {
 export async function requireUser(): Promise<SessionPayload> {
   const user = await currentUser();
   if (!user) throw new UnauthorizedError();
+  // حساب مشتری هرگز به مسیرهای پنل مدیریت راه ندارد.
+  //
+  // این بررسی اینجاست نه در هر مسیر، چون ده‌ها مسیر از همین تابع
+  // استفاده می‌کنند و یادرفتن یکی یعنی نشت کامل داده همه مشتریان.
+  if (user.role === 'customer') throw new ForbiddenError();
   return user;
+}
+
+export class ForbiddenError extends Error {
+  constructor(message = 'به این بخش دسترسی ندارید') {
+    super(message);
+  }
+}
+
+/**
+ * مشتری نشست جاری.
+ *
+ * شناسه مشتری از خود توکن نشست می‌آید، نه از پارامتر درخواست. اگر از
+ * پارامتر خوانده می‌شد، هر مشتری با عوض‌کردن یک عدد داده بقیه را می‌دید.
+ */
+export async function requireCustomer(): Promise<{ session: SessionPayload; customerId: number }> {
+  const user = await currentUser();
+  if (!user) throw new UnauthorizedError();
+  if (user.role !== 'customer' || !user.cid) throw new ForbiddenError();
+  return { session: user, customerId: user.cid };
 }

@@ -42,3 +42,4 @@ export function currentPeriod(calendar = 'jalali', now = new Date()) {
   const nextStart = jalaliMonthStart(addDays(from, 32));
   return { from: iso(from), to: iso(addDays(nextStart, -1)) };
 }
+
