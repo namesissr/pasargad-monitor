@@ -419,6 +419,56 @@ def check_hidden_columns():
                     % (rel(path), cls, th, td)
                 )
 
+
+# ── ۲۷) رشته تک‌نقل‌قولی که در همان خط بسته نشده ─────────────────────────
+# رشته چندخطی در جاوااسکریپت فقط با بک‌تیک مجاز است. رشته تک‌نقل‌قولی که
+# خط بشکند، خطای نحوی است و بیلد را می‌خواباند — ولی چون خطا فقط هنگام
+# کامپایل معلوم می‌شود، روی این سرور یعنی چند دقیقه بیلد و بعد شکست.
+#
+# این یک بار واقعا رخ داد: یک ابزار ویرایش، «\n» را به خط واقعی تبدیل کرد
+# و رشته وسط راه شکست.
+def check_unterminated_strings():
+    backslash = chr(92)
+    for path in walk({".ts", ".tsx", ".mjs"}):
+        for n, line in enumerate(read(path).split("\n"), 1):
+            stripped = line.strip()
+            if stripped.startswith("//") or stripped.startswith("*"):
+                continue
+
+            open_quote = False
+            i = 0
+            while i < len(line):
+                c = line[i]
+                if c == backslash:
+                    i += 2                      # کاراکتر بعدی گریخته است
+                    continue
+                if c == "'":
+                    open_quote = not open_quote
+                elif not open_quote and c == '"':
+                    # رشته دونقل‌قولی را رد می‌کنیم تا آپاستروف داخلش
+                    # هشدار کاذب نسازد
+                    j = i + 1
+                    while j < len(line):
+                        if line[j] == backslash:
+                            j += 2
+                            continue
+                        if line[j] == '"':
+                            break
+                        j += 1
+                    i = j
+                elif not open_quote and c == "`":
+                    break                       # رشته قالبی مجاز است چندخطی باشد
+                elif not open_quote and c == "/" and i + 1 < len(line) and line[i + 1] == "/":
+                    break
+                i += 1
+
+            if open_quote:
+                problems.append(
+                    "%s:%d — رشته تک‌نقل‌قولی در همان خط بسته نشده؛ خطای نحوی است. %s"
+                    % (rel(path), n, stripped[:60])
+                )
+
+
 def main():
     check_non_null_assertion()
     check_empty_catch()
@@ -426,6 +476,7 @@ def main():
     check_imports()
     check_query_generics()
     check_hidden_columns()
+    check_unterminated_strings()
     check_undefined_names()
     check_union_props()
     check_route_auth()

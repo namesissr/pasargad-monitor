@@ -160,9 +160,7 @@ export async function POST(req: Request) {
       }
       const subject = 'آزمایش ارسال ایمیل — پاسارگاد میزبان';
       const text =
-        'این یک ایمیل آزمایشی از پنل مانیتورینگ پاسارگاد میزبان است.
-
-' +
+        'این یک ایمیل آزمایشی از پنل مانیتورینگ پاسارگاد میزبان است.\n\n' +
         'اگر این پیام را می‌بینید، تنظیمات سرور ایمیل درست است.';
       // ارسال آزمایشی عمداً به تنظیم email_enabled نگاه نمی‌کند: باید
       // بشود پیش از روشن‌کردن، اتصال را سنجید.
@@ -170,9 +168,7 @@ export async function POST(req: Request) {
       await query(
         `INSERT INTO notifications (channel, recipient, body, ok, error)
          VALUES ('email', $1, $2, $3, $4)`,
-        [mailTo, `${subject}
-
-${text}`, r.ok, r.error ?? null],
+        [mailTo, `${subject}\n\n${text}`, r.ok, r.error ?? null],
       );
       if (!r.ok) return fail(r.error || 'ارسال ایمیل ناموفق بود', 502);
       return ok({ ok: true });
