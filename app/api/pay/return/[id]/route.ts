@@ -71,14 +71,30 @@ async function recordFailure(
   reason: string,
   pairs: [string, string][],
   method: string,
+  callback?: { refId: string | null; paymentCode: string | null; cardNumber: string | null },
 ) {
   const raw = JSON.stringify({ method, params: Object.fromEntries(pairs) }).slice(0, 2000);
 
+  // شناسه پرداخت و کد هم ذخیره می‌شوند، نه فقط در callback_raw.
+  //
+  // بدون این، تلاش دوباره برای تأیید ممکن نبود و تنها راه، پرداخت
+  // مجدد مشتری بود — یعنی دو بار پول دادن بابت یک سرویس.
   await query(
     `UPDATE invoices
-        SET payment_error = $2, callback_raw = $3, last_attempt_at = now(), updated_at = now()
+        SET payment_error = $2, callback_raw = $3,
+            payment_ref = COALESCE($4, payment_ref),
+            payment_code = COALESCE($5, payment_code),
+            card_number = COALESCE($6, card_number),
+            last_attempt_at = now(), updated_at = now()
       WHERE id = $1 AND status = 'unpaid'`,
-    [invoiceId, reason.slice(0, 500), raw],
+    [
+      invoiceId,
+      reason.slice(0, 500),
+      raw,
+      callback?.refId ?? null,
+      callback?.paymentCode ?? null,
+      callback?.cardNumber ?? null,
+    ],
   ).catch((e) =>
     console.error('[pay] ثبت خطای پرداخت ناموفق:', e instanceof Error ? e.message : e),
   );
@@ -149,6 +165,7 @@ async function handleReturn(req: Request, rawId: string) {
           : 'درگاه هیچ پارامتری برنگرداند — احتمالا کاربر انصراف داده',
         pairs,
         req.method,
+        callback,
       );
       return to('canceled');
     }
@@ -162,6 +179,7 @@ async function handleReturn(req: Request, rawId: string) {
         `شماره فاکتور بازگشتی «${callback.clientRefId}» با فاکتور «${inv.number}» نمی‌خواند`,
         pairs,
         req.method,
+        callback,
       );
       return to('mismatch');
     }
@@ -169,7 +187,7 @@ async function handleReturn(req: Request, rawId: string) {
     const result = await verifyAndSettle(invoiceId, callback);
 
     if (!result.ok) {
-      await recordFailure(invoiceId, result.error || 'علت نامشخص', pairs, req.method);
+      await recordFailure(invoiceId, result.error || 'علت نامشخص', pairs, req.method, callback);
       return to('failed');
     }
 
@@ -179,7 +197,7 @@ async function handleReturn(req: Request, rawId: string) {
     // ببیند و شماره پیگیری‌اش را داشته باشد.
     const message = err instanceof Error ? err.message : String(err);
     console.error('[pay] تأیید پرداخت خطا داد:', message);
-    await recordFailure(invoiceId, message, pairs, req.method);
+    await recordFailure(invoiceId, message, pairs, req.method, callback);
     return to('failed');
   }
 }

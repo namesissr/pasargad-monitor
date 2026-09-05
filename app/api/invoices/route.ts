@@ -1,7 +1,7 @@
 import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
 import { fail, handle, idParam, ok, readJson } from '@/lib/http';
-import { nextInvoiceNumber, settleInvoice } from '@/lib/invoices';
+import { nextInvoiceNumber, settleInvoice, verifyAndSettle } from '@/lib/invoices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -149,6 +149,52 @@ export async function PATCH(req: Request) {
         cardNumber: null,
       });
       if (!result.ok) return fail(result.error || 'ثبت پرداخت ناموفق بود', 400);
+      return ok(result);
+    }
+
+    if (body.action === 'retry_verify') {
+      // تأیید دوباره با همان شناسه پرداختی که درگاه قبلا برگردانده.
+      //
+      // برای فاکتوری است که پولش کم شده ولی تأیید شکست خورده. بدون
+      // این، تنها راه پرداخت مجدد مشتری بود — یعنی دو بار پول دادن
+      // بابت یک سرویس.
+      const inv = await queryOne<{
+        payment_ref: string | null;
+        payment_code: string | null;
+        card_number: string | null;
+        callback_raw: string | null;
+        status: string;
+      }>(
+        `SELECT payment_ref, payment_code, card_number, callback_raw, status
+           FROM invoices WHERE id = $1`,
+        [id],
+      );
+      if (!inv) return fail('فاکتور پیدا نشد', 404);
+      if (inv.status === 'paid') return ok({ ok: true, alreadyPaid: true });
+
+      let refId = inv.payment_ref;
+      let paymentCode = inv.payment_code;
+      let cardNumber = inv.card_number;
+
+      // فاکتورهای قدیمی شناسه را فقط داخل callback_raw دارند
+      if (!refId && inv.callback_raw) {
+        try {
+          const parsed = JSON.parse(inv.callback_raw) as { params?: Record<string, string> };
+          const p = parsed.params ?? {};
+          refId = p.refid || p.refId || p.paymentRefId || null;
+          paymentCode = paymentCode || p.code || p.paymentCode || null;
+          cardNumber = cardNumber || p.cardnumber || p.cardNumber || null;
+        } catch {
+          // پارامترهای ذخیره‌شده جیسون معتبر نبودند؛ چیزی از دست نمی‌رود
+        }
+      }
+
+      if (!refId) {
+        return fail('شناسه پرداختی از درگاه ثبت نشده؛ تأیید دوباره ممکن نیست', 400);
+      }
+
+      const result = await verifyAndSettle(id, { refId, paymentCode, cardNumber });
+      if (!result.ok) return fail(result.error || 'تأیید دوباره ناموفق بود', 502);
       return ok(result);
     }
 

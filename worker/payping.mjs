@@ -174,10 +174,22 @@ export async function verifyPayment(config, { amountToman, refId, paymentCode })
 
   if (!refId) throw new PayPingError('شناسه پرداخت از درگاه نیامد');
 
+  const code = String(paymentCode || '');
+
+  // **کد پرداخت اجباری است، حتی در نسخه ۲.**
+  //
+  // نسخه اول فقط refId و مبلغ می‌فرستاد و درگاه با پیام «مقدار فیلد
+  // 'کد پرداخت' اجباری است» رد می‌کرد. یعنی پول کم می‌شد و فاکتور باز
+  // می‌ماند.
+  //
+  // نام فیلدش در نسخه ۲ از مستندات عمومی معلوم نشد، پس هر دو نام
+  // فرستاده می‌شوند. درگاه روی دات‌نت است و فیلد ناشناخته در بدنه
+  // جیسون را نادیده می‌گیرد، پس فرستادن هر دو بی‌خطر است و هرکدام که
+  // درست باشد می‌نشیند.
   const payload =
     version === 'v3'
-      ? { paymentCode: String(paymentCode || ''), paymentRefId: String(refId), amount }
-      : { refId: String(refId), amount };
+      ? { paymentCode: code, paymentRefId: String(refId), amount }
+      : { refId: String(refId), amount, paymentCode: code, code };
 
   const body = await call(`/${version}/pay/verify`, token, payload);
 

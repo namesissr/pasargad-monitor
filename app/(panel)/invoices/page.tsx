@@ -60,12 +60,15 @@ export default function InvoicesPage() {
   const [adding, setAdding] = useState(false);
   const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
-  async function act(inv: Invoice, action: 'cancel' | 'mark_paid') {
+  async function act(inv: Invoice, action: 'cancel' | 'mark_paid' | 'retry_verify') {
     const question =
       action === 'cancel'
         ? `فاکتور ${inv.number} لغو شود؟`
-        : `فاکتور ${inv.number} به مبلغ ${formatToman(inv.amount_toman)} پرداخت‌شده ثبت شود؟\n\n` +
-          'سرور تمدید می‌شود و به مشتری پیامک و ایمیل می‌رود.';
+        : action === 'retry_verify'
+          ? `تأیید پرداخت فاکتور ${inv.number} دوباره از درگاه گرفته شود؟\n\n` +
+            'پرداخت تازه‌ای انجام نمی‌شود؛ همان شناسه پرداخت قبلی دوباره تأیید می‌شود.'
+          : `فاکتور ${inv.number} به مبلغ ${formatToman(inv.amount_toman)} پرداخت‌شده ثبت شود؟\n\n` +
+            'سرور تمدید می‌شود و به مشتری پیامک و ایمیل می‌رود.';
     if (!confirm(question)) return;
 
     setMsg(null);
@@ -73,7 +76,12 @@ export default function InvoicesPage() {
       await api.patch('/api/invoices', { id: inv.id, action });
       setMsg({
         type: 'success',
-        text: action === 'cancel' ? 'فاکتور لغو شد.' : 'پرداخت ثبت شد و سرویس تمدید شد.',
+        text:
+          action === 'cancel'
+            ? 'فاکتور لغو شد.'
+            : action === 'retry_verify'
+              ? 'پرداخت تأیید شد و سرویس تحویل شد.'
+              : 'پرداخت ثبت شد و سرویس تمدید شد.',
       });
       reload();
     } catch (e) {
@@ -110,7 +118,8 @@ export default function InvoicesPage() {
       {failedCount > 0 && (
         <Notice type="error">
           {faNum(failedCount)} فاکتور تلاش پرداخت ناموفق داشته‌اند. اگر مبلغ از حساب مشتری کم
-          شده، شماره پیگیری را از او بگیرید و فاکتور را دستی ثبت کنید.
+          شده، اول «تأیید دوباره» را بزنید — همان شناسه پرداخت قبلی دوباره تأیید می‌شود و
+          پرداخت تازه‌ای لازم نیست. اگر باز هم نشد، فاکتور را دستی ثبت کنید.
         </Notice>
       )}
 
@@ -224,6 +233,17 @@ export default function InvoicesPage() {
                     <td className="text-end whitespace-nowrap">
                       {inv.status === 'unpaid' && (
                         <>
+                          {/* اگر تلاش پرداختی ناموفق بوده، شناسه‌اش ذخیره
+                              شده و می‌شود بدون پرداخت دوباره تأییدش کرد */}
+                          {inv.payment_error && (
+                            <button
+                              type="button"
+                              className="text-xs text-cyan hover:underline me-3"
+                              onClick={() => act(inv, 'retry_verify')}
+                            >
+                              تأیید دوباره
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="text-xs text-muted hover:text-ok"
