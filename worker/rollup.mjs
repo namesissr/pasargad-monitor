@@ -141,6 +141,9 @@ export async function purgeOld() {
 
   await q(`DELETE FROM server_metrics_hourly WHERE hour < now() - interval '400 days'`);
   await q(`DELETE FROM notifications WHERE created_at < now() - interval '180 days'`);
+  // کد یکبارمصرف سه دقیقه اعتبار دارد؛ یک روز نگه‌داشتنش برای
+  // پیگیری سوءاستفاده کافی است و بیشترش فقط جدول را بزرگ می‌کند.
+  await q(`DELETE FROM otp_codes WHERE created_at < now() - interval '1 day'`);
   await q(`DELETE FROM incidents WHERE resolved_at IS NOT NULL AND resolved_at < now() - interval '365 days'`);
 
   log(`پاک‌سازی: ${raw[0]?.n ?? 0} نمونه خام و ${checks[0]?.n ?? 0} نتیجه بررسی حذف شد`);

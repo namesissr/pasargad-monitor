@@ -98,7 +98,15 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS discount_toman BIGINT NOT NULL DEF
 ALTER TABLE invoices ADD COLUMN IF NOT EXISTS subtotal_toman BIGINT;
 
 -- فاکتور صفر تومانی وقتی تخفیف کل مبلغ را بپوشاند
+--
+-- قید قدیمی (amount_toman > 0) که پستگرس خودش نام‌گذاری کرده بود حذف
+-- می‌شود، و قید تازه جایش می‌نشیند.
+--
+-- قید تازه هم اول DROP IF EXISTS می‌شود، وگرنه اجرای دوباره این فایل با
+-- «constraint already exists» می‌شکند. وقتی معلوم نیست کدام مهاجرت‌ها
+-- قبلا اجرا شده‌اند — که حالت رایج است — باید بشود بی‌خطر دوباره زدشان.
 ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_amount_toman_check;
+ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_amount_positive;
 ALTER TABLE invoices ADD CONSTRAINT invoices_amount_positive
   CHECK (amount_toman >= 0);
 

@@ -18,7 +18,7 @@ import { SESSION_COOKIE, verifySessionToken } from './lib/session';
 // درگاه با POST برمی‌گردد و کوکی sameSite=lax در POST بین‌سایتی
 // فرستاده نمی‌شود. آن مسیر خودش هیچ داده‌ای نشان نمی‌دهد — فقط تأیید
 // می‌کند و ریدایرکت می‌زند.
-const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/ingest', '/api/probe', '/api/bind', '/api/health', '/agent', '/api/pay/return', '/store', '/api/store'];
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/ingest', '/api/probe', '/api/bind', '/api/health', '/agent', '/api/pay/return', '/store', '/api/store', '/api/auth/otp'];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

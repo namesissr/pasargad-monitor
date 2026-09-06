@@ -457,6 +457,57 @@ export default function SettingsPage() {
         </p>
       </section>
 
+      {/* ورود با کد پیامکی */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">ورود با کد پیامکی</h2>
+
+        <Notice type="info">
+          مشتری با شماره موبایلش کد شش‌رقمی می‌گیرد و بدون گذرواژه وارد می‌شود. فقط برای حساب
+          مشتری کار می‌کند؛ کارکنان همیشه با گذرواژه وارد می‌شوند.
+        </Notice>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="ورود با کد پیامکی">
+            <select
+              className="input"
+              value={form.otp_login_enabled ?? 'true'}
+              onChange={set('otp_login_enabled')}
+            >
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+
+          <Field
+            label="حالت توسعه پیامک"
+            hint="کد به‌جای پیامک در لاگ ای‌پی‌آی نوشته می‌شود"
+          >
+            <select
+              className="input"
+              value={form.sms_dev_mode ?? 'false'}
+              onChange={set('sms_dev_mode')}
+            >
+              <option value="false">خاموش</option>
+              <option value="true">روشن</option>
+            </select>
+          </Field>
+        </div>
+
+        {form.sms_dev_mode === 'true' && (
+          <Notice type="error">
+            <b>حالت توسعه روشن است.</b> کد ورود به‌جای پیامک در لاگ نوشته می‌شود و در پاسخ
+            ای‌پی‌آی هم برمی‌گردد. یعنی هر کسی که لاگ را ببیند می‌تواند وارد حساب هر مشتری شود.
+            روی محیط واقعی این را خاموش کنید.
+          </Notice>
+        )}
+
+        <p className="text-[11px] text-muted/70 leading-relaxed">
+          کد سه دقیقه اعتبار دارد، پنج بار قابل امتحان است، و برای هر شماره حداکثر پنج بار در
+          ساعت با فاصله نود ثانیه فرستاده می‌شود. برای دیدن کد در حالت توسعه:{' '}
+          <span className="ltr">docker compose logs api | grep otp</span>
+        </p>
+      </section>
+
       {/* فروشگاه عمومی */}
       <section className="card p-5 space-y-4">
         <h2 className="text-sm font-bold">فروشگاه عمومی</h2>

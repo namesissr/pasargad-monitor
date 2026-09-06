@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { api } from '@/lib/api';
 
 /**
  * منوی پرتال مشتری.
@@ -9,8 +10,9 @@ import { usePathname } from 'next/navigation';
  * پرتال جای مرور است نه مدیریت؛ هرچه بیشتر شود، پیداکردن
  * همان یک عددی که مشتری دنبالش آمده سخت‌تر می‌شود.
  *
- * کلاینت است چون مسیر فعال را از usePathname می‌گیرد. خروج با فرم و
- * POST است، نه fetch: بدون جاوااسکریپت هم باید کار کند.
+ * کلاینت است چون مسیر فعال را از usePathname می‌گیرد. خروج هم fetch
+ * دارد و هم فرم: با جاوااسکریپت، fetch و بعد تغییر آدرس؛ بدون آن،
+ * پیمایش ساده فرم و ریدایرکت سرور.
  */
 
 const NAV = [
@@ -25,6 +27,26 @@ const NAV = [
 
 export function PortalNav() {
   const pathname = usePathname();
+
+  /**
+   * خروج.
+   *
+   * پیمایش پیش‌فرض فرم متوقف می‌شود و به‌جایش fetch می‌رود، چون مقصدِ
+   * بعدش را خود مرورگر با location تعیین می‌کند نه سرآیند Location
+   * سرور. یک متغیر کمتر برای اشتباه‌شدن.
+   *
+   * finally عمدی است: اگر درخواست هم شکست بخورد، کاربر باید به صفحه
+   * ورود برود. ماندن در پرتالی که نشستش نامعلوم است بدتر از یک خروج
+   * ناقص است.
+   */
+  async function logout(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      await api.post('/api/auth/logout');
+    } finally {
+      window.location.href = '/login';
+    }
+  }
 
   // مسیر سرورها روی صفحه جزئیات هم فعال بماند، ولی روی بقیه نه
   const isActive = (href: string) =>
@@ -43,7 +65,15 @@ export function PortalNav() {
             <span className="font-bold text-sm">پاسارگاد میزبان</span>
           </Link>
 
-          <form action="/api/auth/logout" method="post">
+          {/*
+            خروج با fetch انجام می‌شود و بعد خود صفحه عوض می‌شود — همان
+            کاری که پنل مدیریت می‌کند و کار می‌کند.
+
+            action و method روی فرم می‌مانند تا اگر جاوااسکریپت خاموش
+            بود، پیمایش ساده مرورگر همان مسیر را بزند و سرور خودش
+            ریدایرکت کند. دو راه، یک مقصد.
+          */}
+          <form action="/api/auth/logout" method="post" onSubmit={logout}>
             <button type="submit" className="text-xs text-muted hover:text-white px-2 py-1">
               خروج
             </button>

@@ -284,6 +284,56 @@ def main():
 
     print("")
 
+    # ── خروج ───────────────────────────────────────────────────
+    #
+    # خروجی که کاربر را به صفحه ورود نبرد، بدترین حالت است: کاربر فکر
+    # می‌کند بیرون آمده و نیامده. سه چیز باید با هم درست باشد.
+    logout = read("app", "api", "auth", "logout", "route.ts")
+    nav = read("components", "PortalNav.tsx")
+
+    check(
+        "خروج کوکی را روی خود پاسخ پاک می‌کند",
+        "res.cookies.set(SESSION_COOKIE, ''" in logout and "maxAge: 0" in logout,
+        "با cookies() از next/headers، پاک‌شدن روی پاسخِ دست‌ساز تضمین نیست",
+    )
+    check(
+        "مقصد ریدایرکت نسبی است",
+        "Location: '/login'" in logout,
+        "آدرس مطلق از req.url پشت انجین‌ایکس با طرح http و شاید نام داخلی کانتینر ساخته می‌شود",
+    )
+    check(
+        "خروج آدرس مطلق از req.url نمی‌سازد",
+        "new URL('/login', req.url)" not in logout,
+        "همان دام: آدرسی که از مرورگر در دسترس نیست",
+    )
+    check(
+        "خروج به پیمایش مرورگر ریدایرکت می‌دهد",
+        "accept.includes('text/html')" in logout,
+        "پیمایش ساده اگر جیسون بگیرد، کاربر روی متن خام می‌ماند",
+    )
+    check(
+        "خروج با GET هم کار می‌کند",
+        "export async function GET" in logout,
+        "لینک بوکمارک‌شده و مرورگر بی‌جاوااسکریپت GET می‌فرستند",
+    )
+    check(
+        "ریدایرکت خروج ۳۰۳ است",
+        "status: 303" in logout,
+        "با ۳۰۲ بعضی مرورگرها POST را به صفحه ورود می‌برند",
+    )
+    check(
+        "دکمه خروج پرتال هر دو راه را دارد",
+        "onSubmit={logout}" in nav and 'action="/api/auth/logout"' in nav,
+        "fetch برای حالت عادی، فرم برای وقتی جاوااسکریپت خاموش است",
+    )
+    check(
+        "خروج پرتال در هر حال کاربر را می‌فرستد",
+        "finally {" in nav and "window.location.href = '/login'" in nav,
+        "ماندن در پرتالی که نشستش نامعلوم است بدتر از خروج ناقص است",
+    )
+
+    print("")
+
     # ── هیچ مسیر ای‌پی‌آی بدون نگهبان ───────────────────────────
     open_routes = {
         "app/api/ingest/route.ts",
@@ -308,6 +358,10 @@ def main():
         # فقط «وارد شده یا نه» را می‌گوید تا فرم سفارش بداند بخش حساب
         # را نشان بدهد یا نه. شناسه مشتری برنمی‌گرداند.
         "app/api/store/session/route.ts",
+        # ورود با کد پیامکی. همان دلیل صفحه ورود: کسی که وارد می‌شود
+        # هنوز نشستی ندارد. قواعدش پایین‌تر جداگانه آزموده می‌شود.
+        "app/api/auth/otp/request/route.ts",
+        "app/api/auth/otp/verify/route.ts",
     }
     unguarded = []
     for base, _dirs, files in os.walk(os.path.join(ROOT, "app", "api")):

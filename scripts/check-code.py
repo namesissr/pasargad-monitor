@@ -396,7 +396,12 @@ OPEN_ROUTES = {"app/api/ingest/route.ts", "app/api/auth/login/route.ts",
                "app/api/pay/return/[id]/route.ts",
                "app/api/store/products/route.ts",
                "app/api/store/checkout/route.ts",
-               "app/api/store/session/route.ts"}
+               "app/api/store/session/route.ts",
+               # ورود با کد پیامکی: کسی که وارد می‌شود هنوز نشستی
+               # ندارد. امنیتش سقف نرخ آی‌پی، سقف ساعتی شماره، و سقف
+               # تلاش روی خود کد است.
+               "app/api/auth/otp/request/route.ts",
+               "app/api/auth/otp/verify/route.ts"}
 
 
 def check_route_auth():
@@ -680,13 +685,36 @@ def check_gateway_return_url():
                 )
 
 
+def strip_comments(src):
+    """
+    کد بدون توضیحات.
+
+    لازم است چون بعضی قاعده‌ها در توضیح خودشان اسم چیزی را می‌برند که
+    دنبالش می‌گردیم — مثل توضیحی که می‌گوید چرا از فلان تابع استفاده
+    **نشده**. بدون این، همان توضیح بررسی را سبز می‌کند و بررسی مرده
+    می‌شود بی‌آنکه کسی بفهمد.
+    """
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    src = re.sub(r"^\s*//.*$", "", src, flags=re.M)
+    return src
+
+
 # ── ۳۲) فرم ساده به مسیری که ریدایرکت نمی‌کند ───────────────────────────
 # فرم HTML بدون جاوااسکریپت، مرورگر را به پاسخ می‌برد. اگر آن مسیر جیسون
 # برگرداند، کاربر روی متن خام می‌ماند و هیچ‌جا نمی‌رود.
 #
 # این یک بار در دکمه خروج پرتال مشتری رخ داد: کلیک می‌کرد و به صفحه ورود
 # برنمی‌گشت. خطایش فقط با کلیک‌کردن معلوم می‌شود، نه با کامپایل.
+#
+# ریدایرکت دو شکل دارد و هر دو معتبرند: NextResponse.redirect با آدرس
+# مطلق، یا پاسخ دستی با کد ۳۰۳/۳۰۲ و سرآیند Location — که برای مسیر
+# نسبی تنها راه است.
+#
+# جستجو روی کد بدون توضیحات انجام می‌شود. نسخه اول این کار را نمی‌کرد و
+# توضیحی که دلیل انتخاب یکی از دو شکل را می‌گفت، خودش بررسی را سبز
+# می‌کرد.
 FORM_ACTION_RE = re.compile(r"""<form[^>]*action=["']((/api/[^"']+))["']""")
+REDIRECT_RE = re.compile(r"NextResponse\.redirect|status:\s*30[123]|Location['\"]?\s*:")
 
 
 def check_form_actions():
@@ -703,7 +731,7 @@ def check_form_actions():
                     % (rel(path), line_of(src, m.start()), m.group(1))
                 )
                 continue
-            if "NextResponse.redirect" not in read(route):
+            if not REDIRECT_RE.search(strip_comments(read(route))):
                 problems.append(
                     "%s:%d — فرم ساده به «%s» می‌فرستد ولی آن مسیر ریدایرکت نمی‌کند. "
                     "کاربر روی پاسخ خام می‌ماند و هیچ‌جا نمی‌رود."
@@ -803,6 +831,45 @@ def check_control_bytes():
                 break
 
 
+# ── ۳۵) مهاجرت باید دوباره‌اجراشدنی باشد ────────────────────────────────
+# مهاجرت‌ها فقط بار اول و روی دیتابیس خالی خودکار اجرا می‌شوند؛ بقیه
+# دستی زده می‌شوند. یعنی حالت رایج این است که معلوم نیست کدام‌ها قبلا
+# اجرا شده‌اند و آدم همه را از یک جایی به بعد دوباره می‌زند.
+#
+# CREATE TABLE و ADD COLUMN شکل IF NOT EXISTS دارند، ولی ADD CONSTRAINT
+# ندارد: اجرای دوباره‌اش با «constraint already exists» می‌شکند و کل
+# تراکنش برمی‌گردد — یعنی مهاجرت نیمه‌کاره می‌ماند.
+#
+# دو شکل امن پذیرفته است:
+#   ۱) DROP CONSTRAINT IF EXISTS <همان نام> پیش از افزودن
+#   ۲) بلوک DO با بررسی pg_constraint
+#
+# این دقیقا یک بار در مهاجرت ۰۳۸ بود و موقع اجرای دوباره پیدا شد.
+ADD_CONSTRAINT_RE = re.compile(r"ADD\s+CONSTRAINT\s+(\w+)", re.I)
+
+
+def check_migration_rerun():
+    root = os.path.join(ROOT, "db", "migrations")
+    if not os.path.isdir(root):
+        return
+    for name in sorted(os.listdir(root)):
+        if not name.endswith(".sql"):
+            continue
+        path = os.path.join(root, name)
+        src = read(path)
+        for m in ADD_CONSTRAINT_RE.finditer(src):
+            constraint = m.group(1)
+            before = src[: m.start()]
+            dropped = ("DROP CONSTRAINT IF EXISTS %s" % constraint) in before
+            guarded = "pg_constraint" in src[max(0, m.start() - 600) : m.start()]
+            if not dropped and not guarded:
+                problems.append(
+                    "%s:%d — قید «%s» بدون DROP IF EXISTS اضافه می‌شود. "
+                    "اجرای دوباره مهاجرت می‌شکند."
+                    % (rel(path), line_of(src, m.start()), constraint)
+                )
+
+
 def main():
     check_non_null_assertion()
     check_empty_catch()
@@ -820,6 +887,7 @@ def main():
     check_union_props()
     check_union_event_value()
     check_control_bytes()
+    check_migration_rerun()
     check_route_auth()
 
     if not problems:

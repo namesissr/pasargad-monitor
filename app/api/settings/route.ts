@@ -50,6 +50,8 @@ const ALLOWED = [
   'invoice_footer',
   'store_public_enabled',
   'store_intro',
+  'otp_login_enabled',
+  'sms_dev_mode',
 ];
 
 /**

@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
 import { SESSION_COOKIE } from '@/lib/session';
 import { ok } from '@/lib/http';
 
@@ -11,32 +10,72 @@ export const dynamic = 'force-dynamic';
  *
  * دو نوع فراخوان دارد و پاسخ باید با هرکدام بخواند:
  *
- *  • **fetch از پنل مدیریت** — جیسون می‌خواهد و خودش بعدش کاربر را به
- *    صفحه ورود می‌فرستد.
+ *  • **fetch** — جیسون می‌خواهد و خودش بعدش کاربر را می‌فرستد.
  *
- *  • **فرم ساده در پرتال مشتری** — مرورگر خودش پیمایش می‌کند. اگر
- *    جیسون بگیرد، کاربر روی متن خام می‌ماند و هیچ‌وقت به صفحه ورود
- *    برنمی‌گردد. این دقیقا یک بار رخ داد.
+ *  • **پیمایش مرورگر** (فرم ساده، یا لینک وقتی جاوااسکریپت خاموش است)
+ *    — اگر جیسون بگیرد، کاربر روی متن خام می‌ماند و هیچ‌وقت به صفحه
+ *    ورود برنمی‌گردد.
  *
  * تفکیک با سرآیند Accept انجام می‌شود: پیمایش مرورگر همیشه text/html
  * می‌خواهد، ولی fetch این پروژه آن را نمی‌فرستد.
  *
- * ریدایرکت ۳۰۳ است نه ۳۰۲: متد POST را به GET تبدیل می‌کند. با ۳۰۲
- * بعضی مرورگرها POST را به صفحه ورود می‌برند و آنجا خطا می‌دهد.
+ * ── چرا Location نسبی است، نه NextResponse.redirect ────────
+ *
+ * NextResponse.redirect آدرس مطلق می‌خواهد، و تنها منبعی که اینجا برای
+ * ساختنش هست req.url است. پشت انجین‌ایکس، اتصال بین انجین‌ایکس و نکست
+ * ساده (http) است، پس آن آدرس با طرح http ساخته می‌شود در حالی که سایت
+ * https است — و اگر روزی سرآیند Host هم درست منتقل نشود، آدرس به نام
+ * داخلی کانتینر می‌افتد که از مرورگر اصلا در دسترس نیست.
+ *
+ * مسیر نسبی هیچ‌کدام از این‌ها را لازم ندارد: مرورگر خودش آن را نسبت به
+ * آدرس جاری حل می‌کند. استاندارد هم صریح اجازه‌اش را می‌دهد.
+ *
+ * همین دسته خطا قبلا در مسیر بازگشت درگاه پیش آمد و آنجا با خواندن
+ * panel_url از تنظیمات حل شد — آنجا چاره‌ای نبود چون درخواست از سمت
+ * درگاه می‌آید، ولی اینجا مسیر نسبی ساده‌تر و بی‌خطاتر است.
+ *
+ * ── چرا کوکی روی خود پاسخ پاک می‌شود ───────────────────────
+ *
+ * cookies().set از next/headers روی پاسخی که نکست خودش می‌سازد اثر
+ * می‌گذارد. وقتی خودمان یک Response برمی‌گردانیم، مطمئن‌ترین راه این
+ * است که کوکی را روی همان شیء پاسخ بگذاریم.
+ *
+ * ۳۰۳ عمدی است نه ۳۰۲: متد POST را به GET تبدیل می‌کند. با ۳۰۲ بعضی
+ * مرورگرها POST را به صفحه ورود می‌برند و آنجا خطا می‌دهد.
  */
-function clearSession() {
-  cookies().set(SESSION_COOKIE, '', { path: '/', maxAge: 0 });
+
+/**
+ * پاسخ با کوکی نشست پاک‌شده.
+ *
+ * جنریک است تا نوع دقیق پاسخ ورودی حفظ شود؛ با NextResponse ساده،
+ * پاسخ جیسون و پاسخ ریدایرکت باید به یک نوع تبدیل می‌شدند.
+ */
+function clearOn<T extends NextResponse>(res: T): T {
+  res.cookies.set(SESSION_COOKIE, '', {
+    path: '/',
+    maxAge: 0,
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
+  return res;
+}
+
+/** ریدایرکت با مسیر نسبی */
+function toLogin(): NextResponse {
+  return clearOn(
+    new NextResponse(null, {
+      status: 303,
+      headers: { Location: '/login' },
+    }),
+  );
 }
 
 export async function POST(req: Request) {
-  clearSession();
-
   const accept = req.headers.get('accept') || '';
-  if (accept.includes('text/html')) {
-    return NextResponse.redirect(new URL('/login', req.url), 303);
-  }
+  if (accept.includes('text/html')) return toLogin();
 
-  return ok({ ok: true });
+  return clearOn(ok({ ok: true }));
 }
 
 /**
@@ -45,7 +84,6 @@ export async function POST(req: Request) {
  * لینک خروج در بوکمارک، و مرورگری که جاوااسکریپتش خاموش است، هر دو GET
  * می‌فرستند. پاسخ‌ندادن به آن یعنی کاربر گیر می‌کند بی‌آنکه بفهمد چرا.
  */
-export async function GET(req: Request) {
-  clearSession();
-  return NextResponse.redirect(new URL('/login', req.url), 303);
+export async function GET() {
+  return toLogin();
 }

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useLoad, LoadState } from '@/components/useLoad';
 import { Field, Notice } from '@/components/ui';
 import { billingLabel, Spec, type StoreProduct } from '@/components/StoreBits';
+import { OtpForm } from '@/components/OtpForm';
 import { api, ApiError } from '@/lib/api';
 import { formatToman } from '@/lib/format';
 
@@ -18,7 +19,7 @@ interface SessionData {
   username?: string;
 }
 
-type Mode = 'register' | 'login';
+type Mode = 'register' | 'login' | 'otp';
 
 /**
  * صفحه محصول و سفارش.
@@ -33,6 +34,12 @@ type Mode = 'register' | 'login';
  * اگر وارد شده باشد، بخش حساب اصلا نشان داده نمی‌شود. اگر نه، دو گزینه
  * دارد: «حساب دارم» و «حساب ندارم». پیش‌فرض روی ثبت‌نام است، چون کسی که
  * از فروشگاه عمومی می‌آید اغلب مشتری تازه است.
+ *
+ * ── ورود با کد پیامکی ──────────────────────────────────────
+ *
+ * حالت سوم است ولی به مسیر سفارش دست نمی‌زند: فرم کد، خودش نشست را باز
+ * می‌کند و بعد سفارش با mode=session ثبت می‌شود. یعنی مسیر
+ * /api/store/checkout هیچ حالت تازه‌ای لازم ندارد.
  */
 export default function StoreProductPage({ params }: { params: { id: string } }) {
   const { data, loading, error, reload } = useLoad<ProductData>(
@@ -68,6 +75,26 @@ export default function StoreProductPage({ params }: { params: { id: string } })
     // حالت درخواست از وضعیت واقعی نشست می‌آید، نه از انتخاب کاربر:
     // کسی که وارد شده نباید دوباره ثبت‌نام کند.
     const signedIn = Boolean(session.data?.signedIn);
+
+    // مرحله حساب بیرون از این فرم است (فرم تودرتو HTML نامعتبر است)،
+    // پس اعتبارسنجی خودکار مرورگر شاملش نمی‌شود و باید صریح باشد.
+    // سرور هم همه اینها را دوباره بررسی می‌کند؛ این فقط برای این است
+    // که کاربر پیش از رفت‌وبرگشت، خطا را ببیند.
+    if (!signedIn && mode === 'otp') {
+      setMsg('اول با کد پیامکی وارد شوید.');
+      setBusy(false);
+      return;
+    }
+    if (!signedIn && mode === 'login' && (!form.username || !form.login_password)) {
+      setMsg('شماره موبایل و گذرواژه را وارد کنید.');
+      setBusy(false);
+      return;
+    }
+    if (!signedIn && mode === 'register' && (!form.name || !form.phone || !form.password)) {
+      setMsg('نام، شماره موبایل و گذرواژه لازم است.');
+      setBusy(false);
+      return;
+    }
     const payload: Record<string, unknown> = {
       mode: signedIn ? 'session' : mode,
       product_id: Number(params.id),
@@ -79,6 +106,8 @@ export default function StoreProductPage({ params }: { params: { id: string } })
       payload.username = form.username;
       payload.password = form.login_password;
     }
+    // حالت otp اینجا چیزی اضافه نمی‌کند: نشست پیش از این مرحله با فرم
+    // کد باز شده و mode بالا خودش session شده است.
     if (!signedIn && mode === 'register') {
       payload.name = form.name;
       payload.phone = form.phone;
@@ -170,8 +199,12 @@ export default function StoreProductPage({ params }: { params: { id: string } })
           {!product.in_stock && <Notice type="warn">موجودی این محصول تمام شده است.</Notice>}
         </div>
 
-        {/* ── سفارش ──────────────────────────────────────── */}
-        <form onSubmit={submit} className="lg:col-span-3 space-y-4">
+        {/* ── سفارش ────────────────────────────────────────
+            مرحله حساب **بیرون** از فرم سفارش است: فرم کد پیامکی خودش
+            یک <form> است و فرم تودرتو HTML نامعتبر است — مرورگر
+            داخلی را دور می‌اندازد و دکمه «ارسال کد» سفارش را ثبت
+            می‌کند. */}
+        <div className="lg:col-span-3 space-y-4">
           {msg && <Notice type="error">{msg}</Notice>}
 
           {/* بخش حساب فقط وقتی نشان داده می‌شود که کاربر وارد نشده */}
@@ -189,6 +222,7 @@ export default function StoreProductPage({ params }: { params: { id: string } })
                   [
                     ['register', 'حساب ندارم'],
                     ['login', 'حساب دارم'],
+                    ['otp', 'ورود با کد پیامکی'],
                   ] as const
                 ).map(([key, label]) => (
                   <button
@@ -206,7 +240,19 @@ export default function StoreProductPage({ params }: { params: { id: string } })
                 ))}
               </div>
 
-              {mode === 'login' ? (
+              {mode === 'otp' ? (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-muted leading-relaxed">
+                    شماره موبایلتان را بزنید تا کد ورود برایتان پیامک شود. پس از تأیید، سفارش به
+                    همین حساب ثبت می‌شود.
+                  </p>
+                  {/* پس از تأیید، کوکی نشست گذاشته شده. فقط وضعیت نشست
+                      را تازه می‌کنیم تا فرم بداند دیگر مرحله حساب لازم
+                      نیست. صفحه بارگذاری دوباره نمی‌شود، وگرنه چیزی که
+                      در فرم سفارش نوشته شده از دست می‌رود. */}
+                  <OtpForm initialPhone={form.username} onDone={() => session.reload()} />
+                </div>
+              ) : mode === 'login' ? (
                 <div className="grid sm:grid-cols-2 gap-4">
                   <Field label="شماره موبایل">
                     <input
@@ -215,7 +261,6 @@ export default function StoreProductPage({ params }: { params: { id: string } })
                       onChange={set('username')}
                       placeholder="09121234567"
                       autoComplete="username"
-                      required
                     />
                   </Field>
                   <Field label="گذرواژه">
@@ -225,7 +270,6 @@ export default function StoreProductPage({ params }: { params: { id: string } })
                       value={form.login_password}
                       onChange={set('login_password')}
                       autoComplete="current-password"
-                      required
                     />
                   </Field>
                 </div>
@@ -238,7 +282,6 @@ export default function StoreProductPage({ params }: { params: { id: string } })
                         value={form.name}
                         onChange={set('name')}
                         autoComplete="name"
-                        required
                       />
                     </Field>
                     <Field label="شماره موبایل" hint="نام کاربری شما همین شماره خواهد بود">
@@ -248,7 +291,6 @@ export default function StoreProductPage({ params }: { params: { id: string } })
                         onChange={set('phone')}
                         placeholder="09121234567"
                         autoComplete="tel"
-                        required
                       />
                     </Field>
                     <Field label="ایمیل" hint="فاکتور و مشخصات سرور به این نشانی می‌رود">
@@ -267,7 +309,6 @@ export default function StoreProductPage({ params }: { params: { id: string } })
                         value={form.password}
                         onChange={set('password')}
                         autoComplete="new-password"
-                        required
                         minLength={8}
                       />
                     </Field>
@@ -309,6 +350,7 @@ export default function StoreProductPage({ params }: { params: { id: string } })
             </Notice>
           )}
 
+          <form onSubmit={submit} className="space-y-4">
           {/* ── جزئیات سفارش ───────────────────────────── */}
           <div className="card p-5 space-y-4">
             <h2 className="text-sm font-bold">جزئیات سفارش</h2>
@@ -355,7 +397,8 @@ export default function StoreProductPage({ params }: { params: { id: string } })
             سرور اختصاصی خودکار تحویل نمی‌شود. پس از پرداخت، سفارش شما در صف آماده‌سازی قرار
             می‌گیرد و پس از تحویل، مشخصات و رمز ورود سرور برایتان ایمیل می‌شود.
           </p>
-        </form>
+          </form>
+        </div>
       </div>
     </div>
   );
