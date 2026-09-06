@@ -696,6 +696,75 @@ def check_form_actions():
                 )
 
 
+# ── ۳۳) مقدار رویداد در فیلدی که تایپ اتحادی دارد ───────────────────────
+# <select> و <input> همیشه string می‌دهند. اگر همان مقدار مستقیم روی
+# فیلدی از **وضعیت قبلی** بنشیند که تایپش اتحاد رشته‌های ثابت است —
+# 'all' | 'traffic' — تایپ‌اسکریپت آن انتساب را رد می‌کند:
+#
+#   Type 'string' is not assignable to type '"traffic" | "all" | "product"'
+#
+# این خطا فقط در «Checking validity of types» بیلد نکست معلوم می‌شود،
+# یعنی بعد از یک دقیقه‌ونیم کامپایل. در دامنه کد تخفیف دقیقا همین رخ داد.
+#
+# راه درست: مقدار را یک بار با as به همان نوع تبدیل کنید و بعد استفاده.
+#
+# شرط «شیء با ...f شروع شود» عمدی و سخت‌گیرانه است. نسخه اول این شرط را
+# نداشت و روی patch({ action: 'x', status: e.target.value }) هشدار کاذب
+# می‌داد — آنجا پارامتر Record<string, unknown> است و رشته آزاد مشکلی
+# ندارد. بررسی‌ای که کاذب می‌دهد بدتر از نبودنش است.
+# اتحاد یا مستقیم نوشته می‌شود یا با نام مستعار. نسخه اول فقط حالت اول
+# را می‌گرفت و به محض اینکه همان اتحاد به «type Scope = ...» منتقل شد،
+# بررسی کور شد — یعنی دقیقا وقتی که کد تمیزتر شد.
+UNION_ALIAS_RE = re.compile(
+    r"^\s*(?:export\s+)?type\s+(\w+)\s*=\s*'[^']+'(?:\s*\|\s*'[^']+')+\s*;", re.M
+)
+INLINE_UNION_FIELD_RE = re.compile(
+    r"^\s*(\w+)\??:\s*'[^']+'(?:\s*\|\s*'[^']+')+\s*;", re.M
+)
+ALIASED_FIELD_RE = re.compile(r"^\s*(\w+)\??:\s*(\w+)\s*;", re.M)
+EVENT_VALUE_RE = re.compile(r"(\w+)\s*:\s*e\.target\.value\s*[,}]")
+
+
+def opens_with_spread(src, at):
+    """آیا شیءِ دربرگیرنده این نقطه با ...چیزی شروع می‌شود؟"""
+    depth = 0
+    i = at
+    while i > 0:
+        i -= 1
+        c = src[i]
+        if c == "}":
+            depth += 1
+        elif c == "{":
+            if depth == 0:
+                return re.match(r"\s*\.\.\.", src[i + 1 : i + 40]) is not None
+            depth -= 1
+    return False
+
+
+def check_union_event_value():
+    for path in walk({".tsx"}):
+        src = read(path)
+        # فیلدهایی که در همین فایل تایپ اتحادی دارند — چه مستقیم، چه
+        # با نام مستعاری که در همین فایل تعریف شده
+        aliases = {m.group(1) for m in UNION_ALIAS_RE.finditer(src)}
+        unions = {m.group(1) for m in INLINE_UNION_FIELD_RE.finditer(src)}
+        unions |= {
+            m.group(1) for m in ALIASED_FIELD_RE.finditer(src) if m.group(2) in aliases
+        }
+        if not unions:
+            continue
+        for m in EVENT_VALUE_RE.finditer(src):
+            if m.group(1) not in unions:
+                continue
+            if not opens_with_spread(src, m.start()):
+                continue
+            problems.append(
+                "%s:%d — «%s» تایپ اتحادی دارد ولی e.target.value رشته آزاد است. "
+                "اول با as به همان نوع تبدیلش کنید."
+                % (rel(path), line_of(src, m.start()), m.group(1))
+            )
+
+
 def main():
     check_non_null_assertion()
     check_empty_catch()
@@ -711,6 +780,7 @@ def main():
     check_form_actions()
     check_undefined_names()
     check_union_props()
+    check_union_event_value()
     check_route_auth()
 
     if not problems:

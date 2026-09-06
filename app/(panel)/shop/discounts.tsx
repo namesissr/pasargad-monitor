@@ -16,6 +16,15 @@ import { faNum, formatJalaliDay, formatToman } from '@/lib/format';
  * بلند بود و بلندتر شدنش خواندنش را سخت می‌کرد.
  */
 
+/**
+ * دامنه کد.
+ *
+ * مقدار <select> همیشه string است، پس هرجا از رویداد خوانده می‌شود باید
+ * صریح به همین نوع تبدیل شود — وگرنه تایپ فرم به string باز می‌شود و
+ * بیلد می‌شکند، نه اجرا.
+ */
+export type Scope = 'all' | 'traffic' | 'product';
+
 export interface Discount {
   id: number;
   code: string;
@@ -23,7 +32,7 @@ export interface Discount {
   amount_toman: number;
   customer_id: number | null;
   customer_name: string | null;
-  scope: 'all' | 'traffic' | 'product';
+  scope: Scope;
   product_id: number | null;
   package_id: number | null;
   product_name: string | null;
@@ -298,16 +307,17 @@ function DiscountForm({
             <select
               className="input"
               value={form.scope}
-              onChange={(e) =>
+              onChange={(e) => {
+                const scope = e.target.value as Scope;
                 // عوض‌کردن دامنه، هدف مشخصِ ناسازگار را پاک می‌کند —
                 // وگرنه کدی می‌ماند که هیچ خریدی را پوشش نمی‌دهد
                 setForm((f) => ({
                   ...f,
-                  scope: e.target.value,
-                  product_id: e.target.value === 'traffic' ? '' : f.product_id,
-                  package_id: e.target.value === 'product' ? '' : f.package_id,
-                }))
-              }
+                  scope,
+                  product_id: scope === 'traffic' ? '' : f.product_id,
+                  package_id: scope === 'product' ? '' : f.package_id,
+                }));
+              }}
             >
               <option value="all">همه خریدها</option>
               <option value="traffic">فقط بسته ترافیک</option>
