@@ -141,6 +141,9 @@ export async function POST(req: Request) {
       productId: body.product_id,
       discountCode: body.discount_code,
       note: body.note,
+      // فقط شناسه و تعداد از مشتری می‌آید؛ قیمت هر دو از دیتابیس
+      addonPackageId: body.addon_package_id,
+      addonIps: body.addon_ips,
     });
 
     if (!result.ok) {

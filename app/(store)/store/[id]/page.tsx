@@ -4,14 +4,20 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { useLoad, LoadState } from '@/components/useLoad';
 import { Field, Notice } from '@/components/ui';
-import { billingLabel, Spec, type StoreProduct } from '@/components/StoreBits';
+import {
+  billingLabel,
+  Spec,
+  type StoreProduct,
+  type TrafficPackage,
+} from '@/components/StoreBits';
 import { OtpForm } from '@/components/OtpForm';
 import { api, ApiError } from '@/lib/api';
-import { formatToman } from '@/lib/format';
+import { faInt, faNum, formatToman } from '@/lib/format';
 
 interface ProductData {
   enabled: boolean;
   products: StoreProduct[];
+  packages: TrafficPackage[];
 }
 
 interface SessionData {
@@ -61,6 +67,10 @@ export default function StoreProductPage({ params }: { params: { id: string } })
     note: '',
     discount_code: '',
   });
+  // افزودنی‌ها. خالی و صفر یعنی انتخاب نشده.
+  const [addonPackageId, setAddonPackageId] = useState('');
+  const [addonIps, setAddonIps] = useState(0);
+
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -100,6 +110,9 @@ export default function StoreProductPage({ params }: { params: { id: string } })
       product_id: Number(params.id),
       note: form.note,
       discount_code: form.discount_code,
+      // فقط شناسه و تعداد می‌رود؛ قیمت را سرور از دیتابیس می‌خواند
+      addon_package_id: addonPackageId ? Number(addonPackageId) : null,
+      addon_ips: addonIps || null,
     };
 
     if (!signedIn && mode === 'login') {
@@ -152,8 +165,19 @@ export default function StoreProductPage({ params }: { params: { id: string } })
     );
   }
 
-  const total = Number(product.price_toman) + Number(product.setup_toman);
   const signedIn = Boolean(session.data?.signedIn);
+
+  // جمع نمایشی. مبلغ واقعی فاکتور را سرور از دیتابیس حساب می‌کند؛ این
+  // فقط برای اینکه مشتری پیش از زدن دکمه بداند چقدر می‌شود.
+  const pack = data.packages?.find((x) => String(x.id) === addonPackageId) ?? null;
+  const packTotal = pack ? Number(pack.price_toman) : 0;
+  const ipUnit = Number(product.extra_ip_price_toman) || 0;
+  const ipTotal = ipUnit * addonIps;
+  const base = Number(product.price_toman) + Number(product.setup_toman);
+  const total = base + packTotal + ipTotal;
+
+  const maxIps = Number(product.max_extra_ips) || 0;
+  const offersIps = maxIps > 0 && ipUnit > 0;
 
   return (
     <div className="space-y-5">
@@ -190,6 +214,24 @@ export default function StoreProductPage({ params }: { params: { id: string } })
                 <span>{formatToman(product.setup_toman)}</span>
               </div>
             )}
+
+            {/* افزودنی‌ها همان‌جا در خلاصه دیده می‌شوند، وگرنه مشتری
+                عدد نهایی را می‌بیند و نمی‌داند از کجا آمده */}
+            {pack && (
+              <div className="flex justify-between text-xs">
+                <span className="text-muted">{pack.name}</span>
+                <span>{formatToman(packTotal)}</span>
+              </div>
+            )}
+            {ipTotal > 0 && (
+              <div className="flex justify-between text-xs">
+                <span className="text-muted">
+                  {faNum(addonIps)} آی‌پی اضافه
+                </span>
+                <span>{formatToman(ipTotal)}</span>
+              </div>
+            )}
+
             <div className="flex justify-between text-sm font-bold pt-2 border-t border-line mt-2">
               <span>پرداخت اول</span>
               <span>{formatToman(total)}</span>
@@ -351,6 +393,109 @@ export default function StoreProductPage({ params }: { params: { id: string } })
           )}
 
           <form onSubmit={submit} className="space-y-4">
+          {/* ── ترافیک اضافه ───────────────────────────── */}
+          {data.packages?.length > 0 && (
+            <div className="card p-5 space-y-3">
+              <div>
+                <h2 className="text-sm font-bold">ترافیک اضافه</h2>
+                <p className="text-[11px] text-muted mt-0.5 leading-relaxed">
+                  اختیاری. ترافیک خریداری‌شده انقضا ندارد و هنگام تحویل روی همین سرور اعمال
+                  می‌شود.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                {/* گزینه «نمی‌خواهم» صریح است، نه غیبتِ انتخاب: بدون آن
+                    مشتری‌ای که اشتباهی چیزی زده راهی برای برگشت ندارد */}
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-line cursor-pointer hover:border-cyan/40 transition-colors">
+                  <input
+                    type="radio"
+                    name="addon-traffic"
+                    className="accent-cyan"
+                    checked={addonPackageId === ''}
+                    onChange={() => setAddonPackageId('')}
+                  />
+                  <span className="text-xs">ترافیک اضافه نمی‌خواهم</span>
+                </label>
+
+                {data.packages.map((x) => (
+                  <label
+                    key={x.id}
+                    className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                      addonPackageId === String(x.id)
+                        ? 'border-cyan/40 bg-cyan/5'
+                        : 'border-line hover:border-cyan/40'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="addon-traffic"
+                      className="accent-cyan"
+                      checked={addonPackageId === String(x.id)}
+                      onChange={() => setAddonPackageId(String(x.id))}
+                    />
+                    <span className="text-xs flex-1 min-w-0">
+                      {x.name}
+                      <span className="block text-[11px] text-muted">
+                        {faInt(Number(x.gb))} گیگابایت
+                        {x.description ? ` · ${x.description}` : ''}
+                      </span>
+                    </span>
+                    <span className="text-xs font-medium shrink-0">
+                      {formatToman(x.price_toman)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── آی‌پی اضافه ─────────────────────────────── */}
+          {offersIps && (
+            <div className="card p-5 space-y-3">
+              <div>
+                <h2 className="text-sm font-bold">آی‌پی اضافه</h2>
+                <p className="text-[11px] text-muted mt-0.5 leading-relaxed">
+                  اختیاری. هر آی‌پی {formatToman(ipUnit)} در هر دوره. حداکثر {faNum(maxIps)} عدد.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="btn-ghost w-9 h-9 p-0 text-base"
+                    onClick={() => setAddonIps((n) => Math.max(0, n - 1))}
+                    aria-label="کم کردن"
+                  >
+                    −
+                  </button>
+                  <span className="w-12 text-center text-sm font-bold tabular-nums">
+                    {faNum(addonIps)}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-ghost w-9 h-9 p-0 text-base"
+                    onClick={() => setAddonIps((n) => Math.min(maxIps, n + 1))}
+                    aria-label="اضافه کردن"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {ipTotal > 0 && (
+                  <span className="text-xs text-muted">
+                    مجموع {formatToman(ipTotal)}
+                  </span>
+                )}
+              </div>
+
+              <p className="text-[11px] text-muted/70 leading-relaxed">
+                آی‌پی‌های اضافه همراه سرور تحویل داده می‌شوند.
+              </p>
+            </div>
+          )}
+
           {/* ── جزئیات سفارش ───────────────────────────── */}
           <div className="card p-5 space-y-4">
             <h2 className="text-sm font-bold">جزئیات سفارش</h2>

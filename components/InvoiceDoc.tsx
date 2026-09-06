@@ -80,6 +80,17 @@ export interface InvoiceTopup {
   note: string | null;
 }
 
+export interface InvoiceAddon {
+  id: number;
+  kind: 'traffic' | 'ip';
+  label: string;
+  qty: number;
+  unit_toman: number;
+  total_toman: number;
+  gb: number | null;
+  applied_at: string | null;
+}
+
 export interface InvoiceDetailData {
   invoice: InvoiceRow;
   customer: InvoiceParty | null;
@@ -87,6 +98,7 @@ export interface InvoiceDetailData {
   order: InvoiceOrder | null;
   discount: { id: number; code: string; title: string | null } | null;
   topups: InvoiceTopup[];
+  addons: InvoiceAddon[];
   seller: { name: string; id: string; phone: string; address: string; footer: string };
 }
 
@@ -125,6 +137,13 @@ export function InvoiceDoc({ data }: { data: InvoiceDetailData }) {
     inv.subtotal_toman === null || inv.subtotal_toman === undefined
       ? Number(inv.amount_toman) + discount
       : Number(inv.subtotal_toman);
+
+  // افزودنی‌ها ردیف جدا می‌گیرند، پس قلم اصلی باید بدون آن‌ها نشان داده
+  // شود — وگرنه جمع ستون با مبلغ نهایی نمی‌خواند و فاکتور بی‌اعتبار
+  // به‌نظر می‌رسد.
+  const addons = data.addons ?? [];
+  const addonsTotal = addons.reduce((a, x) => a + Number(x.total_toman), 0);
+  const baseTotal = subtotal - addonsTotal;
 
   return (
     <div className="print-doc card p-5 sm:p-7 space-y-6">
@@ -218,8 +237,24 @@ export function InvoiceDoc({ data }: { data: InvoiceDetailData }) {
                   </div>
                 )}
               </td>
-              <td className="text-xs text-end sm:whitespace-nowrap">{formatToman(subtotal)}</td>
+              <td className="text-xs text-end sm:whitespace-nowrap">{formatToman(baseTotal)}</td>
             </tr>
+
+            {addons.map((x) => (
+              <tr key={x.id}>
+                <td className="text-xs">
+                  {x.label}
+                  <span className="block text-[11px] text-muted mt-0.5">
+                    {x.kind === 'traffic'
+                      ? `${faInt(Number(x.gb))} گیگابایت ترافیک`
+                      : `${faNum(x.qty)} عدد × ${formatToman(x.unit_toman)}`}
+                  </span>
+                </td>
+                <td className="text-xs text-end sm:whitespace-nowrap">
+                  {formatToman(x.total_toman)}
+                </td>
+              </tr>
+            ))}
 
             {discount > 0 && (
               <tr>

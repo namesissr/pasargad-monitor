@@ -94,6 +94,60 @@ BALANCE_CASES = [
 ]
 
 
+MAX_IP_CAP = 64
+
+
+def addon_total(product, choice):
+    """
+    بازسازی محاسبه افزودنی‌ها.
+
+    برمی‌گرداند (جمع افزودنی، علت رد). قیمت‌ها از product می‌آیند —
+    یعنی از دیتابیس — نه از choice که همان چیزی است که مشتری فرستاده.
+    """
+    total = 0
+
+    pack = choice.get("package")
+    if pack is not None:
+        if not pack.get("active", True):
+            return (0, "بسته در دسترس نیست")
+        total += round(pack["price"])
+
+    ips = choice.get("ips") or 0
+    if ips > 0:
+        if product["max_ips"] <= 0 or product["ip_price"] <= 0:
+            return (0, "این محصول آی‌پی اضافه ندارد")
+        if ips > product["max_ips"]:
+            return (0, "بیش از سقف")
+        total += product["ip_price"] * ips
+
+    return (total, None)
+
+
+PRODUCT = {"price": 5_000_000, "setup": 500_000, "ip_price": 200_000, "max_ips": 4}
+NO_IP_PRODUCT = {"price": 3_000_000, "setup": 0, "ip_price": 0, "max_ips": 0}
+PACK = {"price": 1_200_000, "gb": 5000, "active": True}
+
+ADDON_CASES = [
+    (PRODUCT, {}, 0, "بدون افزودنی"),
+    (PRODUCT, {"package": PACK}, 1_200_000, "فقط بسته ترافیک"),
+    (PRODUCT, {"ips": 2}, 400_000, "دو آی‌پی"),
+    (PRODUCT, {"package": PACK, "ips": 3}, 1_800_000, "بسته و سه آی‌پی"),
+    (PRODUCT, {"ips": 4}, 800_000, "دقیقا سقف"),
+    (PRODUCT, {"ips": 5}, 0, "بیش از سقف — رد"),
+    (NO_IP_PRODUCT, {"ips": 1}, 0, "محصولی که آی‌پی اضافه ندارد — رد"),
+    (PRODUCT, {"package": {**PACK, "active": False}}, 0, "بسته غیرفعال — رد"),
+    (PRODUCT, {"ips": 0}, 0, "صفر آی‌پی یعنی هیچ"),
+]
+
+# جمع نهایی: افزودنی‌ها پیش از تخفیف اضافه می‌شوند
+ORDER_TOTAL_CASES = [
+    (PRODUCT, 0, 0, 5_500_000, "بدون افزودنی و تخفیف"),
+    (PRODUCT, 1_200_000, 0, 6_700_000, "با بسته ترافیک"),
+    (PRODUCT, 1_200_000, 700_000, 6_000_000, "تخفیف روی کل خرید، نه فقط سرور"),
+    (PRODUCT, 400_000, 10_000_000, 0, "تخفیف بزرگ‌تر از جمع — صفر، نه منفی"),
+]
+
+
 def read(*parts):
     return io.open(os.path.join(ROOT, *parts), encoding="utf-8").read()
 
@@ -127,6 +181,18 @@ def main():
 
     print("")
 
+    for product, choice, expected, name in ADDON_CASES:
+        total, _reason = addon_total(product, choice)
+        check("افزودنی: %s" % name, total, expected)
+
+    print("")
+
+    for product, addons, discount, expected, name in ORDER_TOTAL_CASES:
+        subtotal = product["price"] + product["setup"] + addons
+        check("جمع نهایی: %s" % name, max(0, subtotal - discount), expected)
+
+    print("")
+
     buy = read("app", "api", "portal", "shop", "buy", "route.ts")
     shop = read("app", "api", "portal", "shop", "route.ts")
     inv = read("lib", "invoices.ts")
@@ -134,6 +200,7 @@ def main():
     products = read("app", "api", "products", "route.ts")
     orders = read("app", "api", "orders", "route.ts")
     order_lib = read("lib", "shop-order.ts")
+    mig44 = read("db", "migrations", "044_order_addons.sql")
     store = read("app", "api", "store", "checkout", "route.ts")
     mig = read("db", "migrations", "036_shop.sql")
 
@@ -149,6 +216,25 @@ def main():
         (buy, "buy", "createProductOrder(", "فروشگاه پرتال از تابع مشترک استفاده می‌کند"),
         (store, "store/checkout", "createProductOrder(",
          "فروشگاه عمومی هم از همان تابع مشترک استفاده می‌کند"),
+
+        # ── افزودنی‌ها: قیمت از دیتابیس، سقف رعایت می‌شود ────
+        (order_lib, "shop-order", "FROM traffic_packages WHERE id = $1 AND is_active",
+         "قیمت بسته افزودنی از دیتابیس می‌آید"),
+        (order_lib, "shop-order", "Number(product.extra_ip_price_toman)",
+         "قیمت آی‌پی اضافه از خود محصول می‌آید"),
+        (order_lib, "shop-order", "if (ips > max)", "سقف آی‌پی اضافه رعایت می‌شود"),
+        (order_lib, "shop-order", "INSERT INTO order_addons",
+         "افزودنی‌ها ردیف جدا می‌گیرند"),
+        (order_lib, "shop-order", "+ addonsTotal",
+         "افزودنی‌ها پیش از تخفیف به جمع اضافه می‌شوند"),
+        (mig44, "مهاجرت ۰۴۴", "products_max_extra_ips_sane",
+         "سقف آی‌پی در دیتابیس هم محدود است"),
+        (mig44, "مهاجرت ۰۴۴", "applied_at",
+         "اعمال‌شدن ترافیک روی ردیف ثبت می‌شود"),
+        (orders, "orders", "kind = 'traffic' AND applied_at IS NULL",
+         "ترافیک افزودنی فقط یک بار اعمال می‌شود"),
+        (orders, "orders", "INSERT INTO traffic_topups",
+         "ترافیک افزودنی هنگام تحویل روی سرور می‌نشیند"),
 
         # ── قاعده ۲: مالکیت سرور ─────────────────────────────
         (buy, "buy", "AND customer_id = $2 AND is_active",
@@ -212,7 +298,18 @@ def main():
         ("shop-order", order_lib, "opts"),
         ("store/checkout", store, "body"),
     ):
-        for field in ("price_toman", "amount_toman", "gb", "setup_toman", "traffic_gb"):
+        for field in (
+            "price_toman",
+            "amount_toman",
+            "gb",
+            "setup_toman",
+            "traffic_gb",
+            # افزودنی‌ها هم همین قاعده را دارند: فقط شناسه و تعداد از
+            # مشتری می‌آید
+            "unit_toman",
+            "total_toman",
+            "extra_ip_price_toman",
+        ):
             if re.search(r"\b%s\.%s\b" % (prefix, field), src):
                 failures += 1
                 print("شکست  کد واقعی (%s): «%s» از ورودی خوانده می‌شود" % (label, field))

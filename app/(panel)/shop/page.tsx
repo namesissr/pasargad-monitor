@@ -32,6 +32,8 @@ interface Product {
   setup_toman: number;
   billing_months: number;
   stock: number | null;
+  extra_ip_price_toman: number;
+  max_extra_ips: number;
   is_active: boolean;
   sort_order: number;
   order_count: number;
@@ -284,6 +286,25 @@ function PackageForm({
           />
         </Field>
 
+        {/* آی‌پی اضافه. سقف صفر یعنی این محصول اصلا آی‌پی اضافه
+            نمی‌فروشد و آن بخش در فروشگاه نشان داده نمی‌شود. */}
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="قیمت هر آی‌پی اضافه" hint="قیمت فروش، نه هزینه دیتاسنتر">
+            <input
+              className="input ltr"
+              value={form.extra_ip_price_toman}
+              onChange={set('extra_ip_price_toman')}
+            />
+          </Field>
+          <Field label="سقف آی‌پی اضافه" hint="صفر یعنی این محصول آی‌پی اضافه ندارد">
+            <input
+              className="input ltr"
+              value={form.max_extra_ips}
+              onChange={set('max_extra_ips')}
+            />
+          </Field>
+        </div>
+
         <div className="grid sm:grid-cols-2 gap-4">
           <Field label="وضعیت" hint="غیرفعال از فروشگاه مشتری ناپدید می‌شود">
             <select
@@ -473,6 +494,8 @@ function ProductForm({
     billing_months: String(product?.billing_months ?? 1),
     // رشته خالی یعنی نامحدود
     stock: product?.stock === null || product === null ? '' : String(product.stock),
+    extra_ip_price_toman: String(product?.extra_ip_price_toman ?? 0),
+    max_extra_ips: String(product?.max_extra_ips ?? 0),
     is_active: product?.is_active ?? true,
     sort_order: String(product?.sort_order ?? 0),
   });
@@ -492,6 +515,8 @@ function ProductForm({
         price_toman: Number(form.price_toman),
         setup_toman: Number(form.setup_toman) || 0,
         billing_months: Number(form.billing_months) || 1,
+        extra_ip_price_toman: Number(form.extra_ip_price_toman) || 0,
+        max_extra_ips: Number(form.max_extra_ips) || 0,
         sort_order: Number(form.sort_order) || 0,
       };
       if (product) await api.patch('/api/products', { id: product.id, ...payload });

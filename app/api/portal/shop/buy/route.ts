@@ -136,6 +136,8 @@ export async function POST(req: Request) {
         productId: body.product_id,
         discountCode: body.discount_code,
         note: body.note,
+        addonPackageId: body.addon_package_id,
+        addonIps: body.addon_ips,
       });
       if (!result.ok) return fail(result.error || 'ثبت سفارش ناموفق بود', result.status ?? 400);
 

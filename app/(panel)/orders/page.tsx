@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { useLoad, LoadState } from '@/components/useLoad';
 import { Field, Modal, Notice } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
-import { faNum, formatJalaliDay, formatToman, timeAgo } from '@/lib/format';
+import { faInt, faNum, formatJalaliDay, formatToman, timeAgo } from '@/lib/format';
 
 interface Order {
   id: number;
@@ -26,6 +26,9 @@ interface Order {
   invoice_status: string | null;
   server_id: number | null;
   server_name: string | null;
+  extra_ips: number;
+  extra_traffic_gb: number | null;
+  traffic_applied: boolean | null;
 }
 
 interface Data {
@@ -123,6 +126,25 @@ export default function OrdersPage() {
                     <h3 className="text-sm font-bold">
                       {o.product_name}
                       <span className={`badge ms-2 ${st.cls}`}>{st.label}</span>
+
+                      {/* افزودنی‌ها باید در فهرست دیده شوند، نه فقط در
+                          فرم تحویل: ادمینی که فهرست را مرور می‌کند باید
+                          بداند این سفارش کار بیشتری دارد */}
+                      {o.extra_ips > 0 && (
+                        <span className="badge ms-1 bg-cyan/15 text-cyan">
+                          {faNum(o.extra_ips)} آی‌پی اضافه
+                        </span>
+                      )}
+                      {Number(o.extra_traffic_gb) > 0 && (
+                        <span
+                          className={`badge ms-1 ${
+                            o.traffic_applied ? 'bg-ok/15 text-ok' : 'bg-amber/15 text-amber'
+                          }`}
+                        >
+                          {faInt(Number(o.extra_traffic_gb))} گیگ ترافیک
+                          {o.traffic_applied ? ' ✓' : ''}
+                        </span>
+                      )}
                     </h3>
                     <p className="text-[11px] text-muted mt-1">
                       <span className="ltr">{o.number}</span>
@@ -287,7 +309,40 @@ function ProvisionForm({
             <span className="text-muted">مبلغ پرداخت‌شده</span>
             <span>{formatToman(order.price_toman)}</span>
           </div>
+
+          {Number(order.extra_traffic_gb) > 0 && (
+            <div className="flex justify-between gap-3">
+              <span className="text-muted">ترافیک افزودنی</span>
+              <span className={order.traffic_applied ? 'text-ok' : 'text-amber'}>
+                {faInt(Number(order.extra_traffic_gb))} گیگابایت
+                {order.traffic_applied ? ' — اعمال شد' : ' — هنگام تحویل اعمال می‌شود'}
+              </span>
+            </div>
+          )}
+
+          {order.extra_ips > 0 && (
+            <div className="flex justify-between gap-3">
+              <span className="text-muted">آی‌پی اضافه</span>
+              <span className="text-amber">{faNum(order.extra_ips)} عدد — دستی</span>
+            </div>
+          )}
         </div>
+
+        {/* ترافیک افزودنی جایی برای نشستن می‌خواهد. اگر ادمین سرور را
+            انتخاب نکند، مسیر ای‌پی‌آی هم جلویش را می‌گیرد — این فقط
+            زودتر می‌گویدش. */}
+        {Number(order.extra_traffic_gb) > 0 && !order.traffic_applied && (
+          <Notice type="warn">
+            این سفارش ترافیک افزودنی دارد. برای اعمالش، سرور تحویل‌شده را حتما انتخاب کنید.
+          </Notice>
+        )}
+
+        {order.extra_ips > 0 && (
+          <Notice type="info">
+            {faNum(order.extra_ips)} آی‌پی اضافه خریداری شده. تخصیصشان دستی است؛ پس از تحویل در
+            بخش آی‌پی‌ها ثبتشان کنید.
+          </Notice>
+        )}
 
         <Field
           label="سرور تحویل‌شده"

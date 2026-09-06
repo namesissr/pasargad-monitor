@@ -20,7 +20,17 @@ export interface StoreProduct {
   price_toman: number;
   setup_toman: number;
   billing_months: number;
+  extra_ip_price_toman: number;
+  max_extra_ips: number;
   in_stock: boolean;
+}
+
+export interface TrafficPackage {
+  id: number;
+  name: string;
+  gb: number;
+  price_toman: number;
+  description: string | null;
 }
 
 /** دوره صورتحساب به فارسی خوانا */

@@ -30,6 +30,7 @@ export interface InvoiceDetail {
   order: Record<string, unknown> | null;
   discount: Record<string, unknown> | null;
   topups: Record<string, unknown>[];
+  addons: Record<string, unknown>[];
   seller: {
     name: string;
     id: string;
@@ -110,6 +111,22 @@ export async function invoiceDetail(invoiceId: number): Promise<InvoiceDetail | 
     [invoiceId],
   );
 
+  // افزودنی‌های سفارش: ترافیک اضافه و آی‌پی اضافه. عنوان و قیمتشان از
+  // خود ردیف می‌آید نه از بسته فعلی، پس فاکتور قدیمی همان چیزی را
+  // نشان می‌دهد که مشتری پرداخت کرده.
+  const addons = invoice.order_id
+    ? await query(
+        `SELECT id, kind, label, qty,
+                unit_toman::float8 AS unit_toman,
+                total_toman::float8 AS total_toman,
+                gb::float8 AS gb, applied_at
+           FROM order_addons
+          WHERE order_id = $1
+          ORDER BY id`,
+        [invoice.order_id],
+      )
+    : [];
+
   const s = await getSettings();
 
   return {
@@ -119,6 +136,7 @@ export async function invoiceDetail(invoiceId: number): Promise<InvoiceDetail | 
     order,
     discount,
     topups,
+    addons,
     seller: {
       name: s.invoice_seller_name || s.panel_title || 'پاسارگاد میزبان',
       id: s.invoice_seller_id || '',

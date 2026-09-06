@@ -43,6 +43,24 @@ function validate(body: Record<string, unknown>) {
     return { error: 'موجودی نامعتبر است' };
   }
 
+  // قیمت فروش آی‌پی اضافه. با price_per_ip دیتاسنتر که هزینه ماست فرق
+  // دارد؛ یکی‌کردنشان یعنی حاشیه سود ما در فروشگاه چاپ می‌شود.
+  const ipPrice = Math.round(Number(body.extra_ip_price_toman) || 0);
+  if (!Number.isFinite(ipPrice) || ipPrice < 0) {
+    return { error: 'قیمت آی‌پی اضافه نامعتبر است' };
+  }
+
+  const maxIps = Number(body.max_extra_ips) || 0;
+  if (!Number.isInteger(maxIps) || maxIps < 0 || maxIps > 64) {
+    return { error: 'سقف آی‌پی اضافه باید بین ۰ تا ۶۴ باشد' };
+  }
+
+  // سقف بدون قیمت یعنی مشتری آی‌پی رایگان می‌گیرد. این تقریبا همیشه
+  // اشتباه تایپی است، نه تصمیم.
+  if (maxIps > 0 && ipPrice === 0) {
+    return { error: 'برای فروش آی‌پی اضافه، قیمت هر آی‌پی را هم وارد کنید' };
+  }
+
   const specs: Record<string, string> = {};
   for (const key of SPECS) specs[key] = String(body[key] ?? '').trim();
 
@@ -55,6 +73,8 @@ function validate(body: Record<string, unknown>) {
       setup,
       months,
       stock,
+      ipPrice,
+      maxIps,
       specs,
       is_active: body.is_active !== false && body.is_active !== 'false',
       sort_order: Number(body.sort_order) || 0,
@@ -71,6 +91,7 @@ export async function GET() {
               p.price_toman::float8 AS price_toman,
               p.setup_toman::float8 AS setup_toman,
               p.billing_months, p.stock, p.is_active, p.sort_order, p.created_at,
+              p.extra_ip_price_toman::float8 AS extra_ip_price_toman, p.max_extra_ips,
               COALESCE(o.cnt, 0)::int AS order_count
          FROM products p
          LEFT JOIN LATERAL (
@@ -93,15 +114,17 @@ export async function POST(req: Request) {
     const row = await queryOne<{ id: number }>(
       `INSERT INTO products
          (name, kind, summary, spec_cpu, spec_ram, spec_disk, spec_bandwidth, spec_location,
-          price_toman, setup_toman, billing_months, stock, is_active, sort_order)
+          price_toman, setup_toman, billing_months, stock, is_active, sort_order,
+          extra_ip_price_toman, max_extra_ips)
        VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''),
-               NULLIF($7,''), NULLIF($8,''), $9, $10, $11, $12, $13, $14)
+               NULLIF($7,''), NULLIF($8,''), $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING id`,
       [
         v.name, v.kind, v.summary,
         v.specs.spec_cpu, v.specs.spec_ram, v.specs.spec_disk,
         v.specs.spec_bandwidth, v.specs.spec_location,
         v.price, v.setup, v.months, v.stock, v.is_active, v.sort_order,
+        v.ipPrice, v.maxIps,
       ],
     );
     return ok({ id: row?.id }, { status: 201 });
@@ -126,13 +149,15 @@ export async function PATCH(req: Request) {
               spec_cpu = NULLIF($5,''), spec_ram = NULLIF($6,''), spec_disk = NULLIF($7,''),
               spec_bandwidth = NULLIF($8,''), spec_location = NULLIF($9,''),
               price_toman = $10, setup_toman = $11, billing_months = $12,
-              stock = $13, is_active = $14, sort_order = $15, updated_at = now()
+              stock = $13, is_active = $14, sort_order = $15,
+              extra_ip_price_toman = $16, max_extra_ips = $17, updated_at = now()
         WHERE id = $1 RETURNING id`,
       [
         id, v.name, v.kind, v.summary,
         v.specs.spec_cpu, v.specs.spec_ram, v.specs.spec_disk,
         v.specs.spec_bandwidth, v.specs.spec_location,
         v.price, v.setup, v.months, v.stock, v.is_active, v.sort_order,
+        v.ipPrice, v.maxIps,
       ],
     );
     if (!rows.length) return fail('محصول پیدا نشد', 404);

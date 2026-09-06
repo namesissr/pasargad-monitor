@@ -42,6 +42,8 @@ export async function GET(req: Request) {
               price_toman::float8 AS price_toman,
               setup_toman::float8 AS setup_toman,
               billing_months,
+              extra_ip_price_toman::float8 AS extra_ip_price_toman,
+              max_extra_ips,
               (stock IS NULL OR stock > 0) AS in_stock
          FROM products
          ${where}
@@ -50,9 +52,20 @@ export async function GET(req: Request) {
       params,
     );
 
+    // بسته‌های ترافیک برای بخش «ترافیک اضافه» صفحه محصول. همان
+    // بسته‌هایی که مشتری‌های فعلی از پرتال می‌خرند — یک فهرست، یک قیمت.
+    const packages = await query(
+      `SELECT id, name, gb::float8 AS gb, price_toman::float8 AS price_toman, description
+         FROM traffic_packages
+        WHERE is_active
+        ORDER BY sort_order, gb
+        LIMIT 50`,
+    );
+
     return ok({
       enabled: true,
       products,
+      packages,
       intro: s.store_intro || '',
       brand: s.invoice_seller_name || s.panel_title || 'پاسارگاد میزبان',
     });

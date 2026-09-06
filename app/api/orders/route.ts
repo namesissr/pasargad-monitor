@@ -38,12 +38,22 @@ export async function GET(req: Request) {
               c.phone AS customer_phone, c.email AS customer_email,
               p.id AS product_id,
               i.id AS invoice_id, i.number AS invoice_number, i.status AS invoice_status,
-              s.id AS server_id, s.name AS server_name
+              s.id AS server_id, s.name AS server_name,
+              COALESCE(a.ips, 0)::int AS extra_ips,
+              a.traffic_gb::float8 AS extra_traffic_gb,
+              a.traffic_applied
          FROM orders o
          JOIN customers c ON c.id = o.customer_id
          LEFT JOIN products p ON p.id = o.product_id
          LEFT JOIN invoices i ON i.id = o.invoice_id
          LEFT JOIN servers s ON s.id = o.server_id
+         LEFT JOIN LATERAL (
+           SELECT SUM(qty) FILTER (WHERE kind = 'ip') AS ips,
+                  SUM(gb)  FILTER (WHERE kind = 'traffic') AS traffic_gb,
+                  bool_and(applied_at IS NOT NULL) FILTER (WHERE kind = 'traffic')
+                    AS traffic_applied
+             FROM order_addons x WHERE x.order_id = o.id
+         ) a ON TRUE
          ${where}
         ORDER BY
           -- سفارش پرداخت‌شده و تحویل‌نشده اول می‌آید؛ همان است که کار دارد
@@ -116,6 +126,20 @@ export async function PATCH(req: Request) {
         return fail('فقط سفارش پرداخت‌شده تحویل می‌شود', 400);
       }
 
+      // اگر سفارش ترافیک افزودنی دارد ولی سروری وصل نشده، آن ترافیک
+      // جایی برای نشستن ندارد و بی‌صدا گم می‌شود. مشتری پولش را داده.
+      const pending = await queryOne<{ n: number }>(
+        `SELECT COUNT(*)::int AS n FROM order_addons
+          WHERE order_id = $1 AND kind = 'traffic' AND applied_at IS NULL`,
+        [id],
+      );
+      if (Number(pending?.n) > 0 && !Number.isInteger(Number(body.server_id))) {
+        return fail(
+          'این سفارش ترافیک افزودنی دارد. اول سرور را انتخاب کنید تا ترافیک روی آن اعمال شود.',
+          400,
+        );
+      }
+
       // سرور اختیاری است، ولی اگر داده شد باید مال همان مشتری باشد —
       // وگرنه سفارش به سرور کس دیگری وصل می‌شود
       const serverIdRaw = Number(body.server_id);
@@ -167,6 +191,43 @@ export async function PATCH(req: Request) {
         [id, serverId],
       );
 
+      // ── ترافیک افزودنی ────────────────────────────────
+      //
+      // اینجا اعمال می‌شود، نه هنگام پرداخت: سرور اختصاصی موقع پرداخت
+      // هنوز وجود نداشت.
+      //
+      // شرط applied_at IS NULL در همان به‌روزرسانی است، پس فرستادن
+      // دوباره فرم تحویل ترافیک را دو برابر نمی‌کند. RETURNING فقط
+      // ردیف‌هایی را برمی‌گرداند که واقعا همین حالا برداشته شدند.
+      let appliedGb = 0;
+      if (serverId !== null) {
+        const claimed = await query<{ id: number; gb: number; label: string }>(
+          `UPDATE order_addons
+              SET applied_at = now()
+            WHERE order_id = $1 AND kind = 'traffic' AND applied_at IS NULL
+            RETURNING id, gb::float8 AS gb, label`,
+          [id],
+        );
+
+        for (const line of claimed) {
+          appliedGb += Number(line.gb) || 0;
+          await query(
+            `INSERT INTO traffic_topups (server_id, gb, price_toman, note)
+             VALUES ($1, $2, 0, $3)`,
+            [serverId, Number(line.gb), `افزودنی سفارش ${order.number} — ${line.label}`],
+          );
+        }
+
+        // شروع شمارش مصرف، اگر اولین ترافیک این سرور است
+        if (appliedGb > 0) {
+          await query(
+            `UPDATE servers SET traffic_counted_from = CURRENT_DATE
+              WHERE id = $1 AND traffic_counted_from IS NULL`,
+            [serverId],
+          );
+        }
+      }
+
       // خبر تحویل به مشتری. شکست ارسال نباید جلوی ثبت تحویل را بگیرد؛
       // سفارش تحویل شده و همان واقعیت است.
       const s = await getSettings();
@@ -180,7 +241,11 @@ export async function PATCH(req: Request) {
         username,
         password,
         sshPort: server?.ssh_port ?? null,
-        extraNote,
+        // ترافیک اعمال‌شده در ایمیل تحویل گفته می‌شود، وگرنه مشتری
+        // پولش را داده و هیچ‌جا نمی‌بیند که گرفته است
+        extraNote: appliedGb > 0
+          ? `${extraNote}${extraNote ? '\n' : ''}${appliedGb} گیگابایت ترافیک افزودنی روی سرور اعمال شد.`
+          : extraNote,
         panelUrl: link,
       };
 
