@@ -111,9 +111,9 @@ def main():
     #   الف) مسیرهایی که شناسه سرور نمی‌گیرند: requireCustomer و هر کوئری
     #        مستقیماً به customer_id مقید.
     #
-    #   ب) مسیرهایی که شناسه سرور می‌گیرند: requireOwnedServer که اول
-    #        مالکیت را تأیید می‌کند و شناسه تأییدشده برمی‌گرداند. بعد از
-    #        آن، قید server_id کافی است.
+    #   ب) مسیرهایی که شناسه سرور یا تیکت می‌گیرند: requireOwnedServer
+    #        یا requireOwnedTicket که اول مالکیت را تأیید می‌کنند و شناسه
+    #        تأییدشده برمی‌گردانند. بعد از آن، قید همان شناسه کافی است.
     #
     # الگوی «ب» سست‌تر نیست، سخت‌گیرتر است: به‌جای اینکه هر کوئری یادش
     # باشد customer_id را بگذارد، یک دروازه پیش از همه‌شان است. کوئری‌ای
@@ -122,7 +122,9 @@ def main():
         rel = os.path.relpath(path, ROOT).replace("\\", "/")
         src = io.open(path, encoding="utf-8").read()
 
-        owned = "requireOwnedServer(" in src
+        owned_server = "requireOwnedServer(" in src
+        owned_ticket = "requireOwnedTicket(" in src
+        owned = owned_server or owned_ticket
         check(
             "%s: نگهبان مشتری دارد" % rel,
             "requireCustomer()" in src or owned,
@@ -139,7 +141,9 @@ def main():
         if owned:
             # دروازه باید **پیش از** هر کوئری باشد. اگر بعدش بیاید، یک
             # کوئری روی شناسه تأییدنشده اجرا شده و داده رفته است.
-            guard_at = src.index("requireOwnedServer(")
+            guard_at = src.index(
+                "requireOwnedServer(" if owned_server else "requireOwnedTicket("
+            )
             first_query = min(
                 [i for i in (src.find("query("), src.find("queryOne(")) if i != -1] or [-1]
             )
@@ -214,10 +218,17 @@ def main():
             if rel in open_routes:
                 continue
             src = io.open(path, encoding="utf-8").read()
-            # requireOwnedServer هم نگهبان است و خودش requireCustomer را
-            # صدا می‌زند؛ بالاتر جداگانه بررسی شد که واقعا این کار را کند.
+            # requireOwnedServer و requireOwnedTicket هم نگهبان‌اند: هر دو
+            # خودشان requireCustomer را صدا می‌زنند؛ بالاتر جداگانه بررسی
+            # شد که واقعا این کار را می‌کنند.
             if not any(
-                g in src for g in ("requireUser", "requireCustomer", "requireOwnedServer")
+                g in src
+                for g in (
+                    "requireUser",
+                    "requireCustomer",
+                    "requireOwnedServer",
+                    "requireOwnedTicket",
+                )
             ):
                 unguarded.append(rel)
 

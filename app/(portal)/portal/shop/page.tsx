@@ -265,17 +265,126 @@ export default function PortalShopPage() {
   );
 }
 
+interface Applied {
+  code: string;
+  discount: number;
+  payable: number;
+}
+
+/**
+ * فیلد کد تخفیف.
+ *
+ * بررسی سمت سرور انجام می‌شود و مبلغ تخفیف از همان‌جا می‌آید. هرگز
+ * محاسبه سمت مرورگر نمی‌شود — وگرنه مشتری با عوض‌کردن یک عدد هر چیزی
+ * را رایگان می‌خرد.
+ *
+ * کد اینجا **مصرف نمی‌شود**؛ فقط بررسی می‌شود. مصرف واقعی هنگام پرداخت
+ * موفق انجام می‌گیرد.
+ */
+function DiscountField({
+  payload,
+  applied,
+  onApplied,
+}: {
+  payload: Record<string, unknown>;
+  applied: Applied | null;
+  onApplied: (value: Applied | null) => void;
+}) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function apply() {
+    setErr(null);
+    setBusy(true);
+    try {
+      const res = await api.post<{
+        ok: boolean;
+        reason?: string;
+        code: string;
+        discount: number;
+        payable: number;
+      }>('/api/portal/shop/discount', { ...payload, code });
+
+      if (!res.ok) {
+        setErr(res.reason || 'کد تخفیف معتبر نیست');
+        onApplied(null);
+        return;
+      }
+      onApplied({ code: res.code, discount: res.discount, payable: res.payable });
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : 'بررسی کد ناموفق بود');
+      onApplied(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (applied) {
+    return (
+      <div className="flex items-center justify-between gap-3 text-xs p-3 rounded-lg bg-ok/10 border border-ok/30">
+        <span className="text-ok">
+          کد <span className="ltr font-bold">{applied.code}</span> اعمال شد —{' '}
+          {formatToman(applied.discount)} تخفیف
+        </span>
+        <button
+          type="button"
+          className="text-muted hover:text-danger shrink-0"
+          onClick={() => {
+            onApplied(null);
+            setCode('');
+          }}
+        >
+          برداشتن
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <Field label="کد تخفیف" hint="اختیاری">
+      <div className="flex gap-2">
+        <input
+          className="input ltr flex-1"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="مثلا NOWRUZ"
+          autoComplete="off"
+        />
+        <button
+          type="button"
+          className="btn-ghost text-xs px-4"
+          onClick={apply}
+          disabled={busy || !code.trim()}
+        >
+          {busy ? '…' : 'اعمال'}
+        </button>
+      </div>
+      {err && <p className="text-[11px] text-danger mt-1.5">{err}</p>}
+    </Field>
+  );
+}
+
 /**
  * خرید در دو گام انجام می‌شود: اول فاکتور ساخته می‌شود، بعد همان مسیر
  * پرداختی که برای تمدید هم استفاده می‌شود صدا زده می‌شود.
  *
  * تکرارنکردن منطق درگاه عمدی است. اگر اینجا هم پرداخت شروع می‌شد، دو
  * پیاده‌سازی داشتیم که دیر یا زود از هم دور می‌افتند.
+ *
+ * اگر تخفیف کل مبلغ را بپوشاند، سرور خودش فاکتور را تسویه می‌کند و
+ * چیزی برای پرداخت نمی‌ماند — آن حالت با paid برمی‌گردد.
  */
-async function startPayment(payload: Record<string, unknown>): Promise<string> {
-  const created = await api.post<{ invoiceId: number }>('/api/portal/shop/buy', payload);
+async function startPayment(
+  payload: Record<string, unknown>,
+): Promise<{ url: string } | { paid: true; invoiceId: number }> {
+  const created = await api.post<{ invoiceId: number; paid?: boolean }>(
+    '/api/portal/shop/buy',
+    payload,
+  );
+  if (created.paid) return { paid: true, invoiceId: created.invoiceId };
   const pay = await api.post<{ url: string }>(`/api/portal/invoices/${created.invoiceId}/pay`);
-  return pay.url;
+  return { url: pay.url };
 }
 
 function BuyPackage({
@@ -291,17 +400,21 @@ function BuyPackage({
 }) {
   // اگر فقط یک سرور دارد، همان از قبل انتخاب می‌شود
   const [serverId, setServerId] = useState(servers.length === 1 ? String(servers[0].id) : '');
+  const [applied, setApplied] = useState<Applied | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function buy() {
     setBusy(true);
     try {
-      const url = await startPayment({
+      const res = await startPayment({
         type: 'traffic',
         package_id: pack.id,
         server_id: Number(serverId),
+        discount_code: applied?.code ?? '',
       });
-      window.location.href = url;
+      // تخفیف کامل: چیزی برای پرداخت نمانده و ترافیک اعمال شده
+      window.location.href =
+        'paid' in res ? `/portal/pay/${res.invoiceId}?status=paid` : res.url;
     } catch (e) {
       onError(e instanceof ApiError ? e.message : 'شروع خرید ناموفق بود');
     }
@@ -315,12 +428,26 @@ function BuyPackage({
         <div className="card p-4 bg-panel2/40">
           <div className="flex items-baseline justify-between gap-3">
             <span className="text-sm">{pack.name}</span>
-            <span className="text-sm font-bold">{formatToman(pack.price_toman)}</span>
+            <span className={`text-sm ${applied ? 'text-muted line-through' : 'font-bold'}`}>
+              {formatToman(pack.price_toman)}
+            </span>
           </div>
           <p className="text-[11px] text-muted mt-1">
             {formatFromGb(pack.gb)} ترافیک، بدون انقضا
           </p>
+          {applied && (
+            <div className="flex items-baseline justify-between gap-3 pt-2 mt-2 border-t border-line/60">
+              <span className="text-sm">مبلغ قابل پرداخت</span>
+              <span className="text-sm font-bold text-ok">{formatToman(applied.payable)}</span>
+            </div>
+          )}
         </div>
+
+        <DiscountField
+          payload={{ type: 'traffic', package_id: pack.id }}
+          applied={applied}
+          onApplied={setApplied}
+        />
 
         <Field label="روی کدام سرور اعمال شود؟">
           <select className="input" value={serverId} onChange={(e) => setServerId(e.target.value)}>
@@ -372,15 +499,23 @@ function BuyProduct({
   onError: (message: string) => void;
 }) {
   const [note, setNote] = useState('');
+  const [applied, setApplied] = useState<Applied | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const total = Number(product.price_toman) + Number(product.setup_toman);
+  const subtotal = Number(product.price_toman) + Number(product.setup_toman);
+  const total = applied ? applied.payable : subtotal;
 
   async function buy() {
     setBusy(true);
     try {
-      const url = await startPayment({ type: 'product', product_id: product.id, note });
-      window.location.href = url;
+      const res = await startPayment({
+        type: 'product',
+        product_id: product.id,
+        note,
+        discount_code: applied?.code ?? '',
+      });
+      window.location.href =
+        'paid' in res ? `/portal/pay/${res.invoiceId}?status=paid` : res.url;
     } catch (e) {
       onError(e instanceof ApiError ? e.message : 'ثبت سفارش ناموفق بود');
     }
@@ -402,11 +537,23 @@ function BuyProduct({
               <span>{formatToman(product.setup_toman)}</span>
             </div>
           )}
+          {applied && (
+            <div className="flex justify-between gap-3 text-ok">
+              <span>تخفیف ({applied.code})</span>
+              <span>− {formatToman(applied.discount)}</span>
+            </div>
+          )}
           <div className="flex justify-between gap-3 pt-2 border-t border-line/60 font-bold">
             <span>مبلغ قابل پرداخت</span>
             <span>{formatToman(total)}</span>
           </div>
         </div>
+
+        <DiscountField
+          payload={{ type: 'product', product_id: product.id }}
+          applied={applied}
+          onApplied={setApplied}
+        />
 
         <Field label="توضیح" hint="اختیاری — مثلا سیستم‌عامل یا تنظیمات دلخواه">
           <textarea

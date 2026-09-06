@@ -37,3 +37,33 @@ export async function requireOwnedServer(rawId: unknown): Promise<{
 
   return { customerId, serverId };
 }
+
+/**
+ * مالکیت تیکت، پیش از هر کوئری دیگری.
+ *
+ * همان دلیل requireOwnedServer: مشتری عدد را در آدرس عوض می‌کند و
+ * گفتگوی پشتیبانی مشتری دیگری را می‌خواند. و برخلاف داده سرور، محتوای
+ * تیکت اغلب شخصی‌تر است.
+ */
+export async function requireOwnedTicket(rawId: unknown): Promise<{
+  customerId: number;
+  ticketId: number;
+}> {
+  const { customerId } = await requireCustomer();
+
+  const ticketId = Number(rawId);
+  if (!Number.isInteger(ticketId) || ticketId <= 0) {
+    throw new ForbiddenError('تیکت پیدا نشد');
+  }
+
+  const row = await queryOne<{ id: number }>(
+    `SELECT id FROM tickets WHERE id = $1 AND customer_id = $2`,
+    [ticketId, customerId],
+  );
+
+  // «پیدا نشد» نه «دسترسی ندارید»: با پیام دوم، مشتری می‌فهمد آن تیکت
+  // وجود دارد و مال کس دیگری است.
+  if (!row) throw new ForbiddenError('تیکت پیدا نشد');
+
+  return { customerId, ticketId };
+}

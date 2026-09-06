@@ -457,6 +457,32 @@ export default function SettingsPage() {
         </p>
       </section>
 
+      {/* پشتیبانی */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">پشتیبانی و تیکت</h2>
+
+        <Notice type="info">
+          تیکت تازه مشتری به شما ایمیل و هشدار می‌فرستد؛ پاسخ شما به مشتری ایمیل می‌شود. برای
+          هر دو، بخش ایمیل بالا باید تنظیم شده باشد.
+        </Notice>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field
+            label="ثبت تیکت تازه"
+            hint="غیرفعال‌کردن فقط جلوی تیکت تازه را می‌گیرد؛ گفتگوهای باز همچنان ادامه دارند"
+          >
+            <select
+              className="input"
+              value={form.tickets_enabled ?? 'true'}
+              onChange={set('tickets_enabled')}
+            >
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+        </div>
+      </section>
+
       {/* درگاه پرداخت */}
       <section className="card p-5 space-y-4">
         <h2 className="text-sm font-bold">درگاه پرداخت و فاکتور</h2>

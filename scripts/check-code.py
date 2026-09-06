@@ -402,8 +402,9 @@ def check_route_auth():
         # این دو جای هم را نمی‌گیرند.
         # requireOwnedServer هم نگهبان معتبری است: خودش requireCustomer
         # را صدا می‌زند و علاوه بر آن مالکیت سرور را هم تأیید می‌کند.
+        # requireOwnedTicket هم به همین شکل مالکیت تیکت را تأیید می‌کند.
         src = read(path)
-        guards = ("requireUser", "requireCustomer", "requireOwnedServer")
+        guards = ("requireUser", "requireCustomer", "requireOwnedServer", "requireOwnedTicket")
         if not any(g in src for g in guards):
             problems.append("%s — مسیر API بدون نگهبان احراز هویت. عمدی است؟" % r)
 

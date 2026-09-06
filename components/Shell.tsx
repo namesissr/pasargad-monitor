@@ -19,6 +19,7 @@ const NAV = [
   ]},
   { group: 'مشتریان', items: [
     { href: '/customers', label: 'مشتریان', icon: '☺' },
+    { href: '/tickets', label: 'پشتیبانی', icon: '✉' },
   ]},
   { group: 'گزارش', items: [
     { href: '/reports', label: 'گزارش مصرف', icon: '▨' },

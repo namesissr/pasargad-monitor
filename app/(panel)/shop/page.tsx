@@ -5,6 +5,7 @@ import { useLoad, LoadState } from '@/components/useLoad';
 import { Field, Modal, Notice } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { faNum, formatFromGb, formatToman } from '@/lib/format';
+import { Discounts } from './discounts';
 
 interface Package {
   id: number;
@@ -37,7 +38,7 @@ interface Product {
 }
 
 export default function ShopPage() {
-  const [tab, setTab] = useState<'packages' | 'products'>('packages');
+  const [tab, setTab] = useState<'packages' | 'products' | 'discounts'>('packages');
 
   return (
     <div className="space-y-4">
@@ -52,6 +53,7 @@ export default function ShopPage() {
         {([
           ['packages', 'بسته‌های ترافیک'],
           ['products', 'محصولات'],
+          ['discounts', 'کد تخفیف'],
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -68,7 +70,9 @@ export default function ShopPage() {
         ))}
       </div>
 
-      {tab === 'packages' ? <Packages /> : <Products />}
+      {tab === 'packages' && <Packages />}
+      {tab === 'products' && <Products />}
+      {tab === 'discounts' && <Discounts />}
     </div>
   );
 }

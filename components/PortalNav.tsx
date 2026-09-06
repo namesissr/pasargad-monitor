@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 /**
  * منوی پرتال مشتری.
  *
- * سه بخش، و بس. پرتال جای مرور است نه مدیریت؛ هرچه بیشتر شود، پیداکردن
+ * پرتال جای مرور است نه مدیریت؛ هرچه بیشتر شود، پیداکردن
  * همان یک عددی که مشتری دنبالش آمده سخت‌تر می‌شود.
  *
  * کلاینت است چون مسیر فعال را از usePathname می‌گیرد. خروج با فرم و
@@ -19,6 +19,7 @@ const NAV = [
   { href: '/portal/usage', label: 'گزارش مصرف' },
   { href: '/portal/invoices', label: 'فاکتورها' },
   { href: '/portal/topups', label: 'خرید ترافیک' },
+  { href: '/portal/tickets', label: 'پشتیبانی' },
 ];
 
 export function PortalNav() {

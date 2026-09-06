@@ -22,6 +22,7 @@
 | لاگ ترافیک | مصرف هر سرور در هر تاریخی، به تفکیک دانلود و آپلود، با تقویم شمسی |
 | حسابداری | هزینه هر سرور به تفکیک ماه و روز: اجاره + ترافیک مازاد + آی‌پی مازاد |
 | گزارش | نمودار، جدول تفکیکی و خروجی CSV |
+| پشتیبانی | تیکت مشتری با اطلاع‌رسانی دوطرفه ایمیل — [docs/tickets.md](docs/tickets.md) |
 
 ---
 
@@ -240,14 +241,26 @@ python3 scripts/check-code.py
 ```
 
 ```bash
-python3 scripts/test-jalali.py    # تبدیل تاریخ شمسی
-python3 scripts/test-uplink.py    # تشخیص کارت شبکه ایجنت
-python3 scripts/test-access.py    # منطق پایش اکسس ایران
+# همه آزمون‌ها
+for f in scripts/test-*.py; do python3 "$f" | tail -1; done
 ```
 
-اولی هفت دسته خطا را در چند ثانیه می‌گیرد: ایمپورت شکسته، نام صادرنشده، نام
-ایمپورت‌نشده در JSX، تایپ عمومی نادرست در `query`، `catch` خالی،
-`data!` داخل JSX، و مسیر API بدون `requireUser`.
+هر قاعده پولی یا امنیتی یک آزمون آینه‌ای دارد که تصمیم را بازسازی
+می‌کند **و** بررسی می‌کند کد واقعی هنوز همان کار را می‌کند. مهم‌ترین‌ها:
+
+```bash
+python3 scripts/test-invoices.py   # فاکتور، پرداخت، اید‌مپوتنت‌بودن تسویه
+python3 scripts/test-discounts.py  # کد تخفیف: مصرف فقط پس از پرداخت، هدف کد
+python3 scripts/test-portal.py     # مرز دسترسی مشتری در پرتال
+python3 scripts/test-tickets.py    # پشتیبانی و تیکت
+python3 scripts/test-shop.py       # فروشگاه و تحویل
+python3 scripts/test-topups.py     # موجودی ترافیک پیش‌خرید
+```
+
+`check-code.py` در چند ثانیه چند دسته خطای رایج را می‌گیرد: ایمپورت
+شکسته، نام صادرنشده، نام ایمپورت‌نشده در JSX، تایپ عمومی نادرست در
+`query`، `catch` خالی، `data!` داخل JSX، مسیر API بدون نگهبان احراز
+هویت، ستون SQL که در هیچ مهاجرتی نیست، و چند مورد دیگر.
 
 **این جایگزین کامپایلر نیست.** برای فهرست کامل خطاهای تایپ، بدون اینکه
 منتظر بیلد کامل بمانید:
@@ -370,5 +383,5 @@ pasargad-monitor/
 ├── db/migrations/     ترتیبی؛ فقط بار اول خودکار
 ├── nginx/             panel.conf
 ├── scripts/           setup.sh، selfsigned-cert.sh
-└── docs/           install.md، deploy.md، hypervisor.md، billing.md، iran-access.md
+└── docs/           install.md، deploy.md، hypervisor.md، billing.md، shop.md، tickets.md، iran-access.md
 ```

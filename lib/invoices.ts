@@ -69,6 +69,7 @@ export async function settleInvoice(
       `SELECT i.id, i.number, i.status, i.amount_toman::float8 AS amount_toman, i.title,
               i.kind, i.server_id, i.customer_id, i.period_to,
               i.traffic_gb::float8 AS traffic_gb, i.order_id,
+              i.discount_code_id, i.discount_toman::float8 AS discount_toman,
               c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
               s.name AS server_name, s.renewal_months
          FROM invoices i
@@ -198,6 +199,32 @@ export async function settleInvoice(
           WHERE o.id = $1 AND p.id = o.product_id AND p.stock IS NOT NULL`,
         [inv.order_id],
       );
+    }
+
+    // ── مصرف کد تخفیف ───────────────────────────────────────
+    //
+    // **فقط اینجا، پس از پرداخت موفق.** اگر هنگام ساخت فاکتور مصرف
+    // می‌شد، هر کسی با شروع و لغو مکرر خرید می‌توانست ظرفیت کد را
+    // بسوزاند بدون اینکه یک ریال بدهد.
+    //
+    // ایندکس یکتا روی invoice_id تضمین می‌کند یک فاکتور دو بار کد را
+    // مصرف نکند، حتی اگر تسویه به هر دلیلی دو بار اجرا شود.
+    if (inv.discount_code_id && Number(inv.discount_toman) > 0) {
+      const inserted = await client.query(
+        `INSERT INTO discount_uses (code_id, customer_id, invoice_id, amount_toman)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (invoice_id) WHERE invoice_id IS NOT NULL DO NOTHING
+         RETURNING id`,
+        [inv.discount_code_id, inv.customer_id, invoiceId, Math.round(Number(inv.discount_toman))],
+      );
+
+      // شمارنده فقط وقتی جلو می‌رود که ردیف تازه درج شده باشد
+      if (inserted.rows.length) {
+        await client.query(
+          `UPDATE discount_codes SET used_count = used_count + 1 WHERE id = $1`,
+          [inv.discount_code_id],
+        );
+      }
     }
 
     await client.query('COMMIT');

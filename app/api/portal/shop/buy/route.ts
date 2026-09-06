@@ -2,7 +2,8 @@ import { query, queryOne } from '@/lib/db';
 import { requireCustomer, ForbiddenError } from '@/lib/auth';
 import { fail, handle, ok, readJson } from '@/lib/http';
 import { getSettings } from '@/lib/settings';
-import { nextInvoiceNumber } from '@/lib/invoices';
+import { nextInvoiceNumber, settleInvoice } from '@/lib/invoices';
+import { validateDiscount, type DiscountScope } from '@/lib/discounts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,7 +28,34 @@ export const dynamic = 'force-dynamic';
  *
  * فاکتوری که پرداخت نشود در فهرست فاکتورها می‌ماند و بعدا قابل پرداخت
  * است — که رفتار درستی است، نه یک عارضه.
+ *
+ * ── کد تخفیف ───────────────────────────────────────────────
+ *
+ * فقط **متن کد** از مشتری می‌آید؛ مبلغ تخفیف سمت سرور محاسبه می‌شود.
+ * اگر مبلغ از درخواست بیاید، مشتری با عوض‌کردن یک عدد هر چیزی را
+ * رایگان می‌خرد.
+ *
+ * کد اینجا **مصرف نمی‌شود** — فقط مبلغش روی فاکتور می‌نشیند. مصرف
+ * واقعی هنگام پرداخت موفق انجام می‌شود، وگرنه با شروع و لغو مکرر
+ * ظرفیت کد می‌سوخت.
  */
+
+/**
+ * فاکتور صفر تومانی را همان‌جا تسویه می‌کند.
+ *
+ * تخفیفی که کل مبلغ را بپوشاند، چیزی برای پرداخت نمی‌گذارد. فرستادن
+ * مشتری به درگاه با مبلغ صفر فقط خطا می‌دهد؛ سرویس باید بلافاصله
+ * تحویل شود.
+ */
+async function settleIfFree(invoiceId: number, payable: number) {
+  if (payable > 0) return { free: false as const };
+  const result = await settleInvoice(invoiceId, {
+    refId: null,
+    paymentCode: null,
+    cardNumber: null,
+  });
+  return { free: true as const, ok: result.ok, error: result.error };
+}
 
 /** شماره سفارش خوانا */
 async function nextOrderNumber(): Promise<string> {
@@ -72,20 +100,38 @@ export async function POST(req: Request) {
       );
       if (!pack) return fail('این بسته دیگر در دسترس نیست', 404);
 
+      // قیمت از بسته، نه از درخواست
+      const subtotal = Math.round(Number(pack.price_toman));
+      const discount = await validateDiscount(body.discount_code, {
+        customerId,
+        scope: 'traffic',
+        subtotal,
+        itemId: pack.id,
+      });
+
+      // کد نامعتبر خرید را متوقف می‌کند، نه اینکه بی‌صدا نادیده گرفته
+      // شود: مشتری مبلغ تخفیف‌خورده را دیده و انتظار همان را دارد.
+      if (discount.reason) return fail(discount.reason, 400);
+
+      const payable = Math.max(0, subtotal - discount.discount);
+
       const number = await nextInvoiceNumber();
       const row = await queryOne<{ id: number }>(
         `INSERT INTO invoices
            (number, customer_id, server_id, kind, title, amount_toman,
+            subtotal_toman, discount_toman, discount_code_id,
             traffic_package_id, traffic_gb, due_at)
-         VALUES ($1, $2, $3, 'traffic', $4, $5, $6, $7, CURRENT_DATE)
+         VALUES ($1, $2, $3, 'traffic', $4, $5, $6, $7, $8, $9, $10, CURRENT_DATE)
          RETURNING id`,
         [
           number,
           customerId,
           serverId,
           `${pack.name} — سرور «${server.name}»`,
-          // قیمت از بسته، نه از درخواست
-          Math.round(Number(pack.price_toman)),
+          payable,
+          subtotal,
+          discount.discount,
+          discount.codeId,
           pack.id,
           // مقدار گیگ روی فاکتور کپی می‌شود: ویرایش بعدی بسته نباید
           // شرایط فاکتور صادرشده را عوض کند
@@ -93,7 +139,13 @@ export async function POST(req: Request) {
         ],
       );
 
-      return ok({ invoiceId: row?.id, number }, { status: 201 });
+      const free = await settleIfFree(Number(row?.id), payable);
+      if (free.free && !free.ok) return fail(free.error || 'تحویل رایگان ناموفق بود', 500);
+
+      return ok(
+        { invoiceId: row?.id, number, payable, discount: discount.discount, paid: free.free },
+        { status: 201 },
+      );
     }
 
     // ── محصول ─────────────────────────────────────────────
@@ -124,7 +176,16 @@ export async function POST(req: Request) {
         return fail('موجودی این محصول تمام شده است', 409);
       }
 
-      const total = Math.round(Number(product.price_toman) + Number(product.setup_toman));
+      const subtotal = Math.round(Number(product.price_toman) + Number(product.setup_toman));
+      const discount = await validateDiscount(body.discount_code, {
+        customerId,
+        scope: 'product',
+        subtotal,
+        itemId: product.id,
+      });
+      if (discount.reason) return fail(discount.reason, 400);
+
+      const total = Math.max(0, subtotal - discount.discount);
 
       const orderNumber = await nextOrderNumber();
       const order = await queryOne<{ id: number }>(
@@ -137,6 +198,7 @@ export async function POST(req: Request) {
           customerId,
           product.id,
           product.name,
+          // قیمت روی سفارش، همان مبلغی است که مشتری واقعا می‌پردازد
           total,
           String(body.note ?? '').trim().slice(0, 500),
         ],
@@ -145,15 +207,38 @@ export async function POST(req: Request) {
       const number = await nextInvoiceNumber();
       const invoice = await queryOne<{ id: number }>(
         `INSERT INTO invoices
-           (number, customer_id, kind, title, amount_toman, order_id, due_at)
-         VALUES ($1, $2, 'order', $3, $4, $5, CURRENT_DATE)
+           (number, customer_id, kind, title, amount_toman,
+            subtotal_toman, discount_toman, discount_code_id, order_id, due_at)
+         VALUES ($1, $2, 'order', $3, $4, $5, $6, $7, $8, CURRENT_DATE)
          RETURNING id`,
-        [number, customerId, `سفارش ${product.name}`, total, order?.id],
+        [
+          number,
+          customerId,
+          `سفارش ${product.name}`,
+          total,
+          subtotal,
+          discount.discount,
+          discount.codeId,
+          order?.id,
+        ],
       );
 
       await query(`UPDATE orders SET invoice_id = $2 WHERE id = $1`, [order?.id, invoice?.id]);
 
-      return ok({ invoiceId: invoice?.id, number, orderNumber }, { status: 201 });
+      const free = await settleIfFree(Number(invoice?.id), total);
+      if (free.free && !free.ok) return fail(free.error || 'ثبت سفارش رایگان ناموفق بود', 500);
+
+      return ok(
+        {
+          invoiceId: invoice?.id,
+          number,
+          orderNumber,
+          payable: total,
+          discount: discount.discount,
+          paid: free.free,
+        },
+        { status: 201 },
+      );
     }
 
     return fail('نوع خرید نامعتبر است', 400);

@@ -42,6 +42,7 @@ const ALLOWED = [
   'payping_token',
   'payping_version',
   'payping_unit',
+  'tickets_enabled',
 ];
 
 /**
