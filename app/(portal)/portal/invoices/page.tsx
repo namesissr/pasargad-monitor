@@ -73,6 +73,11 @@ export default function PortalInvoicesPage() {
   const history = data.invoices.filter((i) => i.status !== 'unpaid');
   const dueTotal = unpaid.reduce((a, i) => a + Number(i.amount_toman), 0);
 
+  // فقط پرداخت‌شده‌ها؛ لغوشده پول نبوده و نباید در جمع بیاید
+  const paid = data.invoices.filter((i) => i.status === 'paid');
+  const paidTotal = paid.reduce((a, i) => a + Number(i.amount_toman), 0);
+  const paidCount = paid.length;
+
   return (
     <div className="space-y-5">
       <div>
@@ -83,6 +88,21 @@ export default function PortalInvoicesPage() {
       </div>
 
       {msg && <Notice type="error">{msg}</Notice>}
+
+      {/* یک خلاصه، پیش از فهرست. بدون آن، مشتری برای دانستن «امسال چقدر
+          دادم» باید ردیف‌ها را با چشم جمع بزند. */}
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div className="card p-4">
+          <div className="text-xs text-muted">در انتظار پرداخت</div>
+          <div className="text-xl font-bold mt-1 text-amber">{formatToman(dueTotal)}</div>
+          <div className="text-[11px] text-muted mt-0.5">{faNum(unpaid.length)} فاکتور</div>
+        </div>
+        <div className="card p-4">
+          <div className="text-xs text-muted">جمع پرداخت‌شده</div>
+          <div className="text-xl font-bold mt-1 text-ok">{formatToman(paidTotal)}</div>
+          <div className="text-[11px] text-muted mt-0.5">{faNum(paidCount)} فاکتور</div>
+        </div>
+      </div>
 
       {!data.gatewayReady && unpaid.length > 0 && (
         <Notice type="warn">
@@ -115,7 +135,10 @@ export default function PortalInvoicesPage() {
                   <div className="min-w-0">
                     <h3 className="text-sm font-bold">{inv.title}</h3>
                     <p className="text-[11px] text-muted mt-1">
-                      فاکتور <span className="ltr">{inv.number}</span>
+                      فاکتور{' '}
+                      <Link href={`/portal/invoices/${inv.id}`} className="ltr hover:text-cyan">
+                        {inv.number}
+                      </Link>
                       {inv.server_name && (
                         <>
                           {' · '}
@@ -163,6 +186,12 @@ export default function PortalInvoicesPage() {
                     >
                       {paying === inv.id ? 'در حال انتقال…' : 'پرداخت'}
                     </button>
+                    <Link
+                      href={`/portal/invoices/${inv.id}`}
+                      className="block text-[11px] text-muted hover:text-cyan mt-1.5"
+                    >
+                      جزئیات فاکتور
+                    </Link>
                   </div>
                 </div>
               </div>
@@ -194,6 +223,7 @@ export default function PortalInvoicesPage() {
                   <th>وضعیت</th>
                   <th className="col-sm">تاریخ پرداخت</th>
                   <th className="col-md">پیگیری</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -201,7 +231,11 @@ export default function PortalInvoicesPage() {
                   const st = STATUS[inv.status] || STATUS.canceled;
                   return (
                     <tr key={inv.id}>
-                      <td className="text-xs ltr sm:whitespace-nowrap">{inv.number}</td>
+                      <td className="text-xs ltr sm:whitespace-nowrap">
+                        <Link href={`/portal/invoices/${inv.id}`} className="hover:text-cyan">
+                          {inv.number}
+                        </Link>
+                      </td>
                       <td className="text-xs">
                         {inv.title}
                         {inv.server_name && (
@@ -233,6 +267,14 @@ export default function PortalInvoicesPage() {
                         {inv.card_number && (
                           <span className="block text-[11px] ltr">{inv.card_number}</span>
                         )}
+                      </td>
+                      <td className="text-xs text-end whitespace-nowrap">
+                        <Link
+                          href={`/portal/invoices/${inv.id}`}
+                          className="text-cyan hover:underline"
+                        >
+                          مشاهده
+                        </Link>
                       </td>
                     </tr>
                   );

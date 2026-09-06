@@ -148,13 +148,14 @@ export async function settleInvoice(
     // رفرش صفحه بازگشت دو بار ترافیک نمی‌دهد.
     if (inv.kind === 'traffic' && inv.server_id && Number(inv.traffic_gb) > 0) {
       await client.query(
-        `INSERT INTO traffic_topups (server_id, gb, price_toman, note)
-         VALUES ($1, $2, $3, $4)`,
+        `INSERT INTO traffic_topups (server_id, gb, price_toman, note, invoice_id)
+         VALUES ($1, $2, $3, $4, $5)`,
         [
           inv.server_id,
           Number(inv.traffic_gb),
           Math.round(Number(inv.amount_toman)),
           `خرید آنلاین — فاکتور ${inv.number}`,
+          invoiceId,
         ],
       );
 

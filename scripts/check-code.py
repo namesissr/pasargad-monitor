@@ -402,9 +402,15 @@ def check_route_auth():
         # این دو جای هم را نمی‌گیرند.
         # requireOwnedServer هم نگهبان معتبری است: خودش requireCustomer
         # را صدا می‌زند و علاوه بر آن مالکیت سرور را هم تأیید می‌کند.
-        # requireOwnedTicket هم به همین شکل مالکیت تیکت را تأیید می‌کند.
+        # requireOwnedTicket و requireOwnedInvoice هم به همین شکل‌اند.
         src = read(path)
-        guards = ("requireUser", "requireCustomer", "requireOwnedServer", "requireOwnedTicket")
+        guards = (
+            "requireUser",
+            "requireCustomer",
+            "requireOwnedServer",
+            "requireOwnedTicket",
+            "requireOwnedInvoice",
+        )
         if not any(g in src for g in guards):
             problems.append("%s — مسیر API بدون نگهبان احراز هویت. عمدی است؟" % r)
 
@@ -765,6 +771,29 @@ def check_union_event_value():
             )
 
 
+# ── ۳۴) بایت کنترلی سرگردان در کد ───────────────────────────────────────
+# یک بار در همین مخزن رخ داد: الگویی که قرار بود مرز کلمه داشته باشد،
+# هنگام تولید فایل به بایت 0x08 (backspace) تبدیل شد. الگو خوانا
+# به‌نظر می‌رسید، هیچ‌وقت تطبیق نمی‌داد، و آزمون همیشه سبز بود.
+#
+# بایت کنترلی در کد هیچ کاربرد مشروعی ندارد و چشم هم نمی‌بیندش.
+#
+# با chr نوشته شده نه با گریز، تا خود همین خط قربانی همان اشتباه نشود.
+CONTROL_OK = {chr(9), chr(10), chr(13)}
+
+
+def check_control_bytes():
+    for path in walk({".ts", ".tsx", ".mjs", ".py", ".sql", ".css"}):
+        src = read(path)
+        for i, ch in enumerate(src):
+            if ord(ch) < 32 and ch not in CONTROL_OK:
+                problems.append(
+                    "%s:%d — بایت کنترلی %s در متن. الگو یا رشته‌ای هنگام تولید خراب شده."
+                    % (rel(path), line_of(src, i), hex(ord(ch)))
+                )
+                break
+
+
 def main():
     check_non_null_assertion()
     check_empty_catch()
@@ -781,6 +810,7 @@ def main():
     check_undefined_names()
     check_union_props()
     check_union_event_value()
+    check_control_bytes()
     check_route_auth()
 
     if not problems:

@@ -43,6 +43,11 @@ const ALLOWED = [
   'payping_version',
   'payping_unit',
   'tickets_enabled',
+  'invoice_seller_name',
+  'invoice_seller_id',
+  'invoice_seller_phone',
+  'invoice_seller_address',
+  'invoice_footer',
 ];
 
 /**

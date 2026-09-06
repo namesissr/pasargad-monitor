@@ -30,7 +30,13 @@ interface Invoice {
 
 interface Data {
   invoices: Invoice[];
-  totals: { unpaid: number; paid_month: number; unpaid_count: number } | null;
+  totals: {
+    unpaid: number;
+    paid_month: number;
+    paid_total: number;
+    unpaid_count: number;
+    overdue_count: number;
+  } | null;
 }
 
 const STATUS: Record<string, { label: string; cls: string }> = {
@@ -52,10 +58,29 @@ const FILTERS = [
   ['canceled', 'لغو شده'],
 ] as const;
 
+const KIND_FILTERS = [
+  ['', 'هر نوعی'],
+  ['renewal', 'تمدید'],
+  ['traffic', 'ترافیک'],
+  ['order', 'محصول'],
+  ['manual', 'دستی'],
+] as const;
+
 export default function InvoicesPage() {
   const [status, setStatus] = useState('');
+  const [kind, setKind] = useState('');
+  // جستجو با تأخیر ثبت می‌شود نه با هر حرف: هر تایپ یک کوئری روی جدول
+  // فاکتورها می‌زند و روی صفحه کند، نتیجه‌ها بی‌ترتیب برمی‌گردند
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
+
+  const qs = new URLSearchParams();
+  if (status) qs.set('status', status);
+  if (kind) qs.set('kind', kind);
+  if (q) qs.set('q', q);
+
   const { data, loading, error, reload } = useLoad<Data>(
-    `/api/invoices${status ? `?status=${status}` : ''}`,
+    `/api/invoices${qs.toString() ? `?${qs}` : ''}`,
   );
   const [adding, setAdding] = useState(false);
   const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
@@ -123,7 +148,9 @@ export default function InvoicesPage() {
         </Notice>
       )}
 
-      <div className="grid sm:grid-cols-2 gap-3">
+      {/* این سه عدد همیشه روی کل فاکتورهاست، نه روی فیلتر جاری —
+          وضعیت کسب‌وکار است، نه خلاصه جدول زیرش */}
+      <div className="grid sm:grid-cols-3 gap-3">
         <div className="card p-4">
           <div className="text-xs text-muted">در انتظار پرداخت</div>
           <div className="text-2xl font-bold mt-1 text-amber">
@@ -131,6 +158,12 @@ export default function InvoicesPage() {
           </div>
           <div className="text-[11px] text-muted mt-0.5">
             {faNum(data.totals?.unpaid_count ?? 0)} فاکتور
+            {(data.totals?.overdue_count ?? 0) > 0 && (
+              <span className="text-danger">
+                {' · '}
+                {faNum(data.totals?.overdue_count ?? 0)} معوق
+              </span>
+            )}
           </div>
         </div>
         <div className="card p-4">
@@ -139,23 +172,75 @@ export default function InvoicesPage() {
             {formatToman(data.totals?.paid_month ?? 0)}
           </div>
         </div>
+        <div className="card p-4">
+          <div className="text-xs text-muted">جمع کل پرداخت‌شده</div>
+          <div className="text-2xl font-bold mt-1">
+            {formatToman(data.totals?.paid_total ?? 0)}
+          </div>
+        </div>
       </div>
 
-      <div className="flex gap-1 flex-wrap">
-        {FILTERS.map(([key, label]) => (
-          <button
-            key={key || 'all'}
-            type="button"
-            onClick={() => setStatus(key)}
-            className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
-              status === key
-                ? 'bg-cyan/10 text-cyan border-cyan/30'
-                : 'border-line text-muted hover:text-white'
-            }`}
-          >
-            {label}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex gap-1 flex-wrap">
+          {FILTERS.map(([key, label]) => (
+            <button
+              key={key || 'all'}
+              type="button"
+              onClick={() => setStatus(key)}
+              className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${
+                status === key
+                  ? 'bg-cyan/10 text-cyan border-cyan/30'
+                  : 'border-line text-muted hover:text-white'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <select
+          className="input w-auto py-1.5 text-xs"
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+        >
+          {KIND_FILTERS.map(([key, label]) => (
+            <option key={key || 'any'} value={key}>
+              {label}
+            </option>
+          ))}
+        </select>
+
+        {/* جستجو با فرم است نه با هر حرف: کوئری روی هر کلید یعنی صفحه
+            کند و نتیجه‌های بی‌ترتیب */}
+        <form
+          className="flex items-center gap-1 ms-auto"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setQ(search.trim());
+          }}
+        >
+          <input
+            className="input w-44 sm:w-56 py-1.5 text-xs"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="شماره، مشتری، سرور، پیگیری"
+          />
+          <button type="submit" className="btn-ghost text-xs px-3 py-1.5">
+            جستجو
           </button>
-        ))}
+          {q && (
+            <button
+              type="button"
+              className="text-xs text-muted hover:text-white px-2"
+              onClick={() => {
+                setSearch('');
+                setQ('');
+              }}
+            >
+              پاک
+            </button>
+          )}
+        </form>
       </div>
 
       {!data.invoices.length ? (
@@ -181,7 +266,9 @@ export default function InvoicesPage() {
                 return (
                   <tr key={inv.id}>
                     <td className="text-xs ltr sm:whitespace-nowrap">
-                      {inv.number}
+                      <Link href={`/invoices/${inv.id}`} className="hover:text-cyan">
+                        {inv.number}
+                      </Link>
                       <span className="badge bg-line text-muted ms-1">
                         {KIND[inv.kind] ?? inv.kind}
                       </span>
@@ -231,6 +318,12 @@ export default function InvoicesPage() {
                       )}
                     </td>
                     <td className="text-end whitespace-nowrap">
+                      <Link
+                        href={`/invoices/${inv.id}`}
+                        className="text-xs text-cyan hover:underline me-3"
+                      >
+                        جزئیات
+                      </Link>
                       {inv.status === 'unpaid' && (
                         <>
                           {/* اگر تلاش پرداختی ناموفق بوده، شناسه‌اش ذخیره

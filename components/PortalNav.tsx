@@ -32,7 +32,7 @@ export function PortalNav() {
       : pathname.startsWith(href);
 
   return (
-    <header className="border-b border-line bg-panel/60 sticky top-0 z-20 backdrop-blur">
+    <header className="no-print border-b border-line bg-panel/60 sticky top-0 z-20 backdrop-blur">
       <div className="max-w-6xl mx-auto px-3 sm:px-4">
         <div className="h-14 flex items-center justify-between gap-3">
           <Link href="/portal" className="flex items-center gap-2 shrink-0">

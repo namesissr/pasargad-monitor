@@ -23,6 +23,7 @@
 | حسابداری | هزینه هر سرور به تفکیک ماه و روز: اجاره + ترافیک مازاد + آی‌پی مازاد |
 | گزارش | نمودار، جدول تفکیکی و خروجی CSV |
 | پشتیبانی | تیکت مشتری با اطلاع‌رسانی دوطرفه ایمیل — [docs/tickets.md](docs/tickets.md) |
+| فاکتور | صدور خودکار، پرداخت آنلاین، و سند فاکتور قابل چاپ در پنل و پرتال — [docs/invoices.md](docs/invoices.md) |
 
 ---
 
@@ -260,7 +261,8 @@ python3 scripts/test-topups.py     # موجودی ترافیک پیش‌خرید
 `check-code.py` در چند ثانیه چند دسته خطای رایج را می‌گیرد: ایمپورت
 شکسته، نام صادرنشده، نام ایمپورت‌نشده در JSX، تایپ عمومی نادرست در
 `query`، `catch` خالی، `data!` داخل JSX، مسیر API بدون نگهبان احراز
-هویت، ستون SQL که در هیچ مهاجرتی نیست، و چند مورد دیگر.
+هویت، ستون SQL که در هیچ مهاجرتی نیست، مقدار رویداد در فیلدی که تایپ
+اتحادی دارد، بایت کنترلی سرگردان، و چند مورد دیگر.
 
 **این جایگزین کامپایلر نیست.** برای فهرست کامل خطاهای تایپ، بدون اینکه
 منتظر بیلد کامل بمانید:
@@ -383,5 +385,5 @@ pasargad-monitor/
 ├── db/migrations/     ترتیبی؛ فقط بار اول خودکار
 ├── nginx/             panel.conf
 ├── scripts/           setup.sh، selfsigned-cert.sh
-└── docs/           install.md، deploy.md، hypervisor.md، billing.md، shop.md، tickets.md، iran-access.md
+└── docs/           install.md، deploy.md، hypervisor.md، billing.md، invoices.md، shop.md، tickets.md، iran-access.md
 ```

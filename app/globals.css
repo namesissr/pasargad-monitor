@@ -178,3 +178,48 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+/*
+  چاپ فاکتور.
+
+  پنل تیره است و چاپ تیره هم جوهر می‌سوزاند هم خوانا نیست — بیشتر
+  چاپگرها پس‌زمینه را اصلا نمی‌زنند و متن روشن روی کاغذ سفید ناپدید
+  می‌شود. پس در چاپ، سند به روشن برمی‌گردد.
+
+  هرچه کلاس no-print دارد حذف می‌شود: منو، دکمه‌ها، هشدارها. آنچه
+  می‌ماند خود فاکتور است.
+*/
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .print-doc,
+  .print-doc * {
+    background: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+
+  .print-doc .card,
+  .print-doc table,
+  .print-doc th,
+  .print-doc td {
+    border-color: #999 !important;
+  }
+
+  /* ردیف‌های جدول نباید وسط صفحه دو تکه شوند */
+  .print-doc tr {
+    break-inside: avoid;
+  }
+
+  @page {
+    margin: 14mm;
+  }
+}

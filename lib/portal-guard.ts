@@ -67,3 +67,33 @@ export async function requireOwnedTicket(rawId: unknown): Promise<{
 
   return { customerId, ticketId };
 }
+
+/**
+ * مالکیت فاکتور، پیش از هر کوئری.
+ *
+ * همان دلیل requireOwnedServer. فاکتور مبلغ، مشخصات هویتی و شناسه
+ * پرداخت را کنار هم دارد؛ دیدن فاکتور کس دیگری بدتر از دیدن نمودار
+ * مصرف اوست.
+ */
+export async function requireOwnedInvoice(rawId: unknown): Promise<{
+  customerId: number;
+  invoiceId: number;
+}> {
+  const { customerId } = await requireCustomer();
+
+  const invoiceId = Number(rawId);
+  if (!Number.isInteger(invoiceId) || invoiceId <= 0) {
+    throw new ForbiddenError('فاکتور پیدا نشد');
+  }
+
+  const row = await queryOne<{ id: number }>(
+    `SELECT id FROM invoices WHERE id = $1 AND customer_id = $2`,
+    [invoiceId, customerId],
+  );
+
+  // «پیدا نشد» نه «دسترسی ندارید»: با پیام دوم، مشتری می‌فهمد آن فاکتور
+  // وجود دارد و مال کس دیگری است.
+  if (!row) throw new ForbiddenError('فاکتور پیدا نشد');
+
+  return { customerId, invoiceId };
+}

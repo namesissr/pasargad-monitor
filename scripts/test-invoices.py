@@ -18,6 +18,11 @@
    now() + interval، مشتری‌ای که زودتر پرداخت می‌کند روزهای
    باقی‌مانده‌اش را می‌سوزاند.
 
+۴. **جزئیات فاکتور برای مشتری، فیلدهای داخلی را ندارد.** پارامترهای خام
+   درگاه و یادداشت‌های داخلی فقط در پنل دیده می‌شوند. حذفشان در یک جا
+   جمع است (ADMIN_ONLY)، نه پخش در هر مسیر — وگرنه مسیر بعدی که نوشته
+   می‌شود همان است که یادش می‌رود.
+
 اجرا:  python3 scripts/test-invoices.py
 """
 
@@ -292,6 +297,50 @@ def main():
         else:
             failures += 1
             print("شکست  کد واقعی (تحویل): %s پیدا نشد" % why)
+
+    print("")
+
+    # ── قاعده ۴: مرز جزئیات فاکتور ───────────────────────────
+    detail = read("lib", "invoice-detail.ts")
+    portal_one = read("app", "api", "portal", "invoices", "[id]", "route.ts")
+    admin_route = read("app", "api", "invoices", "route.ts")
+
+    detail_checks = [
+        (detail, "invoice-detail", "const ADMIN_ONLY", "فهرست فیلدهای داخلی یک جا جمع است"),
+        (detail, "invoice-detail", "'callback_raw'", "پارامترهای خام درگاه داخلی است"),
+        (detail, "invoice-detail", "delete invoice[key]", "فیلد داخلی از شیء حذف می‌شود"),
+        (detail, "invoice-detail", "delete order.admin_note", "یادداشت داخلی سفارش حذف می‌شود"),
+        (portal_one, "portal/[id]", "requireOwnedInvoice(params.id)", "مالکیت فاکتور تأیید می‌شود"),
+        (portal_one, "portal/[id]", "customerView(detail)", "پرتال از نمای مشتری رد می‌شود"),
+        (admin_route, "admin", "invoiceDetail(invoiceId)", "پنل جزئیات کامل می‌گیرد"),
+        (detail, "invoice-detail", "subtotal_toman", "مبلغ پیش از تخفیف در جزئیات هست"),
+    ]
+
+    for src, label, needle, why in detail_checks:
+        if needle in src:
+            print("گذشت  کد واقعی (%s): %s" % (label, why))
+        else:
+            failures += 1
+            print("شکست  کد واقعی (%s): %s پیدا نشد" % (label, why))
+
+    # مسیر پرتال هرگز نباید خودش invoiceDetail خام را برگرداند.
+    #
+    # مرز بعد از detail لازم است: بدون آن، customerView(detail) هم که
+    # درست است شمرده می‌شود. نسخه اول این الگو یک بایت خراب داشت و
+    # هیچ‌وقت تطبیق نمی‌داد — بررسی‌ای که همیشه سبز بود.
+    if re.search(r"ok\(\s*\{?\s*\.\.\.detail[,\s}]", portal_one):
+        failures += 1
+        print("شکست  کد واقعی (portal/[id]): جزئیات خام بدون customerView برمی‌گردد")
+    else:
+        print("گذشت  کد واقعی (portal/[id]): جزئیات خام مستقیم برنمی‌گردد")
+
+    # شارژ ترافیک باید به فاکتورش وصل شود، وگرنه «این فاکتور چه تحویل
+    # داد» فقط از روی متن یادداشت قابل حدس است
+    if "INSERT INTO traffic_topups (server_id, gb, price_toman, note, invoice_id)" in inv:
+        print("گذشت  کد واقعی (invoices): شارژ ترافیک به فاکتورش وصل می‌شود")
+    else:
+        failures += 1
+        print("شکست  کد واقعی (invoices): شارژ ترافیک شناسه فاکتور نمی‌گیرد")
 
     print("")
     if failures:

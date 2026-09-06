@@ -59,7 +59,7 @@ export function Shell({ username, children }: { username: string; children: Reac
         صفحه می‌افتاد و اصلا دیده نمی‌شد.
       */}
       <aside
-        className={`fixed start-0 lg:start-auto lg:sticky top-0 h-[100dvh] lg:h-screen w-64 max-w-[85vw]
+        className={`no-print fixed start-0 lg:start-auto lg:sticky top-0 h-[100dvh] lg:h-screen w-64 max-w-[85vw]
                     lg:w-60 shrink-0 bg-panel border-e border-line flex flex-col
                     z-40 transition-transform duration-200
                     ${open ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}`}
@@ -108,7 +108,7 @@ export function Shell({ username, children }: { username: string; children: Reac
       {open && <div className="fixed inset-0 bg-black/60 z-30 lg:hidden" onClick={() => setOpen(false)} />}
 
       <div className="flex-1 min-w-0">
-        <header className="h-14 border-b border-line flex items-center gap-3 px-4 lg:px-6 sticky top-0 bg-rack/90 backdrop-blur z-20">
+        <header className="no-print h-14 border-b border-line flex items-center gap-3 px-4 lg:px-6 sticky top-0 bg-rack/90 backdrop-blur z-20">
           {/* هدف لمسی باید دست‌کم ۴۴ پیکسل باشد؛ آیکون تنها روی موبایل
               به‌سختی زده می‌شود */}
           <button

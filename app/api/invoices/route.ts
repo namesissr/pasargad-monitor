@@ -2,6 +2,7 @@ import { query, queryOne } from '@/lib/db';
 import { requireUser } from '@/lib/auth';
 import { fail, handle, idParam, ok, readJson } from '@/lib/http';
 import { nextInvoiceNumber, settleInvoice, verifyAndSettle } from '@/lib/invoices';
+import { invoiceDetail } from '@/lib/invoice-detail';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,17 @@ export async function GET(req: Request) {
 
     const status = url.searchParams.get('status') || '';
     const customerId = idParam(url, 'customer_id');
+    const kind = url.searchParams.get('kind') || '';
+    const q = (url.searchParams.get('q') || '').trim();
+
+    // یک فاکتور مشخص: همه جزئیات، همان چیزی که پرتال هم می‌بیند به‌علاوه
+    // ردپای پرداخت و یادداشت داخلی
+    const invoiceId = idParam(url, 'id');
+    if (invoiceId !== null) {
+      const detail = await invoiceDetail(invoiceId);
+      if (!detail) return fail('فاکتور پیدا نشد', 404);
+      return ok(detail);
+    }
 
     const params: unknown[] = [];
     const where: string[] = [];
@@ -35,6 +47,20 @@ export async function GET(req: Request) {
     if (customerId !== null) {
       params.push(customerId);
       where.push(`i.customer_id = $${params.length}`);
+    }
+    if (['renewal', 'traffic', 'manual', 'order'].includes(kind)) {
+      params.push(kind);
+      where.push(`i.kind = $${params.length}`);
+    }
+    // جستجو روی شماره فاکتور، نام مشتری، نام سرور و شناسه پیگیری.
+    // شناسه پیگیری عمدا هست: وقتی مشتری زنگ می‌زند و می‌گوید «پول کم
+    // شد»، تنها چیزی که دستش است همان شناسه است.
+    if (q) {
+      params.push(`%${q}%`);
+      const n = params.length;
+      where.push(
+        `(i.number ILIKE $${n} OR c.name ILIKE $${n} OR s.name ILIKE $${n} OR i.payment_ref ILIKE $${n})`,
+      );
     }
 
     const rows = await query(
@@ -54,12 +80,26 @@ export async function GET(req: Request) {
       params,
     );
 
-    const totals = await queryOne<{ unpaid: number; paid_month: number; unpaid_count: number }>(
+    // جمع‌ها همیشه روی کل فاکتورهاست، نه روی فیلتر جاری. عمدی است:
+    // این دو عدد وضعیت کسب‌وکارند، نه خلاصه جدولِ زیرشان. اگر با فیلتر
+    // عوض می‌شدند، «در انتظار پرداخت» با فیلتر «پرداخت‌شده» صفر
+    // می‌شد — عددی درست که معنی غلط می‌دهد.
+    const totals = await queryOne<{
+      unpaid: number;
+      paid_month: number;
+      unpaid_count: number;
+      paid_total: number;
+      overdue_count: number;
+    }>(
       `SELECT COALESCE(SUM(amount_toman) FILTER (WHERE status = 'unpaid'), 0)::float8 AS unpaid,
               COALESCE(SUM(amount_toman) FILTER (
                 WHERE status = 'paid' AND paid_at >= date_trunc('month', now())
               ), 0)::float8 AS paid_month,
-              COUNT(*) FILTER (WHERE status = 'unpaid')::int AS unpaid_count
+              COALESCE(SUM(amount_toman) FILTER (WHERE status = 'paid'), 0)::float8 AS paid_total,
+              COUNT(*) FILTER (WHERE status = 'unpaid')::int AS unpaid_count,
+              COUNT(*) FILTER (
+                WHERE status = 'unpaid' AND due_at IS NOT NULL AND due_at < CURRENT_DATE
+              )::int AS overdue_count
          FROM invoices`,
     );
 

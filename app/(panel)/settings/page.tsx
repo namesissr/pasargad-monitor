@@ -457,6 +457,59 @@ export default function SettingsPage() {
         </p>
       </section>
 
+      {/* مشخصات روی فاکتور */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">مشخصات روی فاکتور</h2>
+
+        <Notice type="info">
+          این‌ها در سربرگ فاکتوری می‌آیند که مشتری می‌بیند و چاپ می‌کند. خالی‌بودنشان چیزی را
+          نمی‌شکند — فقط آن بخش از فاکتور حذف می‌شود.
+        </Notice>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="نام فروشنده">
+            <input
+              className="input"
+              value={form.invoice_seller_name ?? ''}
+              onChange={set('invoice_seller_name')}
+              placeholder="پاسارگاد میزبان"
+            />
+          </Field>
+          <Field label="شناسه ملی یا اقتصادی">
+            <input
+              className="input ltr"
+              value={form.invoice_seller_id ?? ''}
+              onChange={set('invoice_seller_id')}
+            />
+          </Field>
+          <Field label="تلفن">
+            <input
+              className="input ltr"
+              value={form.invoice_seller_phone ?? ''}
+              onChange={set('invoice_seller_phone')}
+            />
+          </Field>
+          <Field label="نشانی">
+            <input
+              className="input"
+              value={form.invoice_seller_address ?? ''}
+              onChange={set('invoice_seller_address')}
+            />
+          </Field>
+        </div>
+
+        <Field
+          label="یادداشت پای فاکتور"
+          hint="روی همه فاکتورها می‌آید — شرایط، شماره حساب، هر چیزی که همیشه باید باشد"
+        >
+          <textarea
+            className="input min-h-[80px]"
+            value={form.invoice_footer ?? ''}
+            onChange={set('invoice_footer')}
+          />
+        </Field>
+      </section>
+
       {/* پشتیبانی */}
       <section className="card p-5 space-y-4">
         <h2 className="text-sm font-bold">پشتیبانی و تیکت</h2>
