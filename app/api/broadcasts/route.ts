@@ -176,6 +176,42 @@ export async function PATCH(req: Request) {
     const id = Number(body.id);
     if (!Number.isInteger(id) || id <= 0) return fail('شناسه ارسال نامعتبر است', 400);
 
+    /**
+     * تلاش دوباره فقط برای گیرنده‌های ناموفق.
+     *
+     * ردیف‌های ناموفق به pending برمی‌گردند و شمارنده ناموفق به همان
+     * اندازه کم می‌شود، وگرنه بعد از تلاش دوباره جمع sent و failed از
+     * total بیشتر می‌شود و عددها بی‌معنی.
+     *
+     * ردیف‌های موفق دست نمی‌خورند — تلاش دوباره نباید به کسی که پیام
+     * گرفته دوباره پیام بفرستد.
+     */
+    if (String(body.action) === 'retry_failed') {
+      const rows = await query<{ n: number }>(
+        `WITH reset AS (
+           UPDATE broadcast_recipients
+              SET status = 'pending', error = NULL, sent_at = NULL
+            WHERE broadcast_id = $1 AND status = 'failed'
+            RETURNING 1
+         )
+         SELECT COUNT(*)::int AS n FROM reset`,
+        [id],
+      );
+      const n = Number(rows[0]?.n) || 0;
+      if (!n) return fail('گیرنده ناموفقی برای تلاش دوباره نیست', 400);
+
+      await query(
+        `UPDATE broadcasts
+            SET failed = GREATEST(failed - $2, 0),
+                status = 'queued',
+                finished_at = NULL
+          WHERE id = $1`,
+        [id, n],
+      );
+
+      return ok({ retried: n });
+    }
+
     if (String(body.action) !== 'cancel') return fail('عملیات نامعتبر است', 400);
 
     // پیام‌هایی که رفته‌اند برنمی‌گردند؛ لغو فقط جلوی بقیه را می‌گیرد.

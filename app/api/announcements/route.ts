@@ -49,6 +49,30 @@ export async function GET(req: Request) {
       `SELECT COUNT(*)::int AS n FROM customers WHERE is_active`,
     );
 
+    // برای یک اطلاعیه مشخص: چه کسانی دیدند و چه کسانی نه.
+    //
+    // فهرست ندیده‌ها همان چیزی است که واقعا کار دارد — کسی که هنوز
+    // خبردار نشده و شاید باید مستقیم با او تماس گرفت.
+    if (id !== null) {
+      const readers = await query(
+        `SELECT c.id, c.name, c.phone,
+                r.read_at,
+                (r.customer_id IS NOT NULL) AS seen
+           FROM customers c
+           LEFT JOIN announcement_reads r
+             ON r.customer_id = c.id AND r.announcement_id = $1
+          WHERE c.is_active
+          ORDER BY
+            -- ندیده‌ها اول: همان‌هایی که کار دارند
+            (r.customer_id IS NOT NULL),
+            r.read_at DESC NULLS LAST,
+            c.name
+          LIMIT 1000`,
+        [id],
+      );
+      return ok({ announcements: rows, customers: total?.n ?? 0, readers });
+    }
+
     return ok({ announcements: rows, customers: total?.n ?? 0 });
   });
 }

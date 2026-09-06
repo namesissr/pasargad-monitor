@@ -152,7 +152,10 @@ def main():
     modal = read("components", "AnnouncementModal.tsx")
     bcast = read("app", "api", "broadcasts", "route.ts")
     worker = read("worker", "broadcasts.mjs")
-    panel = read("app", "(panel)", "settings", "broadcast.tsx")
+    panel = read("app", "(panel)", "broadcasts", "page.tsx")
+    annpage = read("app", "(panel)", "announcements", "page.tsx")
+    settings = read("app", "(panel)", "settings", "page.tsx")
+    shell = read("components", "Shell.tsx")
     mig = read("db", "migrations", "045_announcements.sql")
 
     source_checks = [
@@ -194,14 +197,38 @@ def main():
         # ── قاعده ۶: جدایی ایمیل و پیامک ────────────────────
         (bcast, "broadcasts", "channel !== 'email' && channel !== 'sms'",
          "کانال فقط یکی از این دو"),
-        (panel, "panel", 'channel="email"', "کارت ایمیل جداست"),
-        (panel, "panel", 'channel="sms"', "کارت پیامک جداست"),
+        (panel, "panel", "const isSms = channel === 'sms'",
+         "فرم بر اساس کانال شاخه می‌شود"),
+        (panel, "panel", "['email', 'ایمیل']", "انتخاب کانال ایمیل صریح است"),
+        (panel, "panel", "['sms', 'پیامک']", "انتخاب کانال پیامک صریح است"),
+        (panel, "panel", "پیامک به ${chosen} مشتری فرستاده شود؟",
+         "تأیید پیامک متن خودش را دارد"),
+        (panel, "panel", "subject: isSms ? '' : subject",
+         "پیامک موضوع نمی‌فرستد"),
         (panel, "panel", "پیامک هزینه دارد", "هزینه پیامک پیش از ارسال گفته می‌شود"),
 
         # ── سابقه، و نشانی کپی‌شده ──────────────────────────
         (bcast, "broadcasts", "address", "نشانی در لحظه صف کپی می‌شود"),
         (admin, "announcements", "این اطلاعیه را مشتری‌ها دیده‌اند و حذف نمی‌شود",
          "اطلاعیه دیده‌شده حذف نمی‌شود"),
+
+        # ── صفحه‌های مستقل، نه بخشی از تنظیمات ──────────────
+        (shell, "منو", "'/announcements'", "اطلاعیه‌ها در منو هست"),
+        (shell, "منو", "'/broadcasts'", "ارسال همگانی در منو هست"),
+
+        # ── چه کسانی دیدند، چه کسانی نه ─────────────────────
+        (admin, "announcements", "r.customer_id IS NOT NULL) AS seen",
+         "فهرست بینندگان و ندیده‌ها برمی‌گردد"),
+        (annpage, "announcements-page", "مخاطبان", "دکمه دیدن مخاطبان"),
+        (annpage, "announcements-page", "پیش‌نمایش", "پیش‌نمایش پاپ‌آپ هنگام نوشتن"),
+
+        # ── تلاش دوباره فقط برای ناموفق‌ها ──────────────────
+        (bcast, "broadcasts", "retry_failed", "تلاش دوباره وجود دارد"),
+        (bcast, "broadcasts", "WHERE broadcast_id = $1 AND status = 'failed'",
+         "فقط ناموفق‌ها دوباره در صف می‌روند، نه موفق‌ها"),
+        (bcast, "broadcasts", "GREATEST(failed - $2, 0)",
+         "شمارنده ناموفق هم به همان اندازه کم می‌شود"),
+        (panel, "panel", "r.error", "علت خطای هر گیرنده نشان داده می‌شود"),
     ]
 
     for src, label, needle, why in source_checks:
@@ -243,6 +270,18 @@ def main():
         print("شکست  کد واقعی (modal): کلیک روی پرده پنجره را می‌بندد")
     else:
         print("گذشت  کد واقعی (modal): کلیک روی پرده کاری نمی‌کند")
+
+    print("")
+
+    # اطلاعیه و ارسال همگانی صفحه خودشان را دارند و دیگر بخشی از
+    # تنظیمات نیستند. ماندنشان در هر دو جا یعنی دو نسخه که از هم فاصله
+    # می‌گیرند.
+    for needle, label in (("AnnouncementsPanel", "اطلاعیه"), ("BroadcastPanel", "ارسال همگانی")):
+        if needle in settings:
+            failures += 1
+            print("شکست  کد واقعی (settings): «%s» هنوز در تنظیمات است" % label)
+        else:
+            print("گذشت  کد واقعی (settings): «%s» از تنظیمات برداشته شده" % label)
 
     print("")
 
