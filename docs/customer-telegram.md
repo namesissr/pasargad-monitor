@@ -129,6 +129,8 @@ docker compose exec -T postgres psql -U pasargad -d pasargad_monitor < db/migrat
 
 **دسترسی به `api.telegram.org` از ایران:** با `TELEGRAM_API_BASE` از یک
 واسط عبور دهید — همان متغیری که برای فرستادن هشدار هم استفاده می‌شود.
+راهنمای قدم‌به‌قدم راه‌اندازی واسط روی سرور خارج:
+[docs/telegram-relay.md](telegram-relay.md)
 
 ## خاموش‌کردن
 

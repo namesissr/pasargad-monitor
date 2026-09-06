@@ -27,6 +27,7 @@
 | فروشگاه عمومی | سفارش سرور بدون ثبت‌نام قبلی؛ ثبت‌نام حین سفارش — [docs/store.md](docs/store.md) |
 | ورود با کد پیامکی | مشتری با شماره موبایل و کد شش‌رقمی وارد می‌شود — [docs/otp-login.md](docs/otp-login.md) |
 | تلگرام مشتری | هشدار سهمیه، تمدید، پرداخت و پاسخ تیکت در تلگرام مشتری — [docs/customer-telegram.md](docs/customer-telegram.md) |
+| تلگرام از ایران | راه‌اندازی واسط روی سرور خارج، قدم‌به‌قدم — [docs/telegram-relay.md](docs/telegram-relay.md) |
 | اطلاعیه و ارسال همگانی | پاپ‌آپ اطلاعیه در پرتال، و ایمیل و پیامک گروهی — [docs/announcements.md](docs/announcements.md) |
 
 ---
@@ -392,5 +393,5 @@ pasargad-monitor/
 ├── db/migrations/     ترتیبی؛ فقط بار اول خودکار
 ├── nginx/             panel.conf
 ├── scripts/           setup.sh، selfsigned-cert.sh
-└── docs/           install.md، deploy.md، hypervisor.md، billing.md، invoices.md، shop.md، store.md، otp-login.md، customer-telegram.md، announcements.md، tickets.md، iran-access.md
+└── docs/           install.md، deploy.md، hypervisor.md، billing.md، invoices.md، shop.md، store.md، otp-login.md، customer-telegram.md، telegram-relay.md، announcements.md، tickets.md، iran-access.md
 ```

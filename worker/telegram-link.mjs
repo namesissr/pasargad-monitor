@@ -1,4 +1,4 @@
-import { q, settings, log, logErr } from './db.mjs';
+import { q, q1, settings, log, logErr } from './db.mjs';
 import { sendTelegram } from './telegram.mjs';
 
 /**
@@ -64,10 +64,26 @@ async function call(method, body) {
   }
 }
 
-/** نام کاربری ربات، برای ساختن لینک t.me */
+/**
+ * نام کاربری ربات، برای ساختن لینک t.me.
+ *
+ * از دیتابیس خوانده می‌شود نه از settings()، چون آن پانزده ثانیه کش
+ * دارد و چرخه این بخش هر ده ثانیه است: مقداری که همین حالا نوشته شده
+ * در دور بعد هنوز خالی دیده می‌شود و getMe بی‌دلیل دوباره صدا زده
+ * می‌شود.
+ *
+ * memo هم هست تا در حالت عادی حتی یک کوئری هم نزند.
+ */
+let botUsername = '';
+
 async function ensureBotUsername() {
-  const s = await settings();
-  if (s.telegram_bot_username) return s.telegram_bot_username;
+  if (botUsername) return botUsername;
+
+  const row = await q1(`SELECT value FROM settings WHERE key = 'telegram_bot_username'`);
+  if (row?.value) {
+    botUsername = row.value;
+    return botUsername;
+  }
 
   const me = await call('getMe');
   if (!me.ok || !me.result?.username) {
@@ -80,8 +96,9 @@ async function ensureBotUsername() {
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
     [me.result.username],
   );
-  log('نام کاربری ربات تلگرام ثبت شد:', me.result.username);
-  return me.result.username;
+  botUsername = me.result.username;
+  log('نام کاربری ربات تلگرام ثبت شد:', botUsername);
+  return botUsername;
 }
 
 /** پاسخ کوتاه به همان گفتگو */
@@ -120,6 +137,16 @@ async function handleMessage(msg) {
   }
 
   // ── اتصال با کد ───────────────────────────────────────
+  // شناسه گفتگو در لاگ نوشته می‌شود.
+  //
+  // برای گرفتن شناسه گفتگوی خودِ ادمین لازم است: هشدارهای پنل به
+  // telegram_chat_ids می‌روند و آن عدد را از جایی باید برداشت.
+  //
+  // راه معمولش صداکردن دستی getUpdates است، ولی ورکر با offset همان
+  // به‌روزرسانی‌ها را مصرف می‌کند و آن دو با هم مسابقه می‌دهند. اینجا
+  // نوشتنش، آن مسابقه را حذف می‌کند.
+  log(`پیام تلگرام از گفتگوی ${chatId}`);
+
   const start = text.match(/^\/start(?:\s+(\S+))?$/);
   if (!start) {
     await reply(
@@ -200,7 +227,14 @@ export async function pollTelegram() {
 
   await ensureBotUsername();
 
-  const offset = Number(s.telegram_updates_offset || 0) || 0;
+  // مستقیم از دیتابیس، نه از s که کش‌شده است. با کش، offsetی که دور
+  // قبل نوشته شده هنوز قدیمی دیده می‌شود و همان به‌روزرسانی‌ها دوباره
+  // پردازش می‌شوند — یعنی پاسخ تکراری، و برای کد اتصال یک پیام
+  // «کد معتبر نیست» درست بعد از اتصال موفق.
+  const offsetRow = await q1(
+    `SELECT value FROM settings WHERE key = 'telegram_updates_offset'`,
+  );
+  const offset = Number(offsetRow?.value || 0) || 0;
 
   // timeout=0 یعنی بدون long polling: چرخه ورکر خودش زمان‌بندی دارد و
   // نگه‌داشتن اتصال باز، فقط یک اتصال دیگر است که می‌تواند گیر کند.
