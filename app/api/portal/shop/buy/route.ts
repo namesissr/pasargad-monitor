@@ -1,9 +1,10 @@
-import { query, queryOne } from '@/lib/db';
+import { queryOne } from '@/lib/db';
 import { requireCustomer, ForbiddenError } from '@/lib/auth';
 import { fail, handle, ok, readJson } from '@/lib/http';
 import { getSettings } from '@/lib/settings';
-import { nextInvoiceNumber, settleInvoice } from '@/lib/invoices';
-import { validateDiscount, type DiscountScope } from '@/lib/discounts';
+import { nextInvoiceNumber } from '@/lib/invoices';
+import { validateDiscount } from '@/lib/discounts';
+import { createProductOrder, settleIfFree } from '@/lib/shop-order';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,29 +40,6 @@ export const dynamic = 'force-dynamic';
  * واقعی هنگام پرداخت موفق انجام می‌شود، وگرنه با شروع و لغو مکرر
  * ظرفیت کد می‌سوخت.
  */
-
-/**
- * فاکتور صفر تومانی را همان‌جا تسویه می‌کند.
- *
- * تخفیفی که کل مبلغ را بپوشاند، چیزی برای پرداخت نمی‌گذارد. فرستادن
- * مشتری به درگاه با مبلغ صفر فقط خطا می‌دهد؛ سرویس باید بلافاصله
- * تحویل شود.
- */
-async function settleIfFree(invoiceId: number, payable: number) {
-  if (payable > 0) return { free: false as const };
-  const result = await settleInvoice(invoiceId, {
-    refId: null,
-    paymentCode: null,
-    cardNumber: null,
-  });
-  return { free: true as const, ok: result.ok, error: result.error };
-}
-
-/** شماره سفارش خوانا */
-async function nextOrderNumber(): Promise<string> {
-  const row = await queryOne<{ n: string }>(`SELECT nextval('order_number_seq')::text AS n`);
-  return `S${new Date().getFullYear()}-${String(row?.n ?? '1').padStart(5, '0')}`;
-}
 
 export async function POST(req: Request) {
   return handle(async () => {
@@ -149,93 +127,26 @@ export async function POST(req: Request) {
     }
 
     // ── محصول ─────────────────────────────────────────────
+    //
+    // منطقش در lib/shop-order.ts است چون فروشگاه عمومی هم همان را صدا
+    // می‌زند. قاعده «قیمت از دیتابیس، نه از درخواست» باید یک جا باشد.
     if (type === 'product') {
-      const productId = Number(body.product_id);
-      if (!Number.isInteger(productId) || productId <= 0) {
-        return fail('محصول را انتخاب کنید', 400);
-      }
-
-      const product = await queryOne<{
-        id: number;
-        name: string;
-        price_toman: number;
-        setup_toman: number;
-        stock: number | null;
-      }>(
-        `SELECT id, name, price_toman::float8 AS price_toman,
-                setup_toman::float8 AS setup_toman, stock
-           FROM products WHERE id = $1 AND is_active`,
-        [productId],
-      );
-      if (!product) return fail('این محصول دیگر در دسترس نیست', 404);
-
-      // موجودی اینجا فقط بررسی می‌شود، نه رزرو. رزرو یعنی فاکتور
-      // رهاشده موجودی را تا ابد قفل کند. کم‌شدن واقعی هنگام پرداخت
-      // انجام می‌شود.
-      if (product.stock !== null && product.stock <= 0) {
-        return fail('موجودی این محصول تمام شده است', 409);
-      }
-
-      const subtotal = Math.round(Number(product.price_toman) + Number(product.setup_toman));
-      const discount = await validateDiscount(body.discount_code, {
+      const result = await createProductOrder({
         customerId,
-        scope: 'product',
-        subtotal,
-        itemId: product.id,
+        productId: body.product_id,
+        discountCode: body.discount_code,
+        note: body.note,
       });
-      if (discount.reason) return fail(discount.reason, 400);
-
-      const total = Math.max(0, subtotal - discount.discount);
-
-      const orderNumber = await nextOrderNumber();
-      const order = await queryOne<{ id: number }>(
-        `INSERT INTO orders
-           (number, customer_id, product_id, product_name, price_toman, note)
-         VALUES ($1, $2, $3, $4, $5, NULLIF($6,''))
-         RETURNING id`,
-        [
-          orderNumber,
-          customerId,
-          product.id,
-          product.name,
-          // قیمت روی سفارش، همان مبلغی است که مشتری واقعا می‌پردازد
-          total,
-          String(body.note ?? '').trim().slice(0, 500),
-        ],
-      );
-
-      const number = await nextInvoiceNumber();
-      const invoice = await queryOne<{ id: number }>(
-        `INSERT INTO invoices
-           (number, customer_id, kind, title, amount_toman,
-            subtotal_toman, discount_toman, discount_code_id, order_id, due_at)
-         VALUES ($1, $2, 'order', $3, $4, $5, $6, $7, $8, CURRENT_DATE)
-         RETURNING id`,
-        [
-          number,
-          customerId,
-          `سفارش ${product.name}`,
-          total,
-          subtotal,
-          discount.discount,
-          discount.codeId,
-          order?.id,
-        ],
-      );
-
-      await query(`UPDATE orders SET invoice_id = $2 WHERE id = $1`, [order?.id, invoice?.id]);
-
-      const free = await settleIfFree(Number(invoice?.id), total);
-      if (free.free && !free.ok) return fail(free.error || 'ثبت سفارش رایگان ناموفق بود', 500);
+      if (!result.ok) return fail(result.error || 'ثبت سفارش ناموفق بود', result.status ?? 400);
 
       return ok(
         {
-          invoiceId: invoice?.id,
-          number,
-          orderNumber,
-          payable: total,
-          discount: discount.discount,
-          paid: free.free,
+          invoiceId: result.invoiceId,
+          number: result.number,
+          orderNumber: result.orderNumber,
+          payable: result.payable,
+          discount: result.discount,
+          paid: result.paid,
         },
         { status: 201 },
       );

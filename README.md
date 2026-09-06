@@ -24,6 +24,7 @@
 | گزارش | نمودار، جدول تفکیکی و خروجی CSV |
 | پشتیبانی | تیکت مشتری با اطلاع‌رسانی دوطرفه ایمیل — [docs/tickets.md](docs/tickets.md) |
 | فاکتور | صدور خودکار، پرداخت آنلاین، و سند فاکتور قابل چاپ در پنل و پرتال — [docs/invoices.md](docs/invoices.md) |
+| فروشگاه عمومی | سفارش سرور بدون ثبت‌نام قبلی؛ ثبت‌نام حین سفارش — [docs/store.md](docs/store.md) |
 
 ---
 
@@ -252,7 +253,7 @@ for f in scripts/test-*.py; do python3 "$f" | tail -1; done
 ```bash
 python3 scripts/test-invoices.py   # فاکتور، پرداخت، اید‌مپوتنت‌بودن تسویه
 python3 scripts/test-discounts.py  # کد تخفیف: مصرف فقط پس از پرداخت، هدف کد
-python3 scripts/test-portal.py     # مرز دسترسی مشتری در پرتال
+python3 scripts/test-portal.py     # مرز دسترسی مشتری، و امنیت فروشگاه عمومی
 python3 scripts/test-tickets.py    # پشتیبانی و تیکت
 python3 scripts/test-shop.py       # فروشگاه و تحویل
 python3 scripts/test-topups.py     # موجودی ترافیک پیش‌خرید
@@ -385,5 +386,5 @@ pasargad-monitor/
 ├── db/migrations/     ترتیبی؛ فقط بار اول خودکار
 ├── nginx/             panel.conf
 ├── scripts/           setup.sh، selfsigned-cert.sh
-└── docs/           install.md، deploy.md، hypervisor.md، billing.md، invoices.md، shop.md، tickets.md، iran-access.md
+└── docs/           install.md، deploy.md، hypervisor.md، billing.md، invoices.md، shop.md، store.md، tickets.md، iran-access.md
 ```

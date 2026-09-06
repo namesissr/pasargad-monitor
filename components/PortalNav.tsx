@@ -20,6 +20,7 @@ const NAV = [
   { href: '/portal/invoices', label: 'فاکتورها' },
   { href: '/portal/topups', label: 'خرید ترافیک' },
   { href: '/portal/tickets', label: 'پشتیبانی' },
+  { href: '/portal/profile', label: 'پروفایل' },
 ];
 
 export function PortalNav() {

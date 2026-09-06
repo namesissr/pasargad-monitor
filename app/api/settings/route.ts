@@ -48,6 +48,8 @@ const ALLOWED = [
   'invoice_seller_phone',
   'invoice_seller_address',
   'invoice_footer',
+  'store_public_enabled',
+  'store_intro',
 ];
 
 /**

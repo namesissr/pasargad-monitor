@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLoad, LoadState } from '@/components/useLoad';
 import { Notice } from '@/components/ui';
 import { InvoiceDoc, type InvoiceDetailData } from '@/components/InvoiceDoc';
@@ -25,6 +25,18 @@ export default function PortalInvoicePage({ params }: { params: { id: string } }
   const { data, loading, error, reload } = useLoad<Data>(`/api/portal/invoices/${params.id}`);
   const [paying, setPaying] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [justOrdered, setJustOrdered] = useState(false);
+
+  // فروشگاه عمومی پس از ثبت سفارش با ?pay=1 به اینجا می‌آورد.
+  //
+  // پارامتر از window خوانده می‌شود نه از useSearchParams: آن هوک کل
+  // صفحه را به Suspense نیاز می‌اندازد و اینجا فقط یک بنر است.
+  //
+  // عمدا خودکار به درگاه نمی‌رود — انتقال بی‌کلیک برای کسی که تازه
+  // ثبت‌نام کرده ترسناک است و اغلب همان‌جا صفحه را می‌بندد.
+  useEffect(() => {
+    setJustOrdered(new URLSearchParams(window.location.search).get('pay') === '1');
+  }, []);
 
   async function pay() {
     setMsg(null);
@@ -70,6 +82,22 @@ export default function PortalInvoicePage({ params }: { params: { id: string } }
       {msg && (
         <div className="no-print">
           <Notice type="error">{msg}</Notice>
+        </div>
+      )}
+
+      {justOrdered && inv.status === 'unpaid' && (
+        <div className="no-print">
+          <Notice type="success">
+            سفارش شما ثبت شد. برای شروع آماده‌سازی، فاکتور زیر را پرداخت کنید.
+          </Notice>
+        </div>
+      )}
+
+      {justOrdered && inv.status === 'paid' && (
+        <div className="no-print">
+          <Notice type="success">
+            سفارش شما ثبت و تسویه شد. به‌زودی برای آماده‌سازی با شما تماس می‌گیریم.
+          </Notice>
         </div>
       )}
 

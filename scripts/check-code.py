@@ -384,10 +384,19 @@ def check_union_props():
 # جای دیگری می‌آید: شناسه پرداخت را فقط درگاه می‌دهد، مبلغ از دیتابیس
 # خوانده می‌شود، شماره فاکتور بازگشتی با فاکتور سنجیده می‌شود، و خود
 # مسیر هیچ داده‌ای نشان نمی‌دهد — فقط ریدایرکت می‌کند.
+# مسیرهایی که عمدا نگهبان ندارند، و دلیل هرکدام.
+#
+# app/api/store/* فروشگاه عمومی است: مشتری تازه باید پیش از ثبت‌نام
+# محصولات را ببیند و بتواند سفارش بدهد. هر دو مسیر سقف نرخ دارند و
+# checkout شناسه مشتری را هرگز از بدنه نمی‌خواند — یا از نشست است یا از
+# حسابی که همان‌جا ساخته یا احراز شد.
 OPEN_ROUTES = {"app/api/ingest/route.ts", "app/api/auth/login/route.ts",
                "app/api/auth/logout/route.ts", "app/api/health/route.ts",
                "app/api/probe/route.ts", "app/api/bind/route.ts",
-               "app/api/pay/return/[id]/route.ts"}
+               "app/api/pay/return/[id]/route.ts",
+               "app/api/store/products/route.ts",
+               "app/api/store/checkout/route.ts",
+               "app/api/store/session/route.ts"}
 
 
 def check_route_auth():

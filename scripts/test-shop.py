@@ -133,14 +133,22 @@ def main():
     packages = read("app", "api", "packages", "route.ts")
     products = read("app", "api", "products", "route.ts")
     orders = read("app", "api", "orders", "route.ts")
+    order_lib = read("lib", "shop-order.ts")
+    store = read("app", "api", "store", "checkout", "route.ts")
     mig = read("db", "migrations", "036_shop.sql")
 
     source_checks = [
         # ── قاعده ۱: قیمت از دیتابیس ──────────────────────────
         (buy, "buy", "Math.round(Number(pack.price_toman))",
          "قیمت بسته از دیتابیس می‌آید"),
-        (buy, "buy", "Number(product.price_toman) + Number(product.setup_toman)",
+        # سفارش محصول به lib/shop-order.ts منتقل شد چون فروشگاه عمومی
+        # هم همان را صدا می‌زند. قاعده قیمت باید یک جا بماند، وگرنه در
+        # نسخه‌ای که از اینترنت باز در دسترس است شل می‌شود.
+        (order_lib, "shop-order", "Number(product.price_toman) + Number(product.setup_toman)",
          "قیمت محصول از دیتابیس می‌آید"),
+        (buy, "buy", "createProductOrder(", "فروشگاه پرتال از تابع مشترک استفاده می‌کند"),
+        (store, "store/checkout", "createProductOrder(",
+         "فروشگاه عمومی هم از همان تابع مشترک استفاده می‌کند"),
 
         # ── قاعده ۲: مالکیت سرور ─────────────────────────────
         (buy, "buy", "AND customer_id = $2 AND is_active",
@@ -195,13 +203,21 @@ def main():
 
     # قیمت و مقدار هرگز نباید از بدنه درخواست خوانده شوند. این بررسی
     # صریح است چون همان حفره‌ای است که بیشترین ضرر را می‌زند.
-    for field in ("price_toman", "amount_toman", "gb", "setup_toman", "traffic_gb"):
-        bad = re.search(r"\bbody\.%s\b" % field, buy)
-        if bad:
-            failures += 1
-            print("شکست  کد واقعی (buy): «%s» از بدنه درخواست خوانده می‌شود" % field)
-        else:
-            print("گذشت  کد واقعی (buy): «%s» از بدنه درخواست خوانده نمی‌شود" % field)
+    #
+    # هر سه فایلی که سفارش می‌سازند بررسی می‌شوند، نه فقط یکی. opts. هم
+    # کنار body. می‌آید چون در تابع مشترک، ورودی از مسیر با همان نام
+    # می‌رسد — و همان‌جا هم نباید قیمت از بیرون بیاید.
+    for label, src, prefix in (
+        ("buy", buy, "body"),
+        ("shop-order", order_lib, "opts"),
+        ("store/checkout", store, "body"),
+    ):
+        for field in ("price_toman", "amount_toman", "gb", "setup_toman", "traffic_gb"):
+            if re.search(r"\b%s\.%s\b" % (prefix, field), src):
+                failures += 1
+                print("شکست  کد واقعی (%s): «%s» از ورودی خوانده می‌شود" % (label, field))
+            else:
+                print("گذشت  کد واقعی (%s): «%s» از ورودی خوانده نمی‌شود" % (label, field))
 
     print("")
 

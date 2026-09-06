@@ -457,6 +457,51 @@ export default function SettingsPage() {
         </p>
       </section>
 
+      {/* فروشگاه عمومی */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">فروشگاه عمومی</h2>
+
+        <Notice type="info">
+          نشانی <span className="ltr">/store</span> بدون ورود باز است: بازدیدکننده محصولات را
+          می‌بیند، سفارش می‌دهد و همان‌جا ثبت‌نام می‌کند. محصولات و قیمت‌ها از همان بخش
+          «فروشگاه» می‌آیند.
+        </Notice>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field
+            label="سفارش بدون ثبت‌نام قبلی"
+            hint="خاموش‌کردن فقط فروشگاه عمومی را می‌بندد؛ خرید مشتری‌های فعلی از پرتال باز می‌ماند"
+          >
+            <select
+              className="input"
+              value={form.store_public_enabled ?? 'true'}
+              onChange={set('store_public_enabled')}
+            >
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+        </div>
+
+        <Field
+          label="متن بالای فروشگاه"
+          hint="خالی یعنی متن پیش‌فرض"
+        >
+          <textarea
+            className="input min-h-[70px]"
+            value={form.store_intro ?? ''}
+            onChange={set('store_intro')}
+          />
+        </Field>
+
+        <Notice type="warn">
+          سقف نرخ روی ثبت سفارش عمومی هست (هشت درخواست در ده دقیقه از هر آی‌پی) ولی تأیید شماره
+          موبایل با پیامک <b>نیست</b>. یعنی کسی می‌تواند با شماره‌ای که مال خودش نیست ثبت‌نام
+          کند. تا وقتی تحویل سرور دستی است این خطری ندارد — شما پیش از تحویل با مشتری تماس
+          می‌گیرید.
+        </Notice>
+      </section>
+
       {/* مشخصات روی فاکتور */}
       <section className="card p-5 space-y-4">
         <h2 className="text-sm font-bold">مشخصات روی فاکتور</h2>

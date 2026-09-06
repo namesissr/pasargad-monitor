@@ -1,8 +1,8 @@
-import { cookies } from 'next/headers';
-import { query, queryOne } from '@/lib/db';
+import { queryOne } from '@/lib/db';
 import { verifyPassword } from '@/lib/auth';
-import { createSessionToken, SESSION_COOKIE, SESSION_MAX_AGE } from '@/lib/session';
+import { startSession } from '@/lib/signin';
 import { fail, handle, ok, readJson } from '@/lib/http';
+import { clientIp, rateLimit } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,6 +26,14 @@ export async function POST(req: Request) {
       return fail('نام کاربری و گذرواژه لازم است', 400);
     }
 
+    // سقف تلاش ورود از یک آی‌پی. بدون آن، حدس گذرواژه فقط به سرعت شبکه
+    // محدود است. سقف روی آی‌پی است نه روی نام کاربری — وگرنه کسی با
+    // فرستادن مکرر نام کاربری یک نفر دیگر، او را از حسابش قفل می‌کند.
+    const limit = rateLimit(`login:${clientIp(req)}`, 10, 300);
+    if (!limit.ok) {
+      return fail(`تلاش بیش از حد. ${limit.retryAfter} ثانیه دیگر دوباره امتحان کنید.`, 429);
+    }
+
     const user = await queryOne<Row>(
       `SELECT id, username, password_hash, role, is_active, customer_id
          FROM users WHERE lower(username) = lower($1)`,
@@ -40,22 +48,7 @@ export async function POST(req: Request) {
     // شناسه مشتری داخل توکن نشست می‌رود، نه در پارامتر درخواست. اگر از
     // پارامتر خوانده می‌شد، هر مشتری با عوض‌کردن یک عدد داده بقیه را
     // می‌دید.
-    const token = await createSessionToken({
-      uid: user.id,
-      username: user.username,
-      role: user.role,
-      ...(user.role === 'customer' && user.customer_id ? { cid: user.customer_id } : {}),
-    });
-
-    cookies().set(SESSION_COOKIE, token, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      path: '/',
-      maxAge: SESSION_MAX_AGE,
-    });
-
-    await query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]);
+    await startSession(user);
 
     // رابط بر اساس نقش به بخش خودش می‌رود
     return ok({

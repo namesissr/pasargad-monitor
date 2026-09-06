@@ -11,11 +11,14 @@ import { SESSION_COOKIE, verifySessionToken } from './lib/session';
 // مسیر /agent فایل‌های نصب ایجنت است. باز بودنش لازم است، چون سرور تازه
 // هیچ کوکی نشستی ندارد. توکن در آن فایل‌ها نیست؛ هنگام نصب آرگومان داده می‌شود.
 // «probe» و «bind» هم مثل ingest با توکن خودشان احراز می‌شوند نه کوکی نشست
+// /store و /api/store فروشگاه عمومی‌اند: مشتری تازه باید پیش از
+// ثبت‌نام محصولات را ببیند و بتواند سفارش بدهد. ثبت‌نام حین همان
+// سفارش انجام می‌شود، پس این مسیرها نمی‌توانند پشت نگهبان باشند.
 // /api/pay/return بازگشت از درگاه پرداخت است و باید عمومی بماند:
 // درگاه با POST برمی‌گردد و کوکی sameSite=lax در POST بین‌سایتی
 // فرستاده نمی‌شود. آن مسیر خودش هیچ داده‌ای نشان نمی‌دهد — فقط تأیید
 // می‌کند و ریدایرکت می‌زند.
-const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/ingest', '/api/probe', '/api/bind', '/api/health', '/agent', '/api/pay/return'];
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/ingest', '/api/probe', '/api/bind', '/api/health', '/agent', '/api/pay/return', '/store', '/api/store'];
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

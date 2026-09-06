@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { Notice } from '@/components/ui';
+import { SiteFooter } from '@/components/SiteFooter';
 
 export default function LoginPage() {
   const [username, setUsername] = useState('');
@@ -31,7 +33,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen grid place-items-center p-4">
+    <div className="min-h-screen flex flex-col">
+      <div className="flex-1 grid place-items-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <span className="inline-grid place-items-center w-12 h-12 rounded-xl bg-cyan/15 border border-cyan/30 text-cyan text-xl mb-3">
@@ -73,10 +76,21 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p className="text-center text-[11px] text-muted/60 mt-6">
-          دسترسی فقط برای مدیران. تلاش‌های ورود ثبت می‌شود.
+        <p className="text-center text-xs text-muted mt-6">
+          حساب ندارید؟{' '}
+          <Link href="/store" className="text-cyan hover:underline">
+            از فروشگاه سفارش بدهید
+          </Link>{' '}
+          — ثبت‌نام حین سفارش انجام می‌شود.
+        </p>
+
+        <p className="text-center text-[11px] text-muted/60 mt-2">
+          تلاش‌های ورود ثبت می‌شود.
         </p>
       </div>
+      </div>
+
+      <SiteFooter compact />
     </div>
   );
 }

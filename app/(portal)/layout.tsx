@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/auth';
 import { PortalNav } from '@/components/PortalNav';
+import { SiteFooter } from '@/components/SiteFooter';
 
 /**
  * چیدمان پرتال مشتری.
@@ -18,9 +19,10 @@ export default async function PortalLayout({ children }: { children: React.React
   if (user.role !== 'customer') redirect('/');
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen flex flex-col">
       <PortalNav />
-      <main className="max-w-6xl mx-auto px-3 sm:px-4 py-5 sm:py-6">{children}</main>
+      <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-5 sm:py-6">{children}</main>
+      <SiteFooter compact />
     </div>
   );
 }
