@@ -870,6 +870,80 @@ def check_migration_rerun():
                 )
 
 
+# ── ۳۶) ارجاع به کلیدی که در وضعیت فرم نیست ─────────────────────────────
+# یک فایل می‌تواند چند فرم داشته باشد، هرکدام با useState خودش. اگر
+# فیلدی به فرم اشتباه اضافه شود، تایپ‌اسکریپت می‌گیردش — ولی فقط در
+# مرحله «Checking validity of types» بیلد، یعنی بعد از یک دقیقه‌ونیم.
+#
+# این دقیقا دو بار رخ داد، هر دو بار چون دو فرم بخش‌های مشابه داشتند و
+# لنگر جایگذاری روی اولی افتاد.
+#
+# تحلیل به‌ازای هر کامپوننت انجام می‌شود، نه کل فایل: دو فرم در یک فایل
+# هرکدام کلیدهای خودشان را دارند.
+FORM_STATE_RE = re.compile(r"const \[form, setForm\] = useState\(")
+FORM_REF_RE = re.compile(r"form\.(\w+)|set\('(\w+)'\)")
+# نام متفاوت از COMPONENT_RE بالا، که کار دیگری می‌کند. هم‌نام‌بودنشان
+# آن یکی را سایه می‌انداخت و بررسی پراپ‌های اتحادی را می‌شکست.
+FORM_COMPONENT_RE = re.compile(r"^(?:export )?(?:default )?function (\w+)\(", re.M)
+
+
+def _object_after(src, at):
+    """متن شیء useState، با شمردن آکولاد"""
+    brace = src.find("{", at)
+    if brace == -1:
+        return ""
+    depth = 0
+    for i in range(brace, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[brace : i + 1]
+    return ""
+
+
+def check_form_keys():
+    for path in walk({".tsx"}):
+        src = read(path)
+        if not FORM_STATE_RE.search(src):
+            continue
+
+        # مرزهای کامپوننت‌ها
+        starts = [m.start() for m in FORM_COMPONENT_RE.finditer(src)]
+        if not starts:
+            continue
+        bounds = list(zip(starts, starts[1:] + [len(src)]))
+
+        for begin, end in bounds:
+            chunk = src[begin:end]
+            m = FORM_STATE_RE.search(chunk)
+            if not m:
+                continue
+
+            obj = _object_after(chunk, m.start())
+            # شیء با اسپرد یا مقدار محاسبه‌شده قابل اتکا نیست
+            if not obj or "..." in obj:
+                continue
+
+            keys = set(re.findall(r"^\s*(\w+):", obj, re.M))
+            if not keys:
+                continue
+
+            for ref in FORM_REF_RE.finditer(chunk):
+                name = ref.group(1) or ref.group(2)
+                # متدهای شیء و آرایه، نه کلید فرم
+                if name in ("map", "filter", "length", "trim", "slice", "includes"):
+                    continue
+                if name in keys:
+                    continue
+                problems.append(
+                    "%s:%d — «%s» در وضعیت فرم این کامپوننت نیست. "
+                    "شاید به فرم اشتباه اضافه شده."
+                    % (rel(path), line_of(src, begin + ref.start()), name)
+                )
+
+
 def main():
     check_non_null_assertion()
     check_empty_catch()
@@ -888,6 +962,7 @@ def main():
     check_union_event_value()
     check_control_bytes()
     check_migration_rerun()
+    check_form_keys()
     check_route_auth()
 
     if not problems:

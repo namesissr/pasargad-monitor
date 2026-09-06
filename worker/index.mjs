@@ -7,6 +7,7 @@ import { discoverAll, drainQueue } from './vz-sync.mjs';
 import { checkCustomerAlerts } from './customer-alerts.mjs';
 import { issueRenewalInvoices } from './invoices.mjs';
 import { pollTelegram, pruneLinkTokens } from './telegram-link.mjs';
+import { drainBroadcasts } from './broadcasts.mjs';
 import { hashPassword } from './hash.mjs';
 
 /**
@@ -39,6 +40,9 @@ const CYCLE = {
   // «اتصال تلگرام» منتظر تأیید نشسته؛ ده ثانیه انتظار قابل تحمل است،
   // یک دقیقه نه.
   telegram: 10_000,
+  // صف ارسال همگانی. هر دور یک دسته کوچک می‌رود؛ کوتاه‌بودن فاصله فقط
+  // یعنی ارسال زودتر تمام می‌شود، نه اینکه فشار بیشتری بیاید.
+  broadcasts: 15_000,
 };
 
 let stopping = false;
@@ -149,6 +153,8 @@ async function main() {
     },
     async () => CYCLE.telegram,
   );
+
+  schedule('ارسال همگانی', drainBroadcasts, async () => CYCLE.broadcasts);
 }
 
 for (const sig of ['SIGTERM', 'SIGINT']) {

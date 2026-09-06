@@ -286,25 +286,6 @@ function PackageForm({
           />
         </Field>
 
-        {/* آی‌پی اضافه. سقف صفر یعنی این محصول اصلا آی‌پی اضافه
-            نمی‌فروشد و آن بخش در فروشگاه نشان داده نمی‌شود. */}
-        <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="قیمت هر آی‌پی اضافه" hint="قیمت فروش، نه هزینه دیتاسنتر">
-            <input
-              className="input ltr"
-              value={form.extra_ip_price_toman}
-              onChange={set('extra_ip_price_toman')}
-            />
-          </Field>
-          <Field label="سقف آی‌پی اضافه" hint="صفر یعنی این محصول آی‌پی اضافه ندارد">
-            <input
-              className="input ltr"
-              value={form.max_extra_ips}
-              onChange={set('max_extra_ips')}
-            />
-          </Field>
-        </div>
-
         <div className="grid sm:grid-cols-2 gap-4">
           <Field label="وضعیت" hint="غیرفعال از فروشگاه مشتری ناپدید می‌شود">
             <select
@@ -566,6 +547,25 @@ function ProductForm({
           </Field>
           <Field label="موجودی" hint="خالی یعنی نامحدود">
             <input className="input ltr" value={form.stock} onChange={set('stock')} />
+          </Field>
+        </div>
+
+        {/* آی‌پی اضافه. سقف صفر یعنی این محصول اصلا آی‌پی اضافه
+            نمی‌فروشد و آن بخش در فروشگاه نشان داده نمی‌شود. */}
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="قیمت هر آی‌پی اضافه" hint="قیمت فروش، نه هزینه دیتاسنتر">
+            <input
+              className="input ltr"
+              value={form.extra_ip_price_toman}
+              onChange={set('extra_ip_price_toman')}
+            />
+          </Field>
+          <Field label="سقف آی‌پی اضافه" hint="صفر یعنی این محصول آی‌پی اضافه ندارد">
+            <input
+              className="input ltr"
+              value={form.max_extra_ips}
+              onChange={set('max_extra_ips')}
+            />
           </Field>
         </div>
 

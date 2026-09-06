@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { currentUser } from '@/lib/auth';
 import { PortalNav } from '@/components/PortalNav';
 import { SiteFooter } from '@/components/SiteFooter';
+import { AnnouncementModal } from '@/components/AnnouncementModal';
 
 /**
  * چیدمان پرتال مشتری.
@@ -21,6 +22,10 @@ export default async function PortalLayout({ children }: { children: React.React
   return (
     <div className="min-h-screen flex flex-col">
       <PortalNav />
+
+      {/* اطلاعیه روی هر صفحه پرتال می‌آید، نه فقط صفحه اول: مشتری ممکن
+          است مستقیم روی لینک فاکتور یا تیکت وارد شود */}
+      <AnnouncementModal />
       <main className="flex-1 max-w-6xl w-full mx-auto px-3 sm:px-4 py-5 sm:py-6">{children}</main>
       <SiteFooter compact />
     </div>

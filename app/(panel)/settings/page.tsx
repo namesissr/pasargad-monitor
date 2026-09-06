@@ -5,6 +5,8 @@ import { useLoad, LoadState } from '@/components/useLoad';
 import { Field, Mono, Notice } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { faNum, formatJalaliTime, timeAgo, INCIDENT_KIND_LABEL } from '@/lib/format';
+import { AnnouncementsPanel } from './announcements';
+import { BroadcastPanel } from './broadcast';
 
 interface SettingsData {
   settings: Record<string, string>;
@@ -456,6 +458,12 @@ export default function SettingsPage() {
           آنچه در فرم تایپ شده.
         </p>
       </section>
+
+      {/* اطلاعیه به مشتری */}
+      <AnnouncementsPanel />
+
+      {/* ارسال همگانی */}
+      <BroadcastPanel />
 
       {/* تلگرام مشتری */}
       <section className="card p-5 space-y-4">
