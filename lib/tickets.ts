@@ -1,7 +1,7 @@
 import { query, queryOne } from '@/lib/db';
 import { getSettings } from '@/lib/settings';
-import { sendEmailTo } from '@/lib/email';
 import { notify } from '@/lib/notify';
+import { notifyCustomer } from '@/lib/customer-notify';
 
 /**
  * تیکت پشتیبانی.
@@ -41,15 +41,18 @@ type TicketInfo = {
   id: number;
   number: string;
   subject: string;
+  customer_id: number;
   customer_name: string;
   customer_email: string | null;
+  customer_telegram: string | null;
   server_name: string | null;
 };
 
 async function ticketInfo(ticketId: number): Promise<TicketInfo | null> {
   return queryOne<TicketInfo>(
     `SELECT t.id, t.number, t.subject,
-            c.name AS customer_name, c.email AS customer_email,
+            c.id AS customer_id, c.name AS customer_name, c.email AS customer_email,
+            c.telegram_chat_id AS customer_telegram,
             s.name AS server_name
        FROM tickets t
        JOIN customers c ON c.id = t.customer_id
@@ -95,13 +98,22 @@ export async function announceCustomerMessage(ticketId: number, body: string, is
   );
 }
 
-/** خبر پاسخ ما، به مشتری */
+/**
+ * خبر پاسخ ما، به مشتری.
+ *
+ * از notifyCustomer می‌گذرد تا هر کانالی که مشتری دارد استفاده شود:
+ * ایمیل، و تلگرام اگر وصل کرده باشد.
+ *
+ * **پیامک عمدا فرستاده نمی‌شود.** پاسخ تیکت فوری نیست و هزینه پیامک
+ * روی هر رفت‌وبرگشت گفتگو جمع می‌شود. مشتری‌ای که تیکت زده، پرتال را
+ * باز می‌کند.
+ */
 export async function announceAdminReply(ticketId: number, body: string) {
   const t = await ticketInfo(ticketId);
   if (!t) return;
 
-  if (!t.customer_email) {
-    console.error('[ticket] مشتری ایمیل ندارد؛ پاسخ تیکت خبر داده نشد:', t.number);
+  if (!t.customer_email && !t.customer_telegram) {
+    console.error('[ticket] مشتری هیچ راه ارتباطی ندارد؛ پاسخ تیکت خبر داده نشد:', t.number);
     return;
   }
 
@@ -114,17 +126,19 @@ export async function announceAdminReply(ticketId: number, body: string) {
     `${preview(body, 1500)}` +
     (url ? `\n\nبرای دیدن گفتگو و پاسخ‌دادن وارد پرتال شوید:\n${url}` : '');
 
-  // sendEmailTo خطا پرتاب نمی‌کند؛ شکست را در نتیجه برمی‌گرداند. اگر
-  // فقط catch بگذاریم، ایمیل نرفته و هیچ ردی هم نمی‌ماند.
-  const res = await sendEmailTo(
-    t.customer_email,
-    `پاسخ تیکت ${t.number} — ${t.subject}`,
+  const res = await notifyCustomer(t.customer_id, {
+    subject: `پاسخ تیکت ${t.number} — ${t.subject}`,
     message,
-    'info',
-  ).catch((e) => ({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+    kind: 'info',
+  }).catch((e) => {
+    console.error('[ticket] خبر پاسخ ارسال نشد:', e instanceof Error ? e.message : e);
+    return { sms: false, email: false, telegram: false };
+  });
 
-  if (!res.ok) {
-    console.error(`[ticket] ایمیل پاسخ ${t.number} ارسال نشد:`, res.error);
+  // هیچ کانالی موفق نبود: پاسخ ثبت شده ولی مشتری خبردار نشده. این باید
+  // در لاگ بماند، وگرنه فقط وقتی معلوم می‌شود که مشتری شاکی شود.
+  if (!res.email && !res.telegram) {
+    console.error(`[ticket] هیچ کانالی برای پاسخ ${t.number} موفق نبود`);
   }
 }
 

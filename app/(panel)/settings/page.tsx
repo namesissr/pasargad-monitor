@@ -457,6 +457,52 @@ export default function SettingsPage() {
         </p>
       </section>
 
+      {/* تلگرام مشتری */}
+      <section className="card p-5 space-y-4">
+        <h2 className="text-sm font-bold">تلگرام مشتری</h2>
+
+        <Notice type="info">
+          مشتری از بخش پروفایل، تلگرامش را به حسابش وصل می‌کند و هشدار سهمیه، موعد تمدید،
+          پرداخت فاکتور و پاسخ تیکت را آنجا هم می‌گیرد. این جدا از هشدار تلگرامی خود شماست.
+        </Notice>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="اطلاع‌رسانی تلگرام به مشتری">
+            <select
+              className="input"
+              value={form.telegram_customer_enabled ?? 'true'}
+              onChange={set('telegram_customer_enabled')}
+            >
+              <option value="true">فعال</option>
+              <option value="false">غیرفعال</option>
+            </select>
+          </Field>
+
+          <Field label="ربات" hint="ورکر خودش این را از تلگرام می‌گیرد">
+            <input
+              className="input ltr"
+              value={data.settings.telegram_bot_username ? `@${data.settings.telegram_bot_username}` : ''}
+              placeholder="هنوز شناسایی نشده"
+              disabled
+            />
+          </Field>
+        </div>
+
+        {!data.settings.telegram_bot_username && (
+          <Notice type="warn">
+            ورکر هنوز به ربات وصل نشده. تا وقتی نام ربات شناسایی نشود، مشتری نمی‌تواند
+            تلگرامش را وصل کند. مطمئن شوید <span className="ltr">TELEGRAM_BOT_TOKEN</span> در
+            فایل <span className="ltr">.env</span> هست و ورکر بالاست.
+          </Notice>
+        )}
+
+        <p className="text-[11px] text-muted/70 leading-relaxed">
+          اتصال مشتری از راه خواندن پیام‌های ربات انجام می‌شود، نه وب‌هوک. اگر روی این ربات
+          وب‌هوک تنظیم کرده باشید، اتصال کار نمی‌کند و ورکر در لاگ هشدار می‌دهد:{' '}
+          <span className="ltr">docker compose logs worker | grep تلگرام</span>
+        </p>
+      </section>
+
       {/* ورود با کد پیامکی */}
       <section className="card p-5 space-y-4">
         <h2 className="text-sm font-bold">ورود با کد پیامکی</h2>

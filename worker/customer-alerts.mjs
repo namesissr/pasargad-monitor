@@ -2,6 +2,7 @@ import { q, settings, log, logErr } from './db.mjs';
 import { sendSms } from './sms.mjs';
 import { notify } from './notify.mjs';
 import { sendEmailTo } from './email.mjs';
+import { sendTelegram } from './telegram.mjs';
 
 /**
  * هشدارهای مشتری: سهمیه ترافیک و موعد تمدید.
@@ -41,9 +42,14 @@ async function claim(serverId, kind, periodKey, detail) {
 /**
  * ارسال به مشتری از هر راهی که دارد، و در صورت لزوم به ادمین.
  *
- * پیامک و ایمیل هر دو می‌روند و شکست یکی جلوی دیگری را نمی‌گیرد: ممکن
- * است اعتبار پیامک تمام شده باشد یا شماره عوض شده باشد. مشتری‌ای که
- * خبردار نشود، همان مشتری‌ای است که بعداً شاکی می‌شود.
+ * هر سه کانال مستقل‌اند و شکست یکی جلوی دیگری را نمی‌گیرد: ممکن است
+ * اعتبار پیامک تمام شده باشد، ایمیل به اسپم برود، یا مشتری ربات را
+ * بلاک کرده باشد. مشتری‌ای که خبردار نشود، همان مشتری‌ای است که بعداً
+ * شاکی می‌شود.
+ *
+ * نسخه دوقلوی lib/customer-notify.ts است. تکرار عمدی است: ورکر هشدار
+ * نباید به بالا بودن اپ وب وابسته باشد. اگر یکی را عوض کردید، دیگری
+ * را هم عوض کنید.
  */
 async function dispatch(srv, subject, message, alsoAdmin, kind = 'warn') {
   if (srv.customer_phone) {
@@ -53,6 +59,13 @@ async function dispatch(srv, subject, message, alsoAdmin, kind = 'warn') {
   if (srv.customer_email) {
     const r = await sendEmailTo(srv.customer_email, subject, message, kind);
     if (!r.ok) logErr('ایمیل مشتری ارسال نشد:', srv.customer_email, r.error);
+  }
+  if (srv.customer_telegram) {
+    const s = await settings();
+    if (s.telegram_customer_enabled !== 'false') {
+      const r = await sendTelegram(srv.customer_telegram, `${subject}\n\n${message}`);
+      if (!r.ok) logErr('تلگرام مشتری ارسال نشد:', srv.customer_telegram, r.error);
+    }
   }
   if (alsoAdmin) {
     await notify(message).catch((e) => logErr('هشدار ادمین ارسال نشد:', e.message));
@@ -73,7 +86,8 @@ export async function checkCustomerAlerts() {
             (tp.used_bytes / 1073741824 + s.traffic_used_before_gb)::float8 AS used_gb,
             s.renews_at, s.renew_notice_days,
             c.id AS customer_id, c.name AS customer_name,
-            c.phone AS customer_phone, c.email AS customer_email
+            c.phone AS customer_phone, c.email AS customer_email,
+            c.telegram_chat_id AS customer_telegram
        FROM servers s
        JOIN customers c ON c.id = s.customer_id
        LEFT JOIN LATERAL (

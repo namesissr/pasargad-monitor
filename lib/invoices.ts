@@ -1,7 +1,6 @@
 import { getPool, query, queryOne } from '@/lib/db';
 import { getSettings } from '@/lib/settings';
-import { sendEmailTo } from '@/lib/email';
-import { sendSms } from '@/lib/sms';
+import { notifyCustomer } from '@/lib/customer-notify';
 import { notify } from '@/lib/notify';
 import { verifyPayment, type PayPingConfig } from '@/worker/payping.mjs';
 
@@ -258,17 +257,17 @@ async function announcePaid(inv: Record<string, unknown>) {
     `مبلغ: ${amount} تومان\n\n` +
     `از همراهی شما سپاسگزاریم.`;
 
-  if (inv.customer_phone) {
-    const r = await sendSms(
-      String(inv.customer_phone),
-      `پاسارگاد میزبان: پرداخت فاکتور ${number} به مبلغ ${amount} تومان ثبت شد. با تشکر.`,
-    );
-    if (!r.ok) console.error('[invoice] پیامک مشتری ارسال نشد:', r.error);
-  }
-
-  if (inv.customer_email) {
-    await sendEmailTo(String(inv.customer_email), `پرداخت فاکتور ${number} ثبت شد`, forCustomer, 'ok');
-  }
+  // همه کانال‌های مشتری از یک جا: پیامک، ایمیل، و تلگرام اگر وصل کرده
+  // باشد. پیش‌تر اینجا پیامک و ایمیل جدا صدا زده می‌شدند و افزودن
+  // تلگرام باید در هر جای مشابه تکرار می‌شد.
+  await notifyCustomer(Number(inv.customer_id), {
+    subject: `پرداخت فاکتور ${number} ثبت شد`,
+    message: forCustomer,
+    sms: `پاسارگاد میزبان: پرداخت فاکتور ${number} به مبلغ ${amount} تومان ثبت شد. با تشکر.`,
+    kind: 'ok',
+  }).catch((e) =>
+    console.error('[invoice] خبر پرداخت به مشتری نرسید:', e instanceof Error ? e.message : e),
+  );
 
   // سفارش محصول کار دارد و باید از بقیه پرداخت‌ها جدا دیده شود
   const needsAction = inv.kind === 'order' ? '\n\n⚠ این سفارش منتظر تحویل است.' : '';

@@ -52,6 +52,7 @@ const ALLOWED = [
   'store_intro',
   'otp_login_enabled',
   'sms_dev_mode',
+  'telegram_customer_enabled',
 ];
 
 /**

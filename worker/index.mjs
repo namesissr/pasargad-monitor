@@ -6,6 +6,7 @@ import { rollupHourly, rollupDaily, purgeOld } from './rollup.mjs';
 import { discoverAll, drainQueue } from './vz-sync.mjs';
 import { checkCustomerAlerts } from './customer-alerts.mjs';
 import { issueRenewalInvoices } from './invoices.mjs';
+import { pollTelegram, pruneLinkTokens } from './telegram-link.mjs';
 import { hashPassword } from './hash.mjs';
 
 /**
@@ -34,6 +35,10 @@ const CYCLE = {
   // صدور فاکتور تمدید. ایندکس یکتا جلوی تکرار را می‌گیرد، پس اجرای
   // مکرر فقط یعنی زودتر صادر می‌شود نه بیشتر.
   invoices: 3_600_000,
+  // خواندن پیام‌های ربات تلگرام. کوتاه است چون کاربر پس از زدن
+  // «اتصال تلگرام» منتظر تأیید نشسته؛ ده ثانیه انتظار قابل تحمل است،
+  // یک دقیقه نه.
+  telegram: 10_000,
 };
 
 let stopping = false;
@@ -133,6 +138,17 @@ async function main() {
   schedule('صدور فاکتور', issueRenewalInvoices, async () => CYCLE.invoices);
   schedule('صف ویژالیزور', drainQueue, async () => CYCLE.vzQueue);
   schedule('کشف ویژالیزور', discoverAll, async () => CYCLE.vzDiscover);
+
+  // خواندن پیام‌های ربات، برای اتصال تلگرام مشتری. اگر توکن ربات تنظیم
+  // نشده باشد خود تابع فورا برمی‌گردد، پس شرط اضافه لازم نیست.
+  schedule(
+    'تلگرام مشتری',
+    async () => {
+      await pollTelegram();
+      await pruneLinkTokens();
+    },
+    async () => CYCLE.telegram,
+  );
 }
 
 for (const sig of ['SIGTERM', 'SIGINT']) {

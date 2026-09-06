@@ -95,6 +95,34 @@ def read(*parts):
     return io.open(os.path.join(ROOT, *parts), encoding="utf-8").read()
 
 
+def notify_options(src, func):
+    """
+    شیء تنظیماتی که به notifyCustomer داده شده، داخل یک تابع مشخص.
+
+    آکولادها شمرده می‌شوند تا دقیقا همان یک شیء برگردد — نه هرچه در
+    ادامه تابع آمده.
+    """
+    start = src.find("export async function %s" % func)
+    if start == -1:
+        return ""
+    call = src.find("notifyCustomer(", start)
+    if call == -1:
+        return ""
+    brace = src.find("{", call)
+    if brace == -1:
+        return ""
+
+    depth = 0
+    for i in range(brace, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[brace : i + 1]
+    return ""
+
+
 def main():
     failures = 0
 
@@ -135,6 +163,7 @@ def main():
     pthread = read("app", "api", "portal", "tickets", "[id]", "route.ts")
     admin = read("app", "api", "tickets", "route.ts")
     mig = read("db", "migrations", "039_tickets.sql")
+    notify_lib = read("lib", "customer-notify.ts")
 
     source_checks = [
         # ── قاعده ۱ و ۲: وضعیت با نویسنده عوض می‌شود ─────────
@@ -162,10 +191,17 @@ def main():
 
         # ── اطلاع‌رسانی، همان چیزی که خواسته شده ─────────────
         (lib, "tickets", "notify(message)", "تیکت مشتری به ادمین خبر می‌دهد"),
-        (lib, "tickets", "sendEmailTo(", "پاسخ ما به مشتری ایمیل می‌شود"),
-        (lib, "tickets", "if (!res.ok)",
-         "ایمیلی که نرفته لاگ می‌شود — sendEmailTo خطا پرتاب نمی‌کند"),
+        # کانال‌های مشتری به lib/customer-notify.ts منتقل شدند تا افزودن
+        # کانال تازه — مثل تلگرام — در هر جای مشابه تکرار نشود.
+        (lib, "tickets", "notifyCustomer(", "پاسخ ما از کانال‌های مشتری می‌رود"),
+        (notify_lib, "customer-notify", "sendEmailTo(", "ایمیل یکی از کانال‌هاست"),
+        (notify_lib, "customer-notify", "sendTelegram(", "تلگرام یکی از کانال‌هاست"),
+        (notify_lib, "customer-notify", "if (!r.ok)",
+         "شکست هر کانال لاگ می‌شود — این توابع خطا پرتاب نمی‌کنند"),
+        (lib, "tickets", "!res.email && !res.telegram",
+         "اگر هیچ کانالی موفق نبود لاگ می‌شود"),
         (lib, "tickets", "customer_email", "ایمیل مشتری از دیتابیس خوانده می‌شود"),
+        (lib, "tickets", "customer_telegram", "تلگرام مشتری از دیتابیس خوانده می‌شود"),
 
         # ── شماره یکتا ───────────────────────────────────────
         (mig, "مهاجرت ۰۳۹", "TEXT NOT NULL UNIQUE", "شماره تیکت یکتاست"),
@@ -186,6 +222,20 @@ def main():
         else:
             failures += 1
             print("شکست  کد واقعی (%s): %s پیدا نشد" % (label, why))
+
+    print("")
+
+    # پاسخ تیکت عمدا پیامک ندارد: فوری نیست و هزینه‌اش روی هر
+    # رفت‌وبرگشت گفتگو جمع می‌شود.
+    #
+    # فقط به شیء آرگومان notifyCustomer نگاه می‌شود، نه به کل تابع.
+    # نسخه اول کل تابع را می‌گشت و روی مقدار بازگشتی پیش‌فرضِ هنگام خطا
+    # — { sms: false, ... } — هشدار کاذب می‌داد.
+    if "sms:" in notify_options(lib, "announceAdminReply"):
+        failures += 1
+        print("شکست  کد واقعی (tickets): پاسخ تیکت پیامک هم می‌فرستد")
+    else:
+        print("گذشت  کد واقعی (tickets): پاسخ تیکت پیامک نمی‌فرستد")
 
     print("")
 

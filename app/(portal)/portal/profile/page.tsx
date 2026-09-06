@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useLoad, LoadState } from '@/components/useLoad';
 import { Field, Notice } from '@/components/ui';
+import { TelegramLink } from '@/components/TelegramLink';
 import { api, ApiError } from '@/lib/api';
 import { faNum, formatJalali } from '@/lib/format';
 
@@ -173,6 +174,9 @@ export default function ProfilePage() {
           {busy ? 'در حال ذخیره…' : 'ذخیره مشخصات'}
         </button>
       </form>
+
+      {/* ── تلگرام ───────────────────────────────────────── */}
+      <TelegramLink />
 
       {/* ── گذرواژه ──────────────────────────────────────── */}
       <form onSubmit={changePassword} className="card p-5 space-y-4">
