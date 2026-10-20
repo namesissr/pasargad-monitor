@@ -219,6 +219,24 @@ export function portState(p: Port): { label: string; cls: string } {
   return { label: 'نامشخص', cls: 'bg-line text-muted border-line' };
 }
 
+/**
+ * ترافیک لحظه‌ای سرورها از دید سوییچ: دانلود یعنی خروجی پورت به سرور و
+ * آپلود یعنی ورودی از سرور. آپلینک‌ها (پورت محافظت‌شده، یا عضو پورت‌چنل
+ * محافظت‌شده) کنار می‌روند: هر بایت یک بار از آپلینک و یک بار از پورت سرور
+ * رد می‌شود و جمع همه پورت‌ها آن را دو بار می‌شمرد — دانلود سرورها روی
+ * آپلینک «ورودی» است و آپلودشان «خروجی».
+ */
+export function edgeTraffic(ports: Port[]): { download: number; upload: number; uplinks: number } {
+  const protectedLag = new Set(ports.filter((p) => p.kind === 'port-channel' && p.is_protected).map((p) => p.name));
+  const eth = ports.filter((p) => p.kind === 'ethernet' && p.is_present);
+  const edge = eth.filter((p) => !p.is_protected && !(p.member_of && protectedLag.has(p.member_of)));
+  return {
+    download: edge.reduce((s, p) => s + (Number(p.out_bps) || 0), 0),
+    upload: edge.reduce((s, p) => s + (Number(p.in_bps) || 0), 0),
+    uplinks: eth.length - edge.length,
+  };
+}
+
 /** نام کوتاه همسایه برای جدول */
 export function neighborLabel(n: Neighbor): string {
   return [n.sys_name, n.port_id].filter(Boolean).join(' / ') || '؟';

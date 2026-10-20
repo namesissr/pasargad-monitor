@@ -79,19 +79,22 @@ export async function GET() {
         LIMIT 30`,
     );
 
-    // سوییچ‌ها: فقط خلاصه. مجموع ترافیک فقط از پورت‌های اترنت، چون
-    // پورت‌چنل جمع همان عضوهاست و دوباره شمرده می‌شد.
+    // سوییچ‌ها: فقط خلاصه. دانلود و آپلود سرورها = خروجی و ورودی پورت‌های
+    // اترنت، بدون آپلینک‌ها (محافظت‌شده یا عضو پورت‌چنل محافظت‌شده): هر بایت
+    // یک بار از آپلینک و یک بار از پورت سرور رد می‌شود. پورت‌چنل هم جمع
+    // همان عضوهاست. همان قاعده edgeTraffic در صفحه سوییچ.
     const switches = await query(
       `SELECT w.id, w.name, w.status, w.cpu_percent, w.max_temp_c, w.env_ok,
               CASE WHEN w.mem_total_bytes > 0
                    THEN w.mem_used_bytes::float8 / w.mem_total_bytes * 100 END AS mem_pct,
               COUNT(p.id) FILTER (WHERE p.kind = 'ethernet')::int AS ports_total,
               COUNT(p.id) FILTER (WHERE p.kind = 'ethernet' AND p.oper_up)::int AS ports_up,
-              COALESCE(SUM(p.in_bps) FILTER (WHERE p.kind = 'ethernet'), 0)::float8  AS in_bps,
-              COALESCE(SUM(p.out_bps) FILTER (WHERE p.kind = 'ethernet'), 0)::float8 AS out_bps,
+              COALESCE(SUM(p.out_bps) FILTER (WHERE p.kind = 'ethernet' AND NOT p.is_protected AND pc.id IS NULL), 0)::float8 AS download_bps,
+              COALESCE(SUM(p.in_bps) FILTER (WHERE p.kind = 'ethernet' AND NOT p.is_protected AND pc.id IS NULL), 0)::float8  AS upload_bps,
               (SELECT COUNT(*)::int FROM incidents i WHERE i.switch_id = w.id AND i.resolved_at IS NULL) AS incidents
          FROM switches w
          LEFT JOIN switch_ports p ON p.switch_id = w.id AND p.is_present
+         LEFT JOIN switch_ports pc ON pc.switch_id = w.id AND pc.name = p.member_of AND pc.is_protected
         WHERE w.is_active
         GROUP BY w.id
         ORDER BY (w.status = 'down') DESC, w.name`,

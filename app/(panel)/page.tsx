@@ -53,8 +53,8 @@ interface LiveSwitch {
   env_ok: boolean | null;
   ports_total: number;
   ports_up: number;
-  in_bps: number;
-  out_bps: number;
+  download_bps: number;
+  upload_bps: number;
   incidents: number;
 }
 
@@ -333,11 +333,11 @@ function SwitchesSection({ switches, busy }: { switches: LiveSwitch[]; busy: Bus
                   </span>
                 </span>
                 <span className="text-end shrink-0 text-[11px]">
-                  <span className="block">
-                    <span className="text-cyan">↓</span> {formatBps(w.in_bps)}
+                  <span className="block" title="دانلود سرورها">
+                    <span className="text-cyan">↓</span> {formatBps(w.download_bps)}
                   </span>
-                  <span className="block">
-                    <span className="text-amber">↑</span> {formatBps(w.out_bps)}
+                  <span className="block" title="آپلود سرورها">
+                    <span className="text-amber">↑</span> {formatBps(w.upload_bps)}
                   </span>
                 </span>
               </Link>
