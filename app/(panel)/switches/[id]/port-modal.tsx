@@ -482,7 +482,9 @@ function ControlTab({ sw, port, onChanged }: { sw: SwitchInfo; port: Port; onCha
         title="محدودیت سرعت"
         text={
           !sw.can_rate_limit
-            ? 'فقط برای سوییچ NX-API؛ در SNMP راه استانداردی برای policy کیفیت سرویس نیست.'
+            ? sw.protocol === 'snmp'
+              ? 'با SNMP فقط روی Cisco Nexus، با «انتقال فایل پیکربندی» (SFTP/TFTP) و اجازه نوشتن در ویرایش سوییچ.'
+              : 'این سوییچ محدودیت سرعت از پنل ندارد.'
             : port.is_protected
               ? 'پورت محافظت‌شده (آپلینک) محدودیت نمی‌گیرد.'
               : port.rate_limit_mbps
@@ -593,7 +595,8 @@ function ActionDialog({
       };
       if (dialog.kind === 'description') body.value = desc.trim();
       if (dialog.kind === 'rate_limit') body.value = mbpsNum;
-      const r = await runSwitchAction(body);
+      // با SNMP محدودیت سرعت سه کپی پیکربندی است (خواندن، اعمال، خواندن)
+      const r = await runSwitchAction(body, dialog.kind === 'rate_limit' && sw.protocol === 'snmp' ? 360 : 60);
       setResult(r);
     } catch (e) {
       setResult({ ok: false, text: e instanceof ApiError ? e.message : 'ثبت درخواست ناموفق بود' });

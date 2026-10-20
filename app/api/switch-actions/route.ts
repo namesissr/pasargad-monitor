@@ -125,7 +125,7 @@ export async function POST(req: Request) {
       value = d.value;
     }
     if (action === 'rate_limit') {
-      if (!port.can_rate_limit) return fail('محدودیت سرعت فقط برای سوییچ NX-API پشتیبانی می‌شود', 400);
+      if (!port.can_rate_limit) return fail('محدودیت سرعت فقط برای NX-API، یا Cisco Nexus با SNMP که روش انتقال فایل (SFTP/TFTP) و اجازه نوشتن دارد', 400);
       if (port.is_protected) return fail('پورت محافظت‌شده (آپلینک) محدودیت سرعت نمی‌گیرد', 400);
       const mbps = Number(body.value);
       if (!Number.isInteger(mbps) || mbps < 0 || mbps > 400_000) {
@@ -165,7 +165,7 @@ async function queueBackup(body: Record<string, unknown>, user: { uid: number; u
   );
   if (!sw) return fail('سوییچ پیدا نشد', 404);
   if (!sw.is_active) return fail('سوییچ غیرفعال است', 400);
-  if (!sw.can_backup) return fail('پشتیبان پیکربندی فقط برای سوییچ NX-API ممکن است', 400);
+  if (!sw.can_backup) return fail('پشتیبان پیکربندی فقط برای NX-API، یا سیسکو با SNMP که روش انتقال فایل (SFTP/TFTP) و اجازه نوشتن دارد', 400);
   try {
     const row = await queryOne<{ id: number }>(
       `INSERT INTO switch_actions (switch_id, action, reason, requested_by, requested_by_name)

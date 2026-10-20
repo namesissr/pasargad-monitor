@@ -23,6 +23,7 @@ interface SwitchRow {
   snmp_priv_proto: string;
   snmp_write: boolean;
   vendor: string | null;
+  config_transfer: 'none' | 'sftp' | 'tftp';
   has_community: boolean;
   has_write_community: boolean;
   has_auth_pass: boolean;
@@ -301,6 +302,7 @@ function SwitchForm({
     snmp_priv_proto: sw?.snmp_priv_proto ?? 'aes',
     snmp_priv_pass: '',
     snmp_write: sw?.snmp_write ?? false,
+    config_transfer: sw?.config_transfer ?? 'none',
     datacenter_id: sw?.datacenter_id ? String(sw.datacenter_id) : '',
     location: sw?.location ?? '',
     notes: sw?.notes ?? '',
@@ -345,6 +347,7 @@ function SwitchForm({
         snmp_priv_proto: form.snmp_auth_proto === 'none' ? 'none' : form.snmp_priv_proto,
         snmp_priv_pass: form.snmp_priv_pass,
         snmp_write: form.snmp_write,
+        config_transfer: form.config_transfer,
         datacenter_id: form.datacenter_id || null,
         location: form.location,
         notes: form.notes,
@@ -577,12 +580,40 @@ function SwitchForm({
                 onChange={(e) => setForm((f) => ({ ...f, snmp_write: e.target.checked }))}
               />
               <span>
-                اجازه نوشتن — shut/no shut از پنل
+                اجازه نوشتن — shut/no shut، توضیح پورت، و با انتقال فایل، محدودیت سرعت و پشتیبان
                 <span className="block text-muted mt-0.5">
                   کاربر روی سوییچ باید write-view داشته باشد. بدون این تیک سوییچ فقط پایش می‌شود.
                 </span>
               </span>
             </label>
+          </>
+        )}
+
+        {form.mode !== 'nxapi' && (
+          <>
+            <Field
+              label="انتقال فایل پیکربندی (فقط سیسکو)"
+              hint="برای محدودیت سرعت (نکسوس) و پشتیبان پیکربندی با SNMP: سوییچ فایل را از سرور پنل برمی‌دارد یا به آن می‌فرستد. نشانی سرور پنل و کاربر SFTP در تنظیمات ← پایش."
+            >
+              <select
+                className="input"
+                value={form.config_transfer}
+                onChange={(e) => setForm((f) => ({ ...f, config_transfer: e.target.value as 'none' | 'sftp' | 'tftp' }))}
+              >
+                <option value="none">ندارد</option>
+                <option value="sftp">SFTP — رمزنگاری‌شده (پیشنهادی)</option>
+                <option value="tftp">TFTP — بی‌رمز</option>
+              </select>
+            </Field>
+            {form.config_transfer === 'tftp' && (
+              <Notice type="warn">
+                با TFTP پیکربندی سوییچ — با هش گذرواژه‌ها و کامیونیتی‌ها — روی شبکه مدیریت بی‌رمز منتقل می‌شود. اگر
+                سوییچ SFTP دارد، آن را انتخاب کنید.
+              </Notice>
+            )}
+            {form.config_transfer !== 'none' && !(form.mode === 'snmp3' ? form.snmp_write : form.snmp_write_community || (sameMode && sw?.has_write_community && !form.clear_write_community)) && (
+              <Notice type="info">انتقال فایل با SNMP SET راه می‌افتد و بدون اجازه نوشتن کار نمی‌کند.</Notice>
+            )}
           </>
         )}
 

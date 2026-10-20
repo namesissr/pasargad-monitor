@@ -148,6 +148,15 @@ out.pol = [pol.input, pol.output, m.rateFromPolicy(pol.input), m.rateFromPolicy(
 out.desc = ['  web-01 rack 3  ', 'a;reload', 'a\nb', 'x'.repeat(255), '\x07bell', ''].map((v) => m.cleanDescription(v));
 out.desc64 = m.cleanDescription('x'.repeat(65), 64).ok;
 
+// پیکربندی کامل ← بلوک یک اینترفیس، و تکه محدودیت برای SNMP
+const full = 'hostname x\ninterface Ethernet1/1\n  description a\n  service-policy type qos input PANEL-RL-100M\ninterface Ethernet1/10\n  description b\n';
+out.block = [m.interfaceBlock(full, 'Ethernet1/1'), m.interfaceBlock(full, 'Ethernet1/10'), m.interfaceBlock(full, 'Ethernet1/2')];
+out.snip = [
+  m.rateLimitSnippet('Ethernet1/1', { input: null, output: null }, 100),
+  m.rateLimitSnippet('Ethernet1/1', { input: 'PANEL-RL-100M', output: 'PANEL-RL-100M' }, 250),
+  m.rateLimitSnippet('Ethernet1/1', { input: 'PANEL-RL-100M', output: null }, 0),
+];
+
 // فرمان‌های نوشتنی با سوییچ ساختگی: پورت ناامن، سرعت نامعتبر و policy بیگانه پیش از هر تغییری رد می‌شوند
 const calls = [];
 const origFetch = globalThis.fetch;
@@ -257,6 +266,17 @@ check(D[0] == {"ok": True, "value": "web-01 rack 3"} and D[5] == {"ok": True, "v
 check(not any(d["ok"] for d in D[1:5]), "توضیح با «;»، خط تازه، بیش از ۲۵۴ نویسه یا نویسه کنترلی رد می‌شود")
 check(r["desc64"] is False, "سقف ۶۴ نویسه ifAlias")
 check(r["guard"] == ["rejected"] * 5, "mgmt/ویلن، توضیح ناامن، سرعت اعشاری یا منفی پیش از تماس با سوییچ رد می‌شود")
+
+
+check(r["block"][0] == "interface Ethernet1/1\n  description a\n  service-policy type qos input PANEL-RL-100M"
+      and r["block"][1] == "interface Ethernet1/10\n  description b" and r["block"][2] == "",
+      "بلوک اینترفیس از کل پیکربندی؛ Ethernet1/1 با Ethernet1/10 قاطی نمی‌شود")
+check(r["snip"][0] == "policy-map type qos PANEL-RL-100M\n  class class-default\n    police cir 100 mbps bc 200 ms conform transmit violate drop\n"
+      "interface Ethernet1/1\n  service-policy type qos input PANEL-RL-100M\n  service-policy type qos output PANEL-RL-100M\n",
+      "تکه محدودیت: policy-map، سپس ورودی و در آخر خروجی")
+check("no service-policy type qos input PANEL-RL-100M" in r["snip"][1] and r["snip"][1].endswith("output PANEL-RL-250M\n"),
+      "عوض کردن سقف: policy قبلی پنل برداشته و تازه گذاشته می‌شود")
+check(r["snip"][2] == "interface Ethernet1/1\n  no service-policy type qos input PANEL-RL-100M\n", "سقف صفر: فقط برداشتن")
 
 
 # ── ۱ب) درایور SNMP، اجرای واقعی ───────────────────────────────
@@ -373,6 +393,17 @@ out.disc = m.buildDiscovery({
   qFdbPort: M({ '10.0.80.86.161.0.1': 11, '20.0.80.86.161.0.2': 12, '10.0.80.86.161.0.3': 0 }),
   arpPhys: M({ '1.10.0.0.5': Buffer.from([0, 0x50, 0x56, 0xa1, 0, 1]), '1.10.0.0.9': Buffer.alloc(6) }),
 }, nameOf);
+out.osf = ['Cisco NX-OS(tm) n9000, Software (n9000-dk9), Version 9.3(8)', 'Cisco IOS Software [Cupertino], Catalyst L3 Switch Software, IOS-XE', 'Cisco IOS Software, C2960X Software', 'RouterOS'].map(m.osFamilyOf);
+const vb = (vbs) => vbs.map((v) => [v.oid.split('.').slice(-2)[0], v.type, Buffer.isBuffer(v.value) ? [...v.value] : v.value]);
+out.cc = {
+  sftp: vb(m.copyVarbinds(7, { protocol: 'sftp', source: 1, dest: 4, server: '10.0.0.10', fileName: '/files/pm-a.cfg', user: 'u', pass: 'p' }, 'rev1')),
+  tftp: vb(m.copyVarbinds(7, { protocol: 'tftp', source: 4, dest: 1, server: '10.0.0.10', fileName: 'pm-b.cfg' }, 'legacy')),
+  save: vb(m.copyVarbinds(7, { source: 4, dest: 3 }, null)),
+};
+const cap = (o) => [m.snmpDriver.canBackup(o), m.snmpDriver.canRateLimit(o)];
+const nxs = { vendor: 'cisco', os_family: 'nxos', snmp_version: '3', snmp_write: true, config_transfer: 'sftp' };
+out.cap = [cap(nxs), cap({ ...nxs, config_transfer: 'none' }), cap({ ...nxs, snmp_write: false }), cap({ ...nxs, os_family: 'ios' }), cap({ ...nxs, vendor: 'juniper' }),
+  cap({ ...nxs, snmp_version: '2c', snmp_write: false, snmp_write_community: 'private', config_transfer: 'tftp' })];
 out.discBridge = m.buildDiscovery({ dFdbPort: M({ '0.80.86.161.0.9': 2 }) }, nameOf).macs;
 console.log(JSON.stringify(out));
 """
@@ -452,6 +483,17 @@ check(r["disc"]["macs"] == [{"port": "Gi0/1", "mac": "00:50:56:a1:00:01", "vlan"
       "Q-BRIDGE: پورت پل به ifIndex، ویلن از اندیس؛ پورت صفر رد می‌شود")
 check(r["discBridge"] == [{"port": "Gi0/2", "mac": "00:50:56:a1:00:09", "vlan": None}], "BRIDGE-MIB بدون basePort: شماره پورت پل همان ifIndex")
 check(r["disc"]["arp"] == [{"ip": "10.0.0.5", "mac": "00:50:56:a1:00:01", "iface": "Gi0/1"}], "ARP از ipNetToMedia؛ MAC صفر رد می‌شود")
+
+
+check(r["osf"] == ["nxos", "iosxe", "ios", None], "خانواده سیستم‌عامل از sysDescr")
+C = r["cc"]
+check([c[0] for c in C["sftp"]] == ["2", "3", "4", "15", "16", "6", "7", "8"] and C["sftp"][0][2] == 5 and C["sftp"][4][2] == [10, 0, 0, 10],
+      "ccCopy با SFTP: پروتکل ۵، آدرس Rev1 چهاربایتی، نام فایل، کاربر و گذرواژه")
+check([c[0] for c in C["tftp"]] == ["2", "3", "4", "5", "6"] and C["tftp"][0][2] == 1 and C["tftp"][3][2] == "10.0.0.10",
+      "ccCopy با TFTP: آدرس قدیمی IpAddress، بی‌کاربر و گذرواژه")
+check([c[0] for c in C["save"]] == ["3", "4"], "ذخیره startup-config همان دو ستون قبلی")
+check(r["cap"] == [[True, True], [False, False], [False, False], [True, False], [False, False], [True, True]],
+      "SNMP: پشتیبان فقط سیسکو با روش انتقال و اجازه نوشتن؛ محدودیت فقط نکسوس: %s" % r["cap"])
 
 
 # ── ۱ج) پیشنهاد اتصال، تفاوت و پوشاندن رازها ─────────────────
@@ -606,6 +648,78 @@ check(M_[16] == "no password strength-check" and M_[17] == "hostname n9k", "pass
 check(r["maskedCount"] == 15 and r["idem"] is True, "شمار رازهای پوشیده؛ پوشاندن دوباره چیزی را عوض نمی‌کند (%s)" % r["maskedCount"])
 
 
+# ── ۱د) سرور TFTP ورکر، با کلاینت واقعی روی UDP ────────────────
+
+TFTP_SCRIPT = r"""
+const dgram = (await import('node:dgram')).default;
+process.env.SWITCH_TFTP_PORT = '0';
+const t = await import(process.argv[1]);
+""" + r"""function tftp({ host, port, op, file, data, mode = 'octet', dropFirstAck = false, dropFirstData = false }) {
+  return new Promise((resolve, reject) => {
+    const s = dgram.createSocket('udp4');
+    const req = Buffer.concat([Buffer.from([0, op === 'get' ? 1 : 2]), Buffer.from(`${file}\0${mode}\0`, 'latin1')]);
+    let peer = null; let chunks = []; let sent = 0; let block = 0; let droppedAck = false; let droppedData = false;
+    const t = setTimeout(() => { s.close(); reject(new Error('timeout')); }, 20000);
+    let fin = false; const done = (v) => { if (fin) return; fin = true; clearTimeout(t); s.close(); resolve(v); };
+    s.on('message', (m, r) => {
+      peer = r;
+      const opc = m.readUInt16BE(0); const b = m.readUInt16BE(2);
+      if (opc === 5) { clearTimeout(t); s.close(); return reject(new Error('ERR ' + b + ' ' + m.subarray(4).toString().replace(/\0/g, ''))); }
+      if (op === 'get' && opc === 3) {
+        if (b === block + 1) { chunks.push(m.subarray(4)); block = b; }
+        if (dropFirstAck && !droppedAck) { droppedAck = true; return; }
+        const ack = Buffer.alloc(4); ack.writeUInt16BE(4, 0); ack.writeUInt16BE(b, 2); s.send(ack, r.port, r.address);
+        if (m.length - 4 < 512 && b === block) done(Buffer.concat(chunks));
+      } else if (op === 'put' && opc === 4) {
+        if (b !== sent) return;
+        const start = b * 512; if (start > data.length) return done(true);
+        const chunk = data.subarray(start, start + 512);
+        const pkt = Buffer.alloc(4 + chunk.length); pkt.writeUInt16BE(3, 0); pkt.writeUInt16BE(b + 1, 2); chunk.copy(pkt, 4);
+        sent = b + 1;
+        if (dropFirstData && !droppedData && b === 1) { droppedData = true; setTimeout(() => s.send(pkt, r.port, r.address), 2500); return; }
+        s.send(pkt, r.port, r.address);
+        if (chunk.length < 512) setTimeout(() => done(true), 50);
+      }
+    });
+    s.send(req, port, host);
+  });
+}
+""" + r"""
+await t.ensureTftp(0);
+const port = t.tftpAddress().port;
+const out = {};
+const big = Array.from({ length: 300 }, (_, i) => `interface Ethernet1/${i}`).join('\n') + '\n';
+const o = await t.offerFile('tftp', {}, big);
+out.get = (await tftp({ host: '127.0.0.1', port, op: 'get', file: o.fileName, dropFirstAck: true })).toString() === big;
+out.getAscii = (await tftp({ host: '127.0.0.1', port, op: 'get', file: '/x/' + o.fileName, mode: 'netascii' })).toString() === big.replace(/\n/g, '\r\n');
+out.unknown = await tftp({ host: '127.0.0.1', port, op: 'get', file: 'pm-guess.cfg' }).then(() => 'ok', (e) => e.message);
+const e = await t.expectFile('tftp', {});
+out.readSlot = await tftp({ host: '127.0.0.1', port, op: 'get', file: e.fileName }).then(() => 'ok', (e2) => e2.message);
+out.putOther = await tftp({ host: '127.0.0.1', port, op: 'put', file: 'pm-other.cfg', data: Buffer.from('x') }).then(() => 'ok', (e2) => e2.message);
+await tftp({ host: '127.0.0.1', port, op: 'put', file: e.fileName, data: Buffer.from(big), dropFirstData: true });
+out.put = (await e.read()) === big;
+await o.cleanup();
+out.afterCleanup = await tftp({ host: '127.0.0.1', port, op: 'get', file: o.fileName }).then(() => 'ok', (e2) => e2.message);
+out.netascii = [t.toNetascii(Buffer.from('a\nb\rc')).toString('latin1'), t.fromNetascii(Buffer.from('a\r\nb\r\0c', 'latin1')).toString()];
+t.closeTftp();
+console.log(JSON.stringify(out));
+process.exit(0);
+"""
+
+proc = subprocess.run([node, "--input-type=module", "-e", TFTP_SCRIPT, os.path.join(ROOT, "worker", "transfer.mjs")],
+                      capture_output=True, text=True, timeout=120)
+if proc.returncode != 0:
+    print(proc.stderr)
+    sys.exit(1)
+r = json.loads(proc.stdout.strip().splitlines()[-1])
+check(r["get"] and r["getAscii"], "TFTP: دانلود چندبلوکی با ACK گم‌شده، و netascii با مسیر")
+check(r["unknown"].startswith("ERR 1") and r["readSlot"].startswith("ERR 1"), "TFTP: نام ناشناخته یا جای آپلود قابل دانلود نیست")
+check(r["putOther"].startswith("ERR 2"), "TFTP: آپلود فقط به نام تصادفی که پنل منتظرش است")
+check(r["put"], "TFTP: آپلود چندبلوکی با بلوک دیررسیده")
+check(r["afterCleanup"].startswith("ERR 1"), "TFTP: فایل پس از کار دیگر در دسترس نیست")
+check(r["netascii"] == ["a\r\nb\r\0c", "a\nb\rc"], "تبدیل netascii دو طرف")
+
+
 # ── ۲) قاعده‌ها در کد واقعی ──────────────────────────────────────
 
 actions = read("app/api/switch-actions/route.ts")
@@ -688,7 +802,7 @@ check("reveal ? { text: row.config, masked: 0 } : maskConfig(row.config)" in cfg
 check("maskLine(l.text)" in cfg_route, "تفاوت دو نسخه هم خط‌به‌خط پوشیده می‌شود")
 check("config" not in read("app/api/switches/[id]/configs/route.ts").split("FROM switch_configs")[0].split("SELECT id, taken_at")[1],
       "فهرست نسخه‌ها متن پیکربندی را برنمی‌گرداند")
-check("config" not in pub_cols, "ستون‌های عمومی سوییچ پیکربندی ندارند")
+check(not _re.search(r"\bconfig\b", pub_cols), "ستون‌های عمومی سوییچ متن پیکربندی ندارند")
 rep = read("app/api/switches/report/route.ts")
 check("/^[=+\\-@\\t\\r]/" in rep and "`'${s}`" in rep, "CSV گزارش: فرمول اکسل در توضیح پورت خنثی می‌شود")
 ports_api = read("app/api/switch-ports/route.ts")
@@ -698,6 +812,29 @@ check("'description', 'rate_limit', 'backup'" in mig48 and "switch_actions_one_b
 check(mig48.count("IF NOT EXISTS") >= 20 and "DROP CONSTRAINT IF EXISTS switch_actions_action_check" in mig48, "۰۴۸ دوباره‌اجراپذیر است")
 check("'([0-9]+)'" in read("app/api/switches/[id]/route.ts") and "(\\d+)" not in read("app/api/switches/[id]/route.ts"),
       "مرتب‌سازی عددی پورت: \\d در رشته الگویی جاوااسکریپت به d تبدیل می‌شد")
+
+
+# انتقال پیکربندی با SNMP
+set_snmp = sn[sn.index("async setRateLimit(sw, port, mbps)"):]
+check(set_snmp.index("pullRunning(sw)") < set_snmp.index("pushRunning(sw") and set_snmp.index("before.raw[dir] && before[dir] === null") < set_snmp.index("pushRunning(sw"),
+      "SNMP: پیش از اعمال، running-config خوانده و policy بیگانه رد می‌شود")
+check(set_snmp.rindex("pullRunning(sw)") > set_snmp.index("pushRunning(sw"), "SNMP: پس از اعمال، وضعیت واقعی دوباره خوانده می‌شود")
+check("configPortName(port)" in set_snmp and "isSafePortName(name)" in sn[sn.index("function configPortName"):][:400],
+      "SNMP: نام پورت پیش از رفتن به تکه پیکربندی سنجیده می‌شود")
+check(sw.count("withTransfer(") >= 4, "ورکر تنظیمات انتقال را به سوییچ SNMP می‌چسباند (فرمان، پشتیبان خودکار، پس از فرمان)")
+st_api = read("app/api/settings/route.ts")
+check("'switch_sftp_pass'" in st_api.split("const SECRET")[1].split("]")[0], "گذرواژه SFTP فقط‌نوشتنی است")
+check("ADMIN_ONLY" in st_api and "'switch_transfer_host'" in st_api.split("const ADMIN_ONLY")[1].split("]")[0] and "user.role !== 'admin'" in st_api,
+      "نشانی سرور انتقال را فقط مدیر عوض می‌کند (وگرنه پیکربندی به سرور دیگری فرستاده می‌شد)")
+compose = read("docker-compose.yml")
+check('"${SWITCH_TFTP_BIND:-127.0.0.1}:69:69/udp"' in compose, "TFTP پیش‌فرض فقط روی localhost منتشر می‌شود")
+setup = read("scripts/setup-switch-sftp.sh")
+check("ChrootDirectory" in setup and "ForceCommand internal-sftp" in setup and "AllowTcpForwarding no" in setup,
+      "کاربر SFTP زندانی، فقط SFTP، بدون تونل")
+check(setup.index("sshd -t") < setup.index("systemctl reload") and "sshd_config.d" not in setup.split("cat >>")[1],
+      "پیکربندی sshd پیش از reload سنجیده می‌شود و Match در انتهای sshd_config است")
+mig49 = read("db/migrations/049_switch_snmp_transfer.sql")
+check("CHECK (config_transfer IN ('none', 'sftp', 'tftp'))" in mig49 and "DROP CONSTRAINT IF EXISTS" in mig49, "۰۴۹ دوباره‌اجراپذیر است")
 
 
 if failed:

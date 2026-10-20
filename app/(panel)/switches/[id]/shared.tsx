@@ -115,6 +115,8 @@ export interface SwitchInfo {
   can_save: boolean;
   can_rate_limit: boolean;
   can_backup: boolean;
+  os_family: string | null;
+  config_transfer: 'none' | 'sftp' | 'tftp';
   datacenter_name: string | null;
   location: string | null;
   is_active: boolean;

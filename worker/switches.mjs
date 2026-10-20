@@ -1,4 +1,4 @@
-import { q, q1, settingNum, log, logErr } from './db.mjs';
+import { q, q1, settings, settingNum, log, logErr } from './db.mjs';
 import { openIncident, resolveIncident } from './incidents.mjs';
 import { formatPercent } from './format.mjs';
 import { createHash } from 'node:crypto';
@@ -20,10 +20,30 @@ import { suggestLinks } from './switch-match.mjs';
 
 const driverFor = (sw) => (sw.protocol === 'snmp' ? snmpDriver : nxapiDriver);
 
+/**
+ * سوییچ SNMP برای محدودیت سرعت و پشتیبان، سرور پنل را لازم دارد (سوییچ
+ * فایل را از آن برمی‌دارد یا به آن می‌فرستد). نشانی و کاربر SFTP در
+ * تنظیمات پنل است و همین‌جا به سوییچ چسبانده می‌شود.
+ */
+async function withTransfer(sw) {
+  if (!sw || sw.protocol !== 'snmp') return sw;
+  const st = await settings();
+  return {
+    ...sw,
+    transfer: {
+      host: String(st.switch_transfer_host ?? '').trim(),
+      user: String(st.switch_sftp_user ?? '').trim(),
+      pass: st.switch_sftp_pass ?? '',
+      path: String(st.switch_sftp_path ?? '').trim() || '/',
+    },
+  };
+}
+
 // ستون‌هایی که هر دو درایور لازم دارند
 const SWITCH_COLUMNS = `id, name, protocol, url, username, password, insecure_tls,
   snmp_version, snmp_host, snmp_port, snmp_community, snmp_write_community, snmp_user,
-  snmp_auth_proto, snmp_auth_pass, snmp_priv_proto, snmp_priv_pass, snmp_write, vendor`;
+  snmp_auth_proto, snmp_auth_pass, snmp_priv_proto, snmp_priv_pass, snmp_write, vendor,
+  os_family, config_transfer`;
 
 const SLOW_MS = {
   version: 5 * 60_000,
@@ -350,6 +370,7 @@ async function pollOne(sw) {
        max_temp_c      = $16,
        vendor          = COALESCE($17, vendor),
        sys_object_id   = COALESCE($18, sys_object_id),
+       os_family       = COALESCE($19, os_family),
        updated_at      = now()
      WHERE id = $1`,
     [
@@ -371,6 +392,7 @@ async function pollOne(sw) {
       maxTemp,
       ver?.vendor ?? null,
       ver?.sys_object_id ?? null,
+      ver?.os_family ?? null,
     ],
   );
 
@@ -758,7 +780,7 @@ async function snapshotAfterAction(a) {
   const done = await q1(`SELECT status FROM switch_actions WHERE id = $1`, [a.id]);
   if (done?.status !== 'done') return;
   if (!((await settingNum('switch_backup_hours', 24)) > 0)) return;
-  const sw = await q1(`SELECT ${SWITCH_COLUMNS}, is_active FROM switches WHERE id = $1`, [a.switch_id]);
+  const sw = await withTransfer(await q1(`SELECT ${SWITCH_COLUMNS}, is_active FROM switches WHERE id = $1`, [a.switch_id]));
   if (!sw?.is_active || !driverFor(sw).canBackup(sw)) return;
   try {
     await takeBackup(sw, 'action', a.requested_by_name);
@@ -771,12 +793,12 @@ async function runAction(a) {
   const finish = (status, result) =>
     q(`UPDATE switch_actions SET status = $2, result = $3, finished_at = now() WHERE id = $1`, [a.id, status, result]);
 
-  const sw = await q1(`SELECT ${SWITCH_COLUMNS}, is_active FROM switches WHERE id = $1`, [a.switch_id]);
+  const sw = await withTransfer(await q1(`SELECT ${SWITCH_COLUMNS}, is_active FROM switches WHERE id = $1`, [a.switch_id]));
   if (!sw || !sw.is_active) return finish('failed', 'سوییچ غیرفعال یا حذف شده است');
   const driver = driverFor(sw);
 
   if (a.action === 'backup') {
-    if (!driver.canBackup(sw)) return finish('failed', 'پشتیبان پیکربندی فقط برای سوییچ NX-API ممکن است');
+    if (!driver.canBackup(sw)) return finish('failed', 'پشتیبان پیکربندی فقط برای NX-API، یا سیسکو با SNMP که روش انتقال فایل (SFTP/TFTP) و اجازه نوشتن دارد');
     try {
       const r = await takeBackup(sw, 'manual', a.requested_by_name);
       return finish('done', r.changed ? 'پیکربندی ذخیره شد — با نسخه قبلی فرق دارد' : 'پیکربندی بررسی شد — تغییری نسبت به نسخه قبلی ندارد');
@@ -894,7 +916,7 @@ async function runDescription(a, sw, driver, port, finish) {
  * می‌کند. پس از فرمان، وضعیت واقعی از running-config خوانده می‌شود.
  */
 async function runRateLimit(a, sw, driver, port, finish) {
-  if (!driver.canRateLimit(sw)) return finish('failed', 'محدودیت سرعت فقط برای سوییچ NX-API پشتیبانی می‌شود');
+  if (!driver.canRateLimit(sw)) return finish('failed', 'محدودیت سرعت فقط برای NX-API، یا Cisco Nexus با SNMP که روش انتقال فایل (SFTP/TFTP) و اجازه نوشتن دارد');
   if (port.is_protected) return finish('failed', 'پورت محافظت‌شده است و محدودیت سرعت نمی‌گیرد');
   const mbps = Number(a.value);
   if (!Number.isInteger(mbps) || mbps < 0 || mbps > 400_000) return finish('failed', 'سرعت نامعتبر است');
@@ -906,11 +928,14 @@ async function runRateLimit(a, sw, driver, port, finish) {
     return finish('failed', driver.explain(err));
   }
 
-  let actual = null;
-  try {
-    actual = await driver.readRateLimit(sw, port);
-  } catch (err) {
-    log(`خواندن محدودیت ${port.name} پس از فرمان ناموفق: ${driver.explain(err)}`);
+  // درایور SNMP وضعیت واقعی را همان‌جا خوانده؛ دوباره خواندن running-config گران است
+  let actual = res.actual ?? null;
+  if (!actual) {
+    try {
+      actual = await driver.readRateLimit(sw, port);
+    } catch (err) {
+      log(`خواندن محدودیت ${port.name} پس از فرمان ناموفق: ${driver.explain(err)}`);
+    }
   }
   const inMbps = actual ? actual.input : res.input ? mbps : null;
   const outMbps = actual ? actual.output : res.output ? mbps : null;
@@ -960,13 +985,17 @@ export async function backupSwitchConfigs() {
   if (!(hours > 0)) return;
   const due = await q(
     `SELECT ${SWITCH_COLUMNS} FROM switches
-      WHERE is_active AND protocol = 'nxapi' AND status = 'up'
+      WHERE is_active AND status = 'up'
+        AND (protocol = 'nxapi' OR (protocol = 'snmp' AND vendor = 'cisco' AND config_transfer <> 'none'))
         AND (config_checked_at IS NULL OR config_checked_at < now() - ($1::text || ' hours')::interval)
       ORDER BY config_checked_at NULLS FIRST
       LIMIT 5`,
     [String(hours)],
   );
-  for (const sw of due) {
+  for (const row of due) {
+    const sw = await withTransfer(row);
+    // SNMP بدون اجازه نوشتن نمی‌تواند کپی را راه بیندازد
+    if (!driverFor(sw).canBackup(sw)) continue;
     try {
       const r = await takeBackup(sw, 'auto', null);
       if (r.changed) log(`پیکربندی سوییچ ${sw.name} تغییر کرده؛ نسخه تازه ذخیره شد`);

@@ -63,7 +63,7 @@ export function ConfigTab({ sw, onChanged }: { sw: SwitchInfo; onChanged: () => 
     setBusy(true);
     setMsg(null);
     try {
-      const r = await runSwitchAction({ action: 'backup', switch_id: sw.id }, 150);
+      const r = await runSwitchAction({ action: 'backup', switch_id: sw.id }, sw.protocol === 'snmp' ? 180 : 150);
       setMsg(r);
       setSelected(null);
       list.reload();
@@ -78,8 +78,9 @@ export function ConfigTab({ sw, onChanged }: { sw: SwitchInfo; onChanged: () => 
   if (!sw.can_backup) {
     return (
       <Notice type="info">
-        پشتیبان پیکربندی فقط برای سوییچ NX-API است. در SNMP راه استاندارد و امنی برای خواندن running-config نیست
-        (روش TFTP سیسکو پیکربندی را بی‌رمز روی شبکه می‌فرستد).
+        {sw.protocol === 'snmp'
+          ? 'با SNMP، پشتیبان پیکربندی فقط برای سیسکو است و سوییچ باید «انتقال فایل پیکربندی» (SFTP یا TFTP) و اجازه نوشتن داشته باشد — در ویرایش سوییچ. نشانی سرور پنل و کاربر SFTP در تنظیمات ← پایش.'
+          : 'این سوییچ پشتیبان پیکربندی ندارد.'}
       </Notice>
     );
   }
@@ -98,6 +99,7 @@ export function ConfigTab({ sw, onChanged }: { sw: SwitchInfo; onChanged: () => 
         <div className="me-auto text-xs text-muted space-y-0.5">
           <p>
             running-config خودکار در فاصله تنظیم‌شده خوانده می‌شود و فقط وقتی با نسخه قبلی فرق دارد ذخیره می‌شود.
+            {sw.protocol === 'snmp' && ` سوییچ آن را با ${sw.config_transfer === 'tftp' ? 'TFTP' : 'SFTP'} به سرور پنل می‌فرستد.`}
           </p>
           <p>
             آخرین بررسی: {sw.config_checked_at ? timeAgo(sw.config_checked_at) : 'هنوز نه'}

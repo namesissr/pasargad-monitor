@@ -86,6 +86,8 @@ interface Snmp {
   authProto: string;
   privProto: string;
   write: boolean;
+  /** روش انتقال فایل برای CISCO-CONFIG-COPY-MIB (پشتیبان و محدودیت سرعت) */
+  transfer: 'none' | 'sftp' | 'tftp';
 }
 
 type CleanResult = { ok: false; error: string } | { ok: true; common: Common; conn: Nxapi | Snmp };
@@ -136,10 +138,11 @@ function clean(body: Record<string, unknown>): CleanResult {
         return { ok: false, error: 'رمزنگاری بدون احراز هویت در SNMPv3 ممکن نیست' };
       }
     }
+    const transfer = body.config_transfer === 'sftp' || body.config_transfer === 'tftp' ? body.config_transfer : 'none';
     return {
       ok: true,
       common,
-      conn: { protocol: 'snmp', version, host, port, user, authProto, privProto, write: body.snmp_write === true },
+      conn: { protocol: 'snmp', version, host, port, user, authProto, privProto, write: body.snmp_write === true, transfer },
     };
   }
 
@@ -234,8 +237,8 @@ export async function POST(req: Request) {
          name, protocol, url, username, password, insecure_tls,
          snmp_version, snmp_host, snmp_port, snmp_community, snmp_write_community,
          snmp_user, snmp_auth_proto, snmp_auth_pass, snmp_priv_proto, snmp_priv_pass, snmp_write,
-         datacenter_id, location, notes, is_active
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+         datacenter_id, location, notes, is_active, config_transfer
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
        RETURNING id`,
       [
         c.name,
@@ -259,6 +262,7 @@ export async function POST(req: Request) {
         c.location,
         c.notes,
         c.isActive,
+        sn?.transfer ?? 'none',
       ],
     );
     return ok({ id: row?.id }, { status: 201 });
@@ -361,6 +365,7 @@ export async function PATCH(req: Request) {
               snmp_priv_pass       = CASE WHEN $14 OR $8 = 'none' THEN NULL
                                           WHEN $19 = '' THEN snmp_priv_pass ELSE $19 END,
               fail_streak = CASE WHEN $20 THEN 0 ELSE fail_streak END,
+              config_transfer = $21,
               updated_at = now()
         WHERE id = $1`,
       [
@@ -384,6 +389,7 @@ export async function PATCH(req: Request) {
         sec.authPass,
         sec.privPass,
         targetChanged,
+        conn.transfer,
       ],
     );
     return ok({ ok: true });

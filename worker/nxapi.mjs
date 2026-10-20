@@ -814,6 +814,48 @@ export function rateFromPolicy(name) {
 }
 
 /**
+ * بلوک یک اینترفیس از کل running-config: خط «interface X» و خط‌های
+ * تورفته بعدش. برای SNMP که فقط کل پیکربندی را می‌تواند بخواند.
+ */
+export function interfaceBlock(config, name) {
+  const lines = String(config ?? '').replace(/\r\n/g, '\n').split('\n');
+  const head = `interface ${name}`.toLowerCase();
+  const start = lines.findIndex((l) => l.trim().toLowerCase() === head && !/^\s/.test(l));
+  if (start < 0) return '';
+  const out = [lines[start]];
+  for (let i = start + 1; i < lines.length && /^\s+\S/.test(lines[i]); i++) out.push(lines[i]);
+  return out.join('\n');
+}
+
+/**
+ * تکه پیکربندی محدودیت سرعت برای ادغام در running-config (همان فرمان‌های
+ * مسیر NX-API، یک‌جا). current: policyهای فعلی پورت که فقط مال پنل‌اند —
+ * policy بیگانه پیش از این رد شده است. خط service-policy خروجی آخر است:
+ * اگر سوییچ آن را نپذیرد، بقیه اعمال شده‌اند و خواندن دوباره همین را نشان می‌دهد.
+ */
+export function rateLimitSnippet(name, current, mbps) {
+  const policy = mbps > 0 ? ratePolicyName(mbps) : null;
+  const lines = [];
+  if (policy) {
+    lines.push(
+      `policy-map type qos ${policy}`,
+      '  class class-default',
+      `    police cir ${mbps} mbps bc 200 ms conform transmit violate drop`,
+    );
+  }
+  lines.push(`interface ${name}`);
+  for (const dir of ['input', 'output']) {
+    if (current[dir] && current[dir] !== policy) lines.push(`  no service-policy type qos ${dir} ${current[dir]}`);
+  }
+  if (policy) {
+    for (const dir of ['input', 'output']) {
+      if (current[dir] !== policy) lines.push(`  service-policy type qos ${dir} ${policy}`);
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/**
  * توضیح پورت برای خط فرمان. «;» جداکننده فرمان‌های NX-API است و خط تازه
  * فرمان تازه؛ هر دو یعنی تزریق فرمان، پس رد می‌شوند نه حذف.
  */
@@ -897,7 +939,7 @@ export const nxapiDriver = {
       };
     }
 
-    return { ports, res, ver: ver ? { ...ver, vendor: 'cisco' } : null, env, xcvr, notes, discovery };
+    return { ports, res, ver: ver ? { ...ver, vendor: 'cisco', os_family: 'nxos' } : null, env, xcvr, notes, discovery };
   },
 
   canDescribe: () => true,
