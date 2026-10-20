@@ -1,0 +1,765 @@
+import { q, q1, settingNum, log, logErr } from './db.mjs';
+import { openIncident, resolveIncident } from './incidents.mjs';
+import { formatPercent } from './format.mjs';
+import {
+  show,
+  configure,
+  saveConfig,
+  parseInterfaces,
+  parseInterfaceStatus,
+  parseResources,
+  parseVersion,
+  parseEnvironment,
+  parseTransceivers,
+  counterDelta,
+  explainError,
+  isSafePortName,
+} from './nxapi.mjs';
+
+/**
+ * پایش سوییچ‌ها: خواندن دوره‌ای، اجرای shut/no shut از صف، و تجمیع.
+ *
+ * هر خواندن یک «show interface» است که شمارنده همه پورت‌ها را با هم
+ * می‌دهد، به‌علاوه منابع سوییچ. بقیه — محیط، ماژول نوری، نسخه — کندتر
+ * عوض می‌شوند و با فاصله بیشتر خوانده می‌شوند تا پردازنده کنترل‌پلین
+ * سوییچ بی‌دلیل درگیر نشود.
+ */
+
+const SLOW_MS = {
+  version: 5 * 60_000,
+  env: 5 * 60_000,
+  xcvr: 10 * 60_000,
+};
+
+// زمان آخرین خواندن کند، در حافظه. با ری‌استارت ورکر یک بار زودتر خوانده
+// می‌شوند؛ ضرری ندارد.
+const lastSlow = new Map();
+
+function due(sw, kind) {
+  return Date.now() - (lastSlow.get(`${sw.id}:${kind}`) ?? 0) >= SLOW_MS[kind];
+}
+
+function markDone(sw, kind) {
+  lastSlow.set(`${sw.id}:${kind}`, Date.now());
+}
+
+// پورتی که سرعتش نمونه خام می‌گیرد. ویلن و لوپ‌بک معمولا شمارنده بایت
+// ندارند و نمونه‌شان فقط ردیف صفر می‌ساخت.
+const COUNTED_KINDS = new Set(['ethernet', 'port-channel', 'mgmt']);
+
+// قطعی لینک کوتاه‌تر از این رویداد نمی‌سازد. یک فلپ چندثانیه‌ای که خودش
+// برگشته، ارزش پیامک ندارد.
+const PORT_DOWN_GRACE_SEC = 60;
+
+export async function pollSwitches() {
+  // سوییچ غیرفعال رویداد باز نگه ندارد؛ وگرنه یادآوری‌اش تا ابد می‌رفت
+  await q(
+    `UPDATE incidents SET resolved_at = now()
+      WHERE resolved_at IS NULL
+        AND switch_id IN (SELECT id FROM switches WHERE NOT is_active)`,
+  );
+
+  const list = await q(
+    `SELECT id, name, url, username, password, insecure_tls, status, fail_streak, model, max_temp_c
+       FROM switches WHERE is_active ORDER BY id`,
+  );
+
+  // چند سوییچ با هم، ولی نه همه: هر خواندن چند ثانیه طول می‌کشد
+  for (let i = 0; i < list.length; i += 4) {
+    await Promise.all(
+      list.slice(i, i + 4).map((sw) =>
+        pollOne(sw).catch((err) => logErr(`خواندن سوییچ ${sw.name} خطا داد:`, err.message)),
+      ),
+    );
+  }
+}
+
+async function markFailure(sw, message, ms) {
+  const row = await q1(
+    `UPDATE switches
+        SET fail_streak  = fail_streak + 1,
+            last_error   = $2,
+            last_poll_at = now(),
+            last_poll_ms = $3,
+            status       = CASE WHEN fail_streak + 1 >= 2 THEN 'down' ELSE status END,
+            updated_at   = now()
+      WHERE id = $1
+      RETURNING fail_streak, status`,
+    [sw.id, message, ms],
+  );
+
+  // یک شکست تنها می‌تواند یک تایم‌اوت گذرا باشد. دو بار پشت‌سرهم یعنی
+  // واقعا دسترسی نیست.
+  if (row && row.fail_streak >= 2) {
+    if (row.fail_streak === 2) {
+      // سرعت قدیمی روی پورت‌ها نماند؛ وگرنه جمع ترافیک سوییچ قطع، عدد
+      // لحظه آخرش را نشان می‌داد
+      await q(`UPDATE switch_ports SET in_bps = 0, out_bps = 0 WHERE switch_id = $1`, [sw.id]);
+      log(`سوییچ ${sw.name} در دسترس نیست: ${message}`);
+    }
+    await openIncident({
+      switchId: sw.id,
+      kind: 'switch_down',
+      severity: 'critical',
+      message: `پنل به سوییچ ${sw.name} دسترسی ندارد: ${message}`,
+    });
+  }
+}
+
+async function readEnvironment(sw, notes) {
+  const read = (cmd) =>
+    show(sw, cmd).catch((e) => {
+      notes.push(explainError(e));
+      return null;
+    });
+  const temperature = await read('show environment temperature');
+  const fan = await read('show environment fan');
+  const power = await read('show environment power');
+  if (!temperature && !fan && !power) return null;
+  return parseEnvironment({ temperature, fan, power });
+}
+
+async function pollOne(sw) {
+  const started = Date.now();
+
+  let ifaceBody;
+  try {
+    ifaceBody = await show(sw, 'show interface', { timeoutMs: 45_000 });
+  } catch (err) {
+    await markFailure(sw, explainError(err), Date.now() - started);
+    return;
+  }
+
+  // خطاهای غیرکشنده: پورت‌ها خوانده شدند ولی بخشی دیگر نه
+  const notes = [];
+  const soft = (p) =>
+    p.catch((e) => {
+      notes.push(explainError(e));
+      return null;
+    });
+
+  const statusMap = (await soft(show(sw, 'show interface status').then(parseInterfaceStatus))) ?? new Map();
+  const res = await soft(show(sw, 'show system resources').then(parseResources));
+
+  let ver = null;
+  if (!sw.model || due(sw, 'version')) {
+    markDone(sw, 'version');
+    ver = await soft(show(sw, 'show version').then(parseVersion));
+  }
+
+  let env = null;
+  if (due(sw, 'env')) {
+    markDone(sw, 'env');
+    env = await readEnvironment(sw, notes);
+  }
+
+  let xcvr = null;
+  if (due(sw, 'xcvr')) {
+    markDone(sw, 'xcvr');
+    xcvr = await soft(
+      show(sw, 'show interface transceiver details', { timeoutMs: 60_000 }).then(parseTransceivers),
+    );
+  }
+
+  const nowMs = Date.now();
+  const ts = new Date(nowMs).toISOString();
+  const ports = parseInterfaces(ifaceBody);
+
+  const prevRows = await q(
+    `SELECT id, name, in_bytes, out_bytes, in_errors, out_errors, in_discards, out_discards,
+            crc_errors, counters_at, oper_up, last_change_at, server_id, alert_down
+       FROM switch_ports WHERE switch_id = $1`,
+    [sw.id],
+  );
+  const prev = new Map(prevRows.map((r) => [r.name, r]));
+
+  const records = [];
+  const deltas = new Map();
+
+  for (const p of ports) {
+    const st = statusMap.get(p.name);
+    let reason = p.oper_reason;
+    // err-disabled را «show interface status» روشن‌تر می‌گوید
+    if (p.oper_up === false && st?.state && /err|xcvr|sfp/i.test(st.state)) reason = st.state;
+
+    const p0 = prev.get(p.name);
+    const elapsed = p0?.counters_at ? (nowMs - new Date(p0.counters_at).getTime()) / 1000 : null;
+
+    let inBps = p.in_rate_bps ?? 0;
+    let outBps = p.out_rate_bps ?? 0;
+
+    if (p0 && elapsed && elapsed > 0 && COUNTED_KINDS.has(p.kind)) {
+      const dIn = counterDelta(p0.in_bytes, p.in_bytes);
+      const dOut = counterDelta(p0.out_bytes, p.out_bytes);
+      if (dIn !== null && dOut !== null) {
+        inBps = Math.round((dIn * 8) / elapsed);
+        outBps = Math.round((dOut * 8) / elapsed);
+        const errs =
+          (counterDelta(p0.in_errors, p.in_errors) ?? 0) +
+          (counterDelta(p0.out_errors, p.out_errors) ?? 0) +
+          (counterDelta(p0.crc_errors, p.crc_errors) ?? 0);
+        const disc =
+          (counterDelta(p0.in_discards, p.in_discards) ?? 0) +
+          (counterDelta(p0.out_discards, p.out_discards) ?? 0);
+        // پورت خاموش بی‌ترافیک ردیف نمی‌گیرد؛ چهل پورت خالی در روز
+        // صدهزار ردیف صفر می‌ساختند
+        if (p.oper_up !== false || dIn > 0 || dOut > 0) {
+          deltas.set(p.name, { in_bytes: dIn, out_bytes: dOut, in_bps: inBps, out_bps: outBps, errors: errs, discards: disc });
+        }
+      }
+    }
+
+    records.push({
+      name: p.name,
+      kind: p.kind,
+      description: p.description,
+      admin_up: p.admin_up,
+      oper_up: p.oper_up,
+      oper_reason: reason,
+      speed_mbps: p.speed_mbps,
+      mtu: p.mtu === null ? null : Math.round(p.mtu),
+      mode: p.mode,
+      vlan: st?.vlan ?? null,
+      mac: p.mac,
+      member_of: p.member_of,
+      hw_type: p.hw_type,
+      xcvr_type: st?.xcvr_type ?? null,
+      last_flap: p.last_flap,
+      in_bytes: p.in_bytes,
+      out_bytes: p.out_bytes,
+      in_errors: p.in_errors,
+      out_errors: p.out_errors,
+      in_discards: p.in_discards,
+      out_discards: p.out_discards,
+      crc_errors: p.crc_errors,
+      in_bps: p.oper_up === false ? 0 : inBps,
+      out_bps: p.oper_up === false ? 0 : outBps,
+      transceiver: xcvr ? (xcvr.get(p.name) ?? null) : null,
+    });
+  }
+
+  const saved = await q(
+    `INSERT INTO switch_ports (
+       switch_id, name, kind, description, admin_up, oper_up, oper_reason, speed_mbps, mtu,
+       mode, vlan, mac, member_of, hw_type, xcvr_type, last_flap,
+       in_bytes, out_bytes, in_errors, out_errors, in_discards, out_discards, crc_errors,
+       counters_at, in_bps, out_bps, transceiver, is_protected, is_present, last_change_at, updated_at
+     )
+     SELECT $1, r.name, r.kind, r.description, r.admin_up, r.oper_up, r.oper_reason, r.speed_mbps, r.mtu,
+            r.mode, r.vlan, r.mac, r.member_of, r.hw_type, r.xcvr_type, r.last_flap,
+            r.in_bytes, r.out_bytes, r.in_errors, r.out_errors, r.in_discards, r.out_discards, r.crc_errors,
+            $2::timestamptz, r.in_bps, r.out_bps, r.transceiver,
+            -- پورت مدیریت پیش‌فرض محافظت‌شده است: shut کردنش دسترسی پنل
+            -- به خود سوییچ را می‌بُرد
+            r.kind = 'mgmt', TRUE, $2::timestamptz, now()
+       FROM jsonb_to_recordset($3::jsonb) AS r(
+              name text, kind text, description text, admin_up boolean, oper_up boolean,
+              oper_reason text, speed_mbps int, mtu int, mode text, vlan text, mac text,
+              member_of text, hw_type text, xcvr_type text, last_flap text,
+              in_bytes bigint, out_bytes bigint, in_errors bigint, out_errors bigint,
+              in_discards bigint, out_discards bigint, crc_errors bigint,
+              in_bps bigint, out_bps bigint, transceiver jsonb)
+     ON CONFLICT (switch_id, name) DO UPDATE SET
+       kind           = EXCLUDED.kind,
+       description    = EXCLUDED.description,
+       admin_up       = EXCLUDED.admin_up,
+       oper_up        = EXCLUDED.oper_up,
+       oper_reason    = EXCLUDED.oper_reason,
+       speed_mbps     = EXCLUDED.speed_mbps,
+       mtu            = EXCLUDED.mtu,
+       mode           = EXCLUDED.mode,
+       vlan           = COALESCE(EXCLUDED.vlan, switch_ports.vlan),
+       mac            = EXCLUDED.mac,
+       member_of      = EXCLUDED.member_of,
+       hw_type        = EXCLUDED.hw_type,
+       xcvr_type      = COALESCE(EXCLUDED.xcvr_type, switch_ports.xcvr_type),
+       last_flap      = EXCLUDED.last_flap,
+       in_bytes       = EXCLUDED.in_bytes,
+       out_bytes      = EXCLUDED.out_bytes,
+       in_errors      = EXCLUDED.in_errors,
+       out_errors     = EXCLUDED.out_errors,
+       in_discards    = EXCLUDED.in_discards,
+       out_discards   = EXCLUDED.out_discards,
+       crc_errors     = EXCLUDED.crc_errors,
+       counters_at    = EXCLUDED.counters_at,
+       in_bps         = EXCLUDED.in_bps,
+       out_bps        = EXCLUDED.out_bps,
+       transceiver    = CASE WHEN $4 THEN EXCLUDED.transceiver ELSE switch_ports.transceiver END,
+       is_present     = TRUE,
+       last_change_at = CASE WHEN switch_ports.oper_up IS DISTINCT FROM EXCLUDED.oper_up
+                             THEN EXCLUDED.last_change_at ELSE switch_ports.last_change_at END,
+       updated_at     = now()
+     RETURNING id, name`,
+    [sw.id, ts, JSON.stringify(records), Boolean(xcvr)],
+  );
+  const idOf = new Map(saved.map((r) => [r.name, r.id]));
+
+  // پورتی که دیگر در خروجی نیست حذف نمی‌شود، فقط علامت می‌خورد
+  await q(
+    `UPDATE switch_ports
+        SET is_present = FALSE, oper_up = NULL, in_bps = 0, out_bps = 0, updated_at = now()
+      WHERE switch_id = $1 AND is_present AND NOT (name = ANY($2::text[]))`,
+    [sw.id, ports.map((p) => p.name)],
+  );
+
+  const metricRows = [];
+  for (const [name, d] of deltas) {
+    const id = idOf.get(name);
+    if (id) metricRows.push({ port_id: id, ...d });
+  }
+  if (metricRows.length) {
+    await q(
+      `INSERT INTO switch_port_metrics (port_id, ts, in_bytes, out_bytes, in_bps, out_bps, errors, discards)
+       SELECT r.port_id, $1::timestamptz, r.in_bytes, r.out_bytes, r.in_bps, r.out_bps, r.errors, r.discards
+         FROM jsonb_to_recordset($2::jsonb) AS r(
+                port_id int, in_bytes bigint, out_bytes bigint, in_bps bigint, out_bps bigint,
+                errors bigint, discards bigint)
+       ON CONFLICT (port_id, ts) DO NOTHING`,
+      [ts, JSON.stringify(metricRows)],
+    );
+  }
+
+  const maxTemp = env?.max_temp_c ?? (sw.max_temp_c === null ? null : Number(sw.max_temp_c));
+
+  await q(
+    `UPDATE switches SET
+       status          = 'up',
+       fail_streak     = 0,
+       last_error      = $2,
+       last_seen_at    = now(),
+       last_poll_at    = now(),
+       last_poll_ms    = $3,
+       cpu_percent     = COALESCE($4, cpu_percent),
+       mem_used_bytes  = COALESCE($5, mem_used_bytes),
+       mem_total_bytes = COALESCE($6, mem_total_bytes),
+       load1           = COALESCE($7, load1),
+       hostname        = COALESCE($8, hostname),
+       model           = COALESCE($9, model),
+       serial          = COALESCE($10, serial),
+       os_version      = COALESCE($11, os_version),
+       uptime_sec      = COALESCE($12, uptime_sec),
+       env             = CASE WHEN $13 THEN $14::jsonb ELSE env END,
+       env_ok          = CASE WHEN $13 THEN $15 ELSE env_ok END,
+       env_checked_at  = CASE WHEN $13 THEN now() ELSE env_checked_at END,
+       max_temp_c      = $16,
+       updated_at      = now()
+     WHERE id = $1`,
+    [
+      sw.id,
+      notes.length ? notes.join(' | ') : null,
+      Date.now() - started,
+      res?.cpu_percent ?? null,
+      res?.mem_used_bytes ?? null,
+      res?.mem_total_bytes ?? null,
+      res?.load1 ?? null,
+      ver?.hostname ?? null,
+      ver?.model ?? null,
+      ver?.serial ?? null,
+      ver?.os_version ?? null,
+      ver?.uptime_sec ?? null,
+      Boolean(env),
+      env ? JSON.stringify({ temps: env.temps, fans: env.fans, psus: env.psus, problems: env.problems }) : null,
+      env ? env.problems.length === 0 : null,
+      maxTemp,
+    ],
+  );
+
+  if (res) {
+    await q(
+      `INSERT INTO switch_metrics (switch_id, ts, cpu_percent, mem_used_bytes, mem_total_bytes, load1, max_temp_c)
+       VALUES ($1, $2::timestamptz, $3, $4, $5, $6, $7)
+       ON CONFLICT (switch_id, ts) DO NOTHING`,
+      [sw.id, ts, res.cpu_percent, res.mem_used_bytes, res.mem_total_bytes, res.load1, maxTemp],
+    );
+  }
+
+  await resolveIncident({
+    switchId: sw.id,
+    kind: 'switch_down',
+    recoveryMessage: `پاسارگاد میزبان — سوییچ ${sw.name} دوباره در دسترس است.`,
+  });
+
+  if (env) await evaluateEnvironment(sw, env);
+  if (res) await evaluateCpu(sw);
+  await evaluatePorts(sw, ports, prev, idOf, nowMs);
+}
+
+async function evaluateEnvironment(sw, env) {
+  if (env.problems.length) {
+    await openIncident({
+      switchId: sw.id,
+      kind: 'switch_env',
+      severity: 'critical',
+      message: `سخت‌افزار سوییچ ${sw.name}: ${env.problems.join('، ')}`,
+    });
+  } else {
+    await resolveIncident({
+      switchId: sw.id,
+      kind: 'switch_env',
+      recoveryMessage: `پاسارگاد میزبان — دما، فن و منبع تغذیه سوییچ ${sw.name} عادی شد.`,
+    });
+  }
+}
+
+/**
+ * پردازنده سوییچ: میانگین پنج دقیقه، نه مقدار لحظه‌ای. کنترل‌پلین
+ * نکسوس هنگام همگرایی پروتکل‌ها چند ثانیه صددرصد می‌شود و این عادی است.
+ * برگشت با حاشیه ده درصد، همان قاعده آستانه‌های سرور.
+ */
+async function evaluateCpu(sw) {
+  const threshold = await settingNum('switch_cpu_threshold', 90);
+  if (!(threshold > 0)) return;
+  const row = await q1(
+    `SELECT AVG(cpu_percent)::float8 AS avg, COUNT(*)::int AS n
+       FROM switch_metrics
+      WHERE switch_id = $1 AND ts >= now() - interval '5 minutes' AND cpu_percent IS NOT NULL`,
+    [sw.id],
+  );
+  if (!row || row.n < 3 || row.avg === null) return;
+  const avg = Number(row.avg);
+  if (avg >= threshold) {
+    await openIncident({
+      switchId: sw.id,
+      kind: 'switch_cpu',
+      severity: 'warning',
+      message: `پردازنده سوییچ ${sw.name} پنج دقیقه است بالای ${formatPercent(threshold)} است (${formatPercent(avg)}).`,
+      value: avg,
+    });
+  } else if (avg < threshold * 0.9) {
+    await resolveIncident({ switchId: sw.id, kind: 'switch_cpu' });
+  }
+}
+
+/**
+ * قطعی لینک پورت‌هایی که هشدار رویشان روشن است.
+ *
+ * پورتی که مدیر shut کرده هشدار نمی‌سازد: قطعی عمدی است. رویداد باز
+ * پورتی که هشدارش خاموش شده یا از سوییچ رفته بسته می‌شود، وگرنه
+ * یادآوری‌اش تا ابد ادامه پیدا می‌کرد.
+ */
+async function evaluatePorts(sw, ports, prev, idOf, nowMs) {
+  for (const p of ports) {
+    const p0 = prev.get(p.name);
+    const id = idOf.get(p.name);
+    if (!p0 || !id || !p0.alert_down) continue;
+
+    // اگر همین الان عوض شده، last_change_at همین لحظه است
+    const changedAt = p0.oper_up !== p.oper_up ? nowMs : p0.last_change_at ? new Date(p0.last_change_at).getTime() : 0;
+    const downFor = (nowMs - changedAt) / 1000;
+    const serverId = p0.server_id ?? null;
+
+    if (p.admin_up !== false && p.oper_up === false) {
+      if (downFor < PORT_DOWN_GRACE_SEC) continue;
+      await openIncident({
+        serverId,
+        switchId: sw.id,
+        switchPortId: id,
+        kind: 'port_down',
+        severity: 'critical',
+        message: `پورت ${p.name}${p.description ? ` (${p.description})` : ''} روی سوییچ ${sw.name} قطع شد${p.oper_reason ? `: ${p.oper_reason}` : ''}.`,
+      });
+    } else if (p.oper_up === true) {
+      await resolveIncident({
+        serverId,
+        switchId: sw.id,
+        switchPortId: id,
+        kind: 'port_down',
+        recoveryMessage: `پاسارگاد میزبان — پورت ${p.name} روی سوییچ ${sw.name} دوباره وصل است.`,
+      });
+    } else if (p.admin_up === false) {
+      await resolveIncident({ serverId, switchId: sw.id, switchPortId: id, kind: 'port_down' });
+    }
+  }
+
+  await q(
+    `UPDATE incidents i SET resolved_at = now()
+       FROM switch_ports p
+      WHERE i.switch_port_id = p.id AND i.resolved_at IS NULL AND i.kind = 'port_down'
+        AND p.switch_id = $1
+        -- سرورِ پورت عوض شده باشد هم بسته می‌شود؛ کلید رویداد باز سرور را
+        -- هم دارد و رویداد قدیمی دیگر هرگز با پورت جور نمی‌شد
+        AND (NOT p.alert_down OR NOT p.is_present OR i.server_id IS DISTINCT FROM p.server_id)`,
+    [sw.id],
+  );
+}
+
+// ── صف shut / no shut ──────────────────────────────────────
+
+/**
+ * اجرای درخواست‌های shut/no shut.
+ *
+ * هر درخواست پیش از اجرا دوباره بررسی می‌شود — محافظت پورت، فعال بودن
+ * سوییچ، الگوی نام — چون بین ثبت درخواست و اجرا ممکن است چیزی عوض شده
+ * باشد. پس از فرمان، وضعیت واقعی پورت از خود سوییچ خوانده می‌شود: «فرمان
+ * بدون خطا رفت» با «پورت واقعا خاموش شد» یکی نیست.
+ */
+export async function drainSwitchActions() {
+  // درخواستی که ورکر وسط اجرایش مرده، تا ابد «در حال اجرا» نماند
+  await q(
+    `UPDATE switch_actions
+        SET status = 'failed', finished_at = now(),
+            result = 'اجرا نیمه‌تمام ماند (ورکر ری‌استارت شد). وضعیت پورت را در سوییچ بررسی کنید.'
+      WHERE status = 'running' AND started_at < now() - interval '5 minutes'`,
+  );
+
+  for (let i = 0; i < 5; i++) {
+    const a = await q1(
+      `UPDATE switch_actions SET status = 'running', started_at = now()
+        WHERE id = (
+          SELECT id FROM switch_actions WHERE status = 'pending'
+           ORDER BY requested_at LIMIT 1 FOR UPDATE SKIP LOCKED
+        )
+        RETURNING id, switch_id, port_id, port_name, action, save_config, requested_by_name, reason`,
+    );
+    if (!a) return;
+    await runAction(a).catch(async (err) => {
+      logErr('اجرای درخواست سوییچ خطا داد:', err.message);
+      await q(
+        `UPDATE switch_actions SET status = 'failed', finished_at = now(), result = $2 WHERE id = $1`,
+        [a.id, explainError(err)],
+      );
+    });
+  }
+}
+
+async function runAction(a) {
+  const finish = (status, result) =>
+    q(`UPDATE switch_actions SET status = $2, result = $3, finished_at = now() WHERE id = $1`, [a.id, status, result]);
+
+  const sw = await q1(
+    `SELECT id, name, url, username, password, insecure_tls, is_active FROM switches WHERE id = $1`,
+    [a.switch_id],
+  );
+  if (!sw || !sw.is_active) return finish('failed', 'سوییچ غیرفعال یا حذف شده است');
+
+  const port = a.port_id
+    ? await q1(`SELECT id, name, kind, is_protected FROM switch_ports WHERE id = $1 AND switch_id = $2`, [
+        a.port_id,
+        a.switch_id,
+      ])
+    : null;
+  if (!port) return finish('failed', 'پورت پیدا نشد');
+  if (!isSafePortName(port.name)) return finish('failed', `روی ${port.name} از پنل فرمان اجرا نمی‌شود`);
+  if (a.action === 'shutdown' && port.is_protected) {
+    return finish('failed', 'پورت محافظت‌شده است و از پنل خاموش نمی‌شود');
+  }
+
+  const wantUp = a.action === 'no_shutdown';
+  const lines = [`interface ${port.name}`, wantUp ? 'no shutdown' : 'shutdown'];
+
+  try {
+    await configure(sw, lines);
+  } catch (err) {
+    return finish('failed', explainError(err));
+  }
+
+  let saveNote = '';
+  if (a.save_config) {
+    try {
+      await saveConfig(sw);
+      saveNote = ' و در startup-config ذخیره شد';
+    } catch (err) {
+      saveNote = ` — ولی ذخیره در startup-config انجام نشد (${explainError(err)}) و با ریبوت سوییچ برمی‌گردد`;
+    }
+  }
+
+  // خواندن وضعیت واقعی پس از فرمان
+  let after = null;
+  try {
+    [after] = parseInterfaces(await show(sw, `show interface ${port.name}`));
+  } catch (err) {
+    log(`خواندن وضعیت ${port.name} پس از فرمان ناموفق: ${explainError(err)}`);
+  }
+
+  if (after) {
+    await q(
+      `UPDATE switch_ports
+          SET admin_up = $2, oper_up = $3, oper_reason = $4,
+              last_change_at = CASE WHEN oper_up IS DISTINCT FROM $3 THEN now() ELSE last_change_at END,
+              in_bps  = CASE WHEN $3 THEN in_bps  ELSE 0 END,
+              out_bps = CASE WHEN $3 THEN out_bps ELSE 0 END,
+              updated_at = now()
+        WHERE id = $1`,
+      [port.id, after.admin_up, after.oper_up, after.oper_reason],
+    );
+  }
+
+  const label = wantUp ? 'روشن (no shutdown)' : 'خاموش (shutdown)';
+  log(`سوییچ ${sw.name}: پورت ${port.name} ${label} شد — درخواست ${a.requested_by_name ?? 'نامشخص'}`);
+
+  if (!after) {
+    return finish('done', `فرمان پذیرفته شد${saveNote}. خواندن وضعیت بعدی انجام نشد؛ در خواندن بعدی به‌روز می‌شود.`);
+  }
+  if (after.admin_up !== wantUp) {
+    return finish('failed', `فرمان بدون خطا رفت ولی پورت هنوز ${after.admin_up ? 'روشن' : 'خاموش'} است`);
+  }
+  const link = after.oper_up ? 'لینک بالاست' : `لینک پایین است${after.oper_reason ? ` (${after.oper_reason})` : ''}`;
+  return finish('done', `پورت ${label} شد؛ ${link}${saveNote}.`);
+}
+
+// ── تجمیع ───────────────────────────────────────────────────
+
+/** تجمیع ساعتی پورت‌ها و منابع سوییچ از نمونه خام */
+export async function rollupSwitchHourly(hoursBack = 3) {
+  await q(
+    `INSERT INTO switch_port_hourly (
+       port_id, hour, in_bytes, out_bytes, in_bps_max, out_bps_max, in_bps_avg, out_bps_avg,
+       errors, discards, samples
+     )
+     SELECT port_id, date_trunc('hour', ts),
+            COALESCE(SUM(in_bytes), 0), COALESCE(SUM(out_bytes), 0),
+            COALESCE(MAX(in_bps), 0), COALESCE(MAX(out_bps), 0),
+            COALESCE(AVG(in_bps), 0)::bigint, COALESCE(AVG(out_bps), 0)::bigint,
+            COALESCE(SUM(errors), 0), COALESCE(SUM(discards), 0),
+            COUNT(*)::int
+       FROM switch_port_metrics
+      WHERE ts >= date_trunc('hour', now()) - ($1::text || ' hours')::interval
+      GROUP BY 1, 2
+     ON CONFLICT (port_id, hour) DO UPDATE SET
+       in_bytes    = EXCLUDED.in_bytes,
+       out_bytes   = EXCLUDED.out_bytes,
+       in_bps_max  = EXCLUDED.in_bps_max,
+       out_bps_max = EXCLUDED.out_bps_max,
+       in_bps_avg  = EXCLUDED.in_bps_avg,
+       out_bps_avg = EXCLUDED.out_bps_avg,
+       errors      = EXCLUDED.errors,
+       discards    = EXCLUDED.discards,
+       samples     = EXCLUDED.samples`,
+    [String(hoursBack)],
+  );
+
+  await q(
+    `INSERT INTO switch_metrics_hourly (switch_id, hour, cpu_avg, cpu_max, mem_pct_avg, mem_pct_max, temp_max, samples)
+     SELECT switch_id, date_trunc('hour', ts),
+            AVG(cpu_percent)::real, MAX(cpu_percent)::real,
+            AVG(CASE WHEN mem_total_bytes > 0 THEN mem_used_bytes::float8 / mem_total_bytes * 100 END)::real,
+            MAX(CASE WHEN mem_total_bytes > 0 THEN mem_used_bytes::float8 / mem_total_bytes * 100 END)::real,
+            MAX(max_temp_c)::real,
+            COUNT(*)::int
+       FROM switch_metrics
+      WHERE ts >= date_trunc('hour', now()) - ($1::text || ' hours')::interval
+      GROUP BY 1, 2
+     ON CONFLICT (switch_id, hour) DO UPDATE SET
+       cpu_avg     = EXCLUDED.cpu_avg,
+       cpu_max     = EXCLUDED.cpu_max,
+       mem_pct_avg = EXCLUDED.mem_pct_avg,
+       mem_pct_max = EXCLUDED.mem_pct_max,
+       temp_max    = EXCLUDED.temp_max,
+       samples     = EXCLUDED.samples`,
+    [String(hoursBack)],
+  );
+}
+
+/** تجمیع روزانه پورت‌ها از ساعتی */
+export async function rollupSwitchDaily(daysBack = 3) {
+  await q(
+    `INSERT INTO switch_port_daily (port_id, day, in_bytes, out_bytes, in_bps_max, out_bps_max, errors, discards, samples)
+     SELECT port_id, hour::date,
+            COALESCE(SUM(in_bytes), 0), COALESCE(SUM(out_bytes), 0),
+            COALESCE(MAX(in_bps_max), 0), COALESCE(MAX(out_bps_max), 0),
+            COALESCE(SUM(errors), 0), COALESCE(SUM(discards), 0),
+            COALESCE(SUM(samples), 0)::int
+       FROM switch_port_hourly
+      WHERE hour >= date_trunc('day', now()) - ($1::text || ' days')::interval
+      GROUP BY 1, 2
+     ON CONFLICT (port_id, day) DO UPDATE SET
+       in_bytes    = EXCLUDED.in_bytes,
+       out_bytes   = EXCLUDED.out_bytes,
+       in_bps_max  = EXCLUDED.in_bps_max,
+       out_bps_max = EXCLUDED.out_bps_max,
+       errors      = EXCLUDED.errors,
+       discards    = EXCLUDED.discards,
+       samples     = EXCLUDED.samples`,
+    [String(daysBack)],
+  );
+}
+
+// پورت‌هایی که مبنای ترافیک سرورند. عضوی که پورت‌چنلش هم برای همان
+// سرور شمرده می‌شود کنار می‌رود، وگرنه ترافیک دو بار حساب می‌شد.
+const COUNTED_PORTS = `
+  SELECT p.id AS port_id, p.server_id, COALESCE(p.count_since, now()) AS since
+    FROM switch_ports p
+    JOIN switches w ON w.id = p.switch_id
+   WHERE p.count_traffic AND p.server_id IS NOT NULL AND w.is_active
+     AND NOT EXISTS (
+       SELECT 1 FROM switch_ports pc
+        WHERE pc.switch_id = p.switch_id AND pc.name = p.member_of
+          AND pc.count_traffic AND pc.server_id = p.server_id
+     )`;
+
+/**
+ * ترافیک پورت سوییچ به‌جای ترافیک ایجنت، برای سرورهایی که پورتشان
+ * «مبنای ترافیک» است.
+ *
+ * چرا در تجمیع ساعتی و نه در نمونه خام: نمونه خام همان چیزی است که
+ * داشبورد «آخرین ردیف» را از آن می‌خواند. ردیف سوییچ پردازنده و حافظه
+ * ندارد؛ اگر کنار ردیف ایجنت نوشته می‌شد، نمای زنده هر چند ثانیه
+ * پردازنده را خالی نشان می‌داد. تجمیع ساعتی ولی پایه همه‌چیز پولی است
+ * — روزانه، سهمیه، حسابداری، گزارش و پرتال — پس جایگزینی همین‌جا کافی
+ * است و مسیر داغ ingest دست نمی‌خورد.
+ *
+ * جهت: in پورت همان آپلود سرور است (tx) و out پورت دانلودش (rx).
+ *
+ * باید بعد از rollupHourly سرورها اجرا شود، چون آن هر بار ترافیک ایجنت
+ * را دوباره می‌نویسد.
+ */
+export async function applySwitchTrafficToServers(hoursBack = 3) {
+  await q(
+    `WITH counted AS (${COUNTED_PORTS}),
+     sw AS (
+       SELECT c.server_id, h.hour,
+              SUM(h.out_bytes)   AS rx_bytes,   SUM(h.in_bytes)    AS tx_bytes,
+              SUM(h.out_bps_max) AS rx_bps_max, SUM(h.in_bps_max)  AS tx_bps_max,
+              SUM(h.out_bps_avg) AS rx_bps_avg, SUM(h.in_bps_avg)  AS tx_bps_avg
+         FROM switch_port_hourly h
+         JOIN counted c ON c.port_id = h.port_id
+        WHERE h.hour >= date_trunc('hour', now()) - ($1::text || ' hours')::interval
+          AND h.hour >= date_trunc('hour', c.since)
+        GROUP BY 1, 2
+     )
+     INSERT INTO server_metrics_hourly (
+       server_id, hour, rx_bytes, tx_bytes, rx_bps_max, tx_bps_max, rx_bps_avg, tx_bps_avg, samples
+     )
+     SELECT server_id, hour, rx_bytes, tx_bytes, rx_bps_max, tx_bps_max, rx_bps_avg, tx_bps_avg, 0
+       FROM sw
+     ON CONFLICT (server_id, hour) DO UPDATE SET
+       rx_bytes   = EXCLUDED.rx_bytes,
+       tx_bytes   = EXCLUDED.tx_bytes,
+       rx_bps_max = EXCLUDED.rx_bps_max,
+       tx_bps_max = EXCLUDED.tx_bps_max,
+       rx_bps_avg = EXCLUDED.rx_bps_avg,
+       tx_bps_avg = EXCLUDED.tx_bps_avg`,
+    [String(hoursBack)],
+  );
+
+  // ساعتی که سوییچ داده ندارد (سوییچ از دسترس خارج بوده) ترافیک ایجنت
+  // نمی‌گیرد: شمارنده سوییچ پایدار است و همان حجم در اولین خواندن پس از
+  // برگشت می‌آید. اگر عدد ایجنت می‌ماند، آن بازه دو بار شمرده می‌شد.
+  await q(
+    `WITH counted AS (${COUNTED_PORTS}),
+     srv AS (SELECT server_id, MIN(since) AS since FROM counted GROUP BY 1)
+     UPDATE server_metrics_hourly m
+        SET rx_bytes = 0, tx_bytes = 0, rx_bps_max = 0, tx_bps_max = 0, rx_bps_avg = 0, tx_bps_avg = 0
+       FROM srv
+      WHERE m.server_id = srv.server_id
+        AND m.hour >= date_trunc('hour', now()) - ($1::text || ' hours')::interval
+        AND m.hour >= date_trunc('hour', srv.since)
+        AND (m.rx_bytes <> 0 OR m.tx_bytes <> 0)
+        AND NOT EXISTS (
+          SELECT 1 FROM switch_port_hourly h
+            JOIN counted c ON c.port_id = h.port_id
+           WHERE c.server_id = m.server_id AND h.hour = m.hour
+        )`,
+    [String(hoursBack)],
+  );
+}
+
+/** پاک‌سازی؛ جدول روزانه پورت مثل سرورها هرگز پاک نمی‌شود */
+export async function purgeSwitches() {
+  const days = Math.max(1, await settingNum('raw_retention_days', 7));
+  await q(`DELETE FROM switch_port_metrics WHERE ts < now() - ($1::text || ' days')::interval`, [String(days)]);
+  await q(`DELETE FROM switch_metrics WHERE ts < now() - ($1::text || ' days')::interval`, [String(days)]);
+  await q(`DELETE FROM switch_port_hourly WHERE hour < now() - interval '400 days'`);
+  await q(`DELETE FROM switch_metrics_hourly WHERE hour < now() - interval '400 days'`);
+  await q(`DELETE FROM switch_actions WHERE requested_at < now() - interval '365 days'`);
+}

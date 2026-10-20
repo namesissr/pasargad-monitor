@@ -213,6 +213,10 @@ export const INCIDENT_KIND_LABEL: Record<string, string> = {
   ip_access_released: 'آزادشدن از اکسس',
   ip_access_blocked: 'اکسس شدن آی‌پی',
   probe_lost: 'قطع ارتباط دیدبان',
+  switch_down: 'عدم دسترسی به سوییچ',
+  switch_env: 'سخت‌افزار سوییچ',
+  switch_cpu: 'پردازنده سوییچ بالا',
+  port_down: 'قطعی پورت سوییچ',
 };
 
 /** برچسب فارسی وضعیت اکسس ایران */

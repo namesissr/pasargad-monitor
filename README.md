@@ -29,6 +29,7 @@
 | تلگرام مشتری | هشدار سهمیه، تمدید، پرداخت و پاسخ تیکت در تلگرام مشتری — [docs/customer-telegram.md](docs/customer-telegram.md) |
 | تلگرام از ایران | راه‌اندازی واسط روی سرور خارج، قدم‌به‌قدم — [docs/telegram-relay.md](docs/telegram-relay.md) |
 | اطلاعیه و ارسال همگانی | پاپ‌آپ اطلاعیه در پرتال، و ایمیل و پیامک گروهی — [docs/announcements.md](docs/announcements.md) |
+| سوییچ‌ها | Cisco Nexus از راه NX-API: مصرف هر پورت، منابع و سخت‌افزار سوییچ، shut/no shut پورت، مصرف پورت به‌جای ایجنت — [docs/switches.md](docs/switches.md) |
 
 ---
 
@@ -264,6 +265,7 @@ python3 scripts/test-telegram.py   # تلگرام مشتری
 python3 scripts/test-announcements.py  # اطلاعیه و ارسال همگانی
 python3 scripts/test-shop.py       # فروشگاه و تحویل
 python3 scripts/test-topups.py     # موجودی ترافیک پیش‌خرید
+python3 scripts/test-switch.py     # سوییچ: تجزیه خروجی NX-API و قاعده‌های shut
 ```
 
 `check-code.py` در چند ثانیه چند دسته خطای رایج را می‌گیرد: ایمپورت
@@ -393,5 +395,5 @@ pasargad-monitor/
 ├── db/migrations/     ترتیبی؛ فقط بار اول خودکار
 ├── nginx/             panel.conf
 ├── scripts/           setup.sh، selfsigned-cert.sh
-└── docs/           install.md، deploy.md، hypervisor.md، billing.md، invoices.md، shop.md، store.md، otp-login.md، customer-telegram.md، telegram-relay.md، announcements.md، tickets.md، iran-access.md
+└── docs/           install.md، deploy.md، hypervisor.md، billing.md، invoices.md، shop.md، store.md، otp-login.md، customer-telegram.md، telegram-relay.md، announcements.md، tickets.md، iran-access.md، switches.md
 ```

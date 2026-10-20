@@ -13,6 +13,9 @@ interface IncidentRow {
   server_name: string | null;
   server_ip: string | null;
   ip: string | null;
+  switch_id: number | null;
+  switch_name: string | null;
+  port_name: string | null;
   kind: string;
   severity: string;
   message: string;
@@ -32,7 +35,10 @@ interface IncidentData {
   summary: { open: number; today: number; week: number };
 }
 
-const KINDS = ['all', 'down', 'agent_lost', 'cpu', 'ram', 'disk', 'traffic', 'ip_down'];
+const KINDS = [
+  'all', 'down', 'agent_lost', 'cpu', 'ram', 'disk', 'traffic', 'ip_down',
+  'switch_down', 'switch_env', 'switch_cpu', 'port_down',
+];
 
 export default function IncidentsPage() {
   const [openOnly, setOpenOnly] = useState(false);
@@ -135,6 +141,16 @@ export default function IncidentsPage() {
                         {inc.server_name}
                         <br />
                         <Mono className="text-muted">{inc.ip || inc.server_ip}</Mono>
+                      </Link>
+                    ) : inc.switch_id ? (
+                      <Link href={`/switches/${inc.switch_id}`} className="hover:text-cyan">
+                        {inc.switch_name}
+                        {inc.port_name && (
+                          <>
+                            <br />
+                            <Mono className="text-muted">{inc.port_name}</Mono>
+                          </>
+                        )}
                       </Link>
                     ) : (
                       <Mono className="text-muted">{inc.ip || '—'}</Mono>

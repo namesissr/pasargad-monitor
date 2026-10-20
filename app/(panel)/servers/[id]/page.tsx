@@ -9,6 +9,7 @@ import { Field, IpBadge, Modal, Mono, Notice, StatCard, StatusBadge } from '@/co
 import { InstallInstructions } from '@/components/InstallInstructions';
 import { DIRECTION_LABEL, type BillingDirection } from '@/lib/billing';
 import { TopupForm } from '@/components/TopupForm';
+import { SwitchPortsCard } from '@/components/SwitchPortsCard';
 import { api, ApiError } from '@/lib/api';
 import {
   faFloat,
@@ -558,6 +559,8 @@ export default function ServerDetailPage() {
           مقیاس خودش را داشت، آپلود کوچک هم‌اندازه دانلود بزرگ به نظر می‌رسید.
         </p>
       </section>
+
+      <SwitchPortsCard serverId={s.id} />
 
       {/* مشخصات و آی‌پی‌ها */}
       <div className="grid lg:grid-cols-3 gap-3">
