@@ -1,6 +1,7 @@
 import { query, queryOne } from '@/lib/db';
 import { requireAdmin, requireUser } from '@/lib/auth';
 import { fail, handle, idParam, ok, readJson } from '@/lib/http';
+import { SWITCH_CAN_WRITE } from '@/lib/switches';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -64,9 +65,13 @@ export async function POST(req: Request) {
       is_present: boolean;
       switch_active: boolean;
       switch_status: string;
+      protocol: string;
+      if_index: number | null;
+      can_write: boolean;
     }>(
-      `SELECT p.id, p.switch_id, p.name, p.kind, p.is_protected, p.is_present,
-              w.is_active AS switch_active, w.status AS switch_status
+      `SELECT p.id, p.switch_id, p.name, p.kind, p.is_protected, p.is_present, p.if_index,
+              w.is_active AS switch_active, w.status AS switch_status, w.protocol,
+              ${SWITCH_CAN_WRITE} AS can_write
          FROM switch_ports p
          JOIN switches w ON w.id = p.switch_id
         WHERE p.id = $1`,
@@ -77,6 +82,15 @@ export async function POST(req: Request) {
     if (!port.is_present) return fail('این پورت در آخرین خواندن سوییچ نبود', 400);
     if (!['ethernet', 'port-channel'].includes(port.kind)) {
       return fail('از پنل فقط پورت اترنت و پورت‌چنل خاموش و روشن می‌شود', 400);
+    }
+    if (!port.can_write) {
+      return fail(
+        'برای این سوییچ اجازه نوشتن تنظیم نشده. در SNMP v2c کامیونیتی نوشتنی، و در v3 «اجازه نوشتن» را در ویرایش سوییچ بدهید.',
+        400,
+      );
+    }
+    if (port.protocol === 'snmp' && !port.if_index) {
+      return fail('شماره اینترفیس این پورت هنوز خوانده نشده؛ پس از خواندن بعدی سوییچ دوباره تلاش کنید', 400);
     }
     if (action === 'shutdown' && port.is_protected) {
       return fail('این پورت محافظت‌شده است. اگر واقعا باید خاموش شود، اول محافظت را بردارید.', 400);

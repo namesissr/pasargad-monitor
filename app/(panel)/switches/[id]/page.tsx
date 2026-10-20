@@ -93,7 +93,14 @@ interface EnvItem {
 interface SwitchInfo {
   id: number;
   name: string;
-  url: string;
+  protocol: 'nxapi' | 'snmp';
+  url: string | null;
+  snmp_version: string | null;
+  snmp_host: string | null;
+  snmp_port: number;
+  vendor: string | null;
+  can_write: boolean;
+  can_save: boolean;
   datacenter_name: string | null;
   location: string | null;
   is_active: boolean;
@@ -259,12 +266,14 @@ export default function SwitchDetailPage() {
             {sw.is_active ? <StatusBadge status={sw.status} /> : <span className="badge bg-line text-muted">غیرفعال</span>}
           </div>
           <p className="text-xs text-muted mt-1.5">
-            {[sw.model, sw.os_version && `NX-OS ${sw.os_version}`, sw.serial && `سریال ${sw.serial}`, sw.hostname]
+            {[sw.vendor, sw.model, sw.os_version, sw.serial && `سریال ${sw.serial}`, sw.hostname]
               .filter(Boolean)
               .join(' · ') || 'هنوز خوانده نشده'}
           </p>
           <p className="text-[11px] text-muted mt-1">
-            <Mono>{sw.url}</Mono>
+            {sw.protocol === 'snmp' ? `SNMP v${sw.snmp_version}` : 'NX-API'}
+            {!sw.can_write && ' (فقط پایش)'} ·{' '}
+            <Mono>{sw.protocol === 'snmp' ? `${sw.snmp_host}:${sw.snmp_port}` : sw.url}</Mono>
             {sw.datacenter_name && ` · ${sw.datacenter_name}`}
             {sw.location && ` · ${sw.location}`}
           </p>
@@ -539,6 +548,8 @@ export default function SwitchDetailPage() {
         <PortModal
           switchId={sw.id}
           switchName={sw.name}
+          canWrite={sw.can_write}
+          canSave={sw.can_save}
           port={openPort}
           onClose={() => setOpenPortId(null)}
           onChanged={detail.reload}
@@ -672,12 +683,16 @@ interface ServerOption {
 function PortModal({
   switchId,
   switchName,
+  canWrite,
+  canSave,
   port,
   onClose,
   onChanged,
 }: {
   switchId: number;
   switchName: string;
+  canWrite: boolean;
+  canSave: boolean;
   port: Port;
   onClose: () => void;
   onChanged: () => void;
@@ -696,6 +711,9 @@ function PortModal({
   const peak = points.reduce((m, pt) => Math.max(m, Number(pt.in_bps) || 0, Number(pt.out_bps) || 0), 0);
   const x = port.transceiver;
   const canAct = port.is_present && ['ethernet', 'port-channel'].includes(port.kind);
+  const actionHint = canWrite
+    ? 'فرمان روی سوییچ اجرا و سپس وضعیت واقعی پورت دوباره خوانده می‌شود. فقط حساب مدیر.'
+    : 'این سوییچ فقط پایش می‌شود. برای خاموش و روشن کردن، در ویرایش سوییچ کامیونیتی نوشتنی (v2c) یا «اجازه نوشتن» (v3) بدهید.';
 
   return (
     <Modal open wide title={`${switchName} / ${port.name}`} onClose={onClose}>
@@ -794,10 +812,8 @@ function PortModal({
         {/* shut / no shut */}
         {canAct && (
           <div className="border-t border-line pt-4 flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted me-auto">
-              فرمان روی سوییچ اجرا و سپس وضعیت واقعی پورت دوباره خوانده می‌شود. فقط حساب مدیر.
-            </span>
-            {port.admin_up === false ? (
+            <span className="text-xs text-muted me-auto">{actionHint}</span>
+            {!canWrite ? null : port.admin_up === false ? (
               <button type="button" className="btn-primary" onClick={() => setConfirming('no_shutdown')}>
                 روشن کردن (no shutdown)
               </button>
@@ -822,6 +838,7 @@ function PortModal({
         <ActionConfirm
           port={port}
           switchName={switchName}
+          canSave={canSave}
           action={confirming}
           onClose={() => setConfirming(null)}
           onDone={() => {
@@ -984,12 +1001,14 @@ function PortSettings({ port, onSaved }: { port: Port; onSaved: () => void }) {
 function ActionConfirm({
   port,
   switchName,
+  canSave,
   action,
   onClose,
   onDone,
 }: {
   port: Port;
   switchName: string;
+  canSave: boolean;
   action: 'shutdown' | 'no_shutdown';
   onClose: () => void;
   onDone: () => void;
@@ -1013,7 +1032,7 @@ function ActionConfirm({
         port_id: port.id,
         action,
         reason,
-        save_config: save,
+        save_config: save && canSave,
       });
       // ورکر هر سه ثانیه صف را نگاه می‌کند؛ تا یک دقیقه منتظر می‌مانیم
       for (let i = 0; i < 40; i++) {
@@ -1062,12 +1081,20 @@ function ActionConfirm({
                 <input className="input ltr" value={typed} onChange={(e) => setTyped(e.target.value)} />
               </Field>
             )}
-            <label className="flex items-start gap-2 text-xs cursor-pointer">
-              <input type="checkbox" className="mt-0.5" checked={save} onChange={(e) => setSave(e.target.checked)} />
+            <label className={`flex items-start gap-2 text-xs ${canSave ? 'cursor-pointer' : 'opacity-60'}`}>
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={save && canSave}
+                disabled={!canSave}
+                onChange={(e) => setSave(e.target.checked)}
+              />
               <span>
                 ماندگار پس از ریبوت (copy running-config startup-config)
                 <span className="block text-muted mt-0.5">
-                  بدون این، تغییر با ریبوت سوییچ برمی‌گردد. توجه: هر تغییر ذخیره‌نشده دیگری روی سوییچ هم با آن ذخیره می‌شود.
+                  {canSave
+                    ? 'بدون این، تغییر با ریبوت سوییچ برمی‌گردد. توجه: هر تغییر ذخیره‌نشده دیگری روی سوییچ هم با آن ذخیره می‌شود.'
+                    : 'ذخیره پیکربندی از پنل فقط برای NX-API و سیسکو با SNMP ممکن است. روی این سوییچ، ذخیره را خودتان انجام دهید وگرنه با ریبوت برمی‌گردد.'}
                 </span>
               </span>
             </label>
