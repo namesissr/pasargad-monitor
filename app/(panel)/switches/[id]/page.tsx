@@ -24,6 +24,7 @@ import {
   RangeButtons,
   Tabs,
   actionLabel,
+  edgeTraffic,
   neighborLabel,
   portState,
   speedLabel,
@@ -76,8 +77,8 @@ export default function SwitchDetailPage() {
   const sw = d.switch;
   const physical = d.ports.filter((p) => p.kind === 'ethernet' && p.is_present);
   const upCount = physical.filter((p) => p.oper_up).length;
-  const totalIn = physical.reduce((s, p) => s + (Number(p.in_bps) || 0), 0);
-  const totalOut = physical.reduce((s, p) => s + (Number(p.out_bps) || 0), 0);
+  const traffic = edgeTraffic(d.ports);
+  const noUplink = traffic.uplinks === 0 && physical.length > 0;
   const memPct = sw.mem_total_bytes && sw.mem_used_bytes !== null ? (sw.mem_used_bytes / sw.mem_total_bytes) * 100 : null;
   const openPort = openPortId !== null ? d.ports.find((p) => p.id === openPortId) ?? null : null;
   const suggestions = d.ports.filter((p) => !p.server_id && p.suggested_server_id && p.is_present);
@@ -112,6 +113,7 @@ export default function SwitchDetailPage() {
         </div>
         <div className="text-[11px] text-muted text-end space-y-0.5">
           <p>آخرین خواندن: {sw.last_poll_at ? timeAgo(sw.last_poll_at) : '—'}</p>
+          {sw.uptime_sec ? <p>روشن از {formatDuration(sw.uptime_sec)}</p> : null}
           {sw.last_poll_ms !== null && <p>مدت خواندن: {faNum((sw.last_poll_ms / 1000).toFixed(1))} ثانیه</p>}
           <p>
             <Link href={`/switches/report?switch_id=${sw.id}`} className="hover:text-cyan">
@@ -148,16 +150,21 @@ export default function SwitchDetailPage() {
           tone={sw.env_ok === false ? 'danger' : 'default'}
           sub={sw.env_ok === false ? 'مشکل سخت‌افزار' : sw.env_ok ? 'فن و تغذیه سالم' : undefined}
         />
-        <StatCard title="روشن از" value={sw.uptime_sec ? formatDuration(sw.uptime_sec) : '—'} />
         <StatCard
           title="پورت‌های وصل"
           value={`${faNum(upCount)} از ${faNum(physical.length)}`}
           tone="cyan"
         />
         <StatCard
-          title="ترافیک لحظه‌ای پورت‌ها"
-          value={formatBps(totalIn + totalOut)}
-          sub={`ورودی ${formatBps(totalIn)} · خروجی ${formatBps(totalOut)}`}
+          title="دانلود لحظه‌ای"
+          value={formatBps(traffic.download)}
+          tone="cyan"
+          sub={noUplink ? 'آپلینک «محافظت‌شده» نیست و در جمع آمده' : 'از سوییچ به سرورها، بدون آپلینک‌ها'}
+        />
+        <StatCard
+          title="آپلود لحظه‌ای"
+          value={formatBps(traffic.upload)}
+          sub={noUplink ? 'آپلینک «محافظت‌شده» نیست و در جمع آمده' : 'از سرورها به سوییچ، بدون آپلینک‌ها'}
         />
       </div>
 
