@@ -217,6 +217,9 @@ export const INCIDENT_KIND_LABEL: Record<string, string> = {
   switch_env: 'سخت‌افزار سوییچ',
   switch_cpu: 'پردازنده سوییچ بالا',
   port_down: 'قطعی پورت سوییچ',
+  port_saturated: 'اشباع پورت سوییچ',
+  port_errors: 'خطای پورت سوییچ',
+  port_flapping: 'قطع و وصل پورت سوییچ',
 };
 
 /** برچسب فارسی وضعیت اکسس ایران */

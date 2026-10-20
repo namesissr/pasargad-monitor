@@ -13,8 +13,10 @@ import {
   drainSwitchActions,
   rollupSwitchHourly,
   rollupSwitchDaily,
+  rollupSwitch5min,
   applySwitchTrafficToServers,
   purgeSwitches,
+  backupSwitchConfigs,
 } from './switches.mjs';
 import { hashPassword } from './hash.mjs';
 
@@ -53,6 +55,8 @@ const CYCLE = {
   broadcasts: 15_000,
   // صف shut/no shut سوییچ. کوتاه است چون ادمین روی دکمه منتظر نتیجه است.
   switchActions: 3_000,
+  // بررسی اینکه پشتیبان پیکربندی کدام سوییچ رسیده؛ فاصله واقعی از تنظیمات
+  switchBackup: 600_000,
 };
 
 let stopping = false;
@@ -143,6 +147,7 @@ async function main() {
       // ترتیب مهم است: ساعتی پورت‌ها پیش از ساعتی سرورها، و جایگزینی
       // ترافیک سوییچ بعد از آن، چون rollupHourly هر بار عدد ایجنت را
       // دوباره می‌نویسد. روزانه سرورها هم باید عدد جایگزین‌شده را ببیند.
+      await rollupSwitch5min(1);
       await rollupSwitchHourly(3);
       await rollupHourly(3);
       await applySwitchTrafficToServers(3);
@@ -167,6 +172,8 @@ async function main() {
     async () => Math.max(10, await settingNum('switch_poll_sec', 30)) * 1000,
   );
   schedule('صف سوییچ', drainSwitchActions, async () => CYCLE.switchActions);
+  // خود تابع بررسی می‌کند کدام سوییچ وقت پشتیبانش رسیده
+  schedule('پشتیبان پیکربندی سوییچ', backupSwitchConfigs, async () => CYCLE.switchBackup);
 
   schedule('هشدار مشتری', checkCustomerAlerts, async () => CYCLE.customerAlerts);
   schedule('صدور فاکتور', issueRenewalInvoices, async () => CYCLE.invoices);

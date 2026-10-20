@@ -824,6 +824,21 @@ export default function SettingsPage() {
           <Field label="آستانه پردازنده سوییچ (درصد)" hint="میانگین پنج دقیقه؛ صفر یعنی بدون هشدار">
             <input className="input ltr" value={form.switch_cpu_threshold ?? ''} onChange={set('switch_cpu_threshold')} />
           </Field>
+          <Field label="آستانه اشباع پورت (درصد)" hint="میانگین پنج دقیقه نسبت به سرعت پورت؛ فقط پورت‌هایی که «هشدار اشباع» دارند. صفر یعنی خاموش">
+            <input className="input ltr" value={form.switch_util_threshold ?? ''} onChange={set('switch_util_threshold')} />
+          </Field>
+          <Field label="آستانه خطای پورت" hint="مجموع خطای ورودی، خروجی و CRC در پانزده دقیقه؛ صفر یعنی خاموش">
+            <input className="input ltr" value={form.switch_err_threshold ?? ''} onChange={set('switch_err_threshold')} />
+          </Field>
+          <Field label="آستانه قطع و وصل پورت" hint="تعداد قطع و وصل در پانزده دقیقه؛ صفر یعنی خاموش">
+            <input className="input ltr" value={form.switch_flap_threshold ?? ''} onChange={set('switch_flap_threshold')} />
+          </Field>
+          <Field label="پشتیبان پیکربندی سوییچ (ساعت)" hint="هر چند ساعت running-config سوییچ‌های NX-API خوانده شود؛ نسخه فقط اگر عوض شده باشد ذخیره می‌شود. صفر یعنی خاموش">
+            <input className="input ltr" value={form.switch_backup_hours ?? ''} onChange={set('switch_backup_hours')} />
+          </Field>
+          <Field label="نگهداری داده صدک ۹۵ (روز)" hint="تجمیع پنج‌دقیقه‌ای پورت‌ها برای گزارش صدک ۹۵؛ حداقل ۳۵">
+            <input className="input ltr" value={form.switch_5min_days ?? ''} onChange={set('switch_5min_days')} />
+          </Field>
           <Field label="مبنای دوره ماهانه" hint="گروه‌بندی گزارش ماهانه و محاسبه سهمیه">
             <select className="input" value={form.traffic_calendar ?? 'jalali'} onChange={set('traffic_calendar')}>
               <option value="jalali">تقویم شمسی</option>

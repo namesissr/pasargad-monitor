@@ -25,6 +25,11 @@ const ALLOWED = [
   'check_interval_sec',
   'switch_poll_sec',
   'switch_cpu_threshold',
+  'switch_util_threshold',
+  'switch_err_threshold',
+  'switch_flap_threshold',
+  'switch_backup_hours',
+  'switch_5min_days',
   'traffic_calendar',
   'panel_title',
   'email_enabled',
@@ -137,6 +142,21 @@ export async function PATCH(req: Request) {
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
         return fail('پورت SMTP نامعتبر است', 400);
       }
+    }
+
+    // آستانه‌های سوییچ: عدد نامعتبر در ورکر بی‌صدا پیش‌فرض می‌شد و ادمین
+    // فکر می‌کرد تنظیمش اعمال شده
+    const SWITCH_NUM: Record<string, [number, number, string]> = {
+      switch_util_threshold: [0, 100, 'آستانه اشباع پورت باید بین ۰ تا ۱۰۰ باشد'],
+      switch_err_threshold: [0, 1e9, 'آستانه خطای پورت نامعتبر است'],
+      switch_flap_threshold: [0, 1000, 'آستانه قطع و وصل نامعتبر است'],
+      switch_backup_hours: [0, 24 * 30, 'فاصله پشتیبان‌گیری باید بین ۰ تا ۷۲۰ ساعت باشد'],
+      switch_5min_days: [35, 800, 'نگهداری داده پنج‌دقیقه‌ای باید بین ۳۵ تا ۸۰۰ روز باشد'],
+    };
+    for (const [key, [min, max, msg]] of Object.entries(SWITCH_NUM)) {
+      if (!(key in patch)) continue;
+      const n = Number(patch[key]);
+      if (patch[key].trim() === '' || !Number.isFinite(n) || n < min || n > max) return fail(msg, 400);
     }
 
     if (!Object.keys(patch).length) return fail('هیچ تنظیمی برای ذخیره فرستاده نشده است', 400);

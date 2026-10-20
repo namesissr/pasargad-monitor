@@ -375,11 +375,13 @@ def main():
             src = io.open(path, encoding="utf-8").read()
             # دروازه‌های requireOwned* هم نگهبان‌اند: همه‌شان خودشان
             # requireCustomer را صدا می‌زنند؛ بالاتر جداگانه بررسی شد که
-            # واقعا این کار را می‌کنند.
+            # واقعا این کار را می‌کنند. requireAdmin هم با requireUser شروع
+            # می‌شود (پایین بررسی می‌شود).
             if not any(
                 g in src
                 for g in (
                     "requireUser",
+                    "requireAdmin",
                     "requireCustomer",
                     "requireOwnedServer",
                     "requireOwnedTicket",
@@ -387,6 +389,13 @@ def main():
                 )
             ):
                 unguarded.append(rel)
+
+    auth_src = io.open(os.path.join(ROOT, "lib", "auth.ts"), encoding="utf-8").read()
+    admin_fn = auth_src[auth_src.index("export async function requireAdmin"):]
+    check(
+        "requireAdmin اول requireUser را صدا می‌زند",
+        admin_fn[: admin_fn.index("\n}")].find("await requireUser()") != -1,
+    )
 
     check(
         "همه مسیرهای ای‌پی‌آی نگهبان دارند",

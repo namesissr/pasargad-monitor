@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
  *
  * GET ?server_id=  پورت‌های وصل به یک سرور، برای صفحه سرور
  * PATCH            سرور، مبنای ترافیک، محافظت و هشدار یک پورت
+ *   {id, op: 'dismiss_suggestion'}  پیشنهاد اتصال را رد کن تا دوباره نیاید
  *
  * PATCH فقط از حساب مدیر: «مبنای ترافیک» مستقیم روی سهمیه و حسابداری
  * اثر دارد، و «محافظت‌شده» تنها مانع خاموش‌شدن تصادفی آپلینک است.
@@ -53,6 +54,17 @@ export async function PATCH(req: Request) {
     );
     if (!port) return fail('پورت پیدا نشد', 404);
 
+    if (body.op === 'dismiss_suggestion') {
+      await query(
+        `UPDATE switch_ports
+            SET suggest_dismissed_server_id = suggested_server_id,
+                suggested_server_id = NULL, suggest_reason = NULL, updated_at = now()
+          WHERE id = $1`,
+        [id],
+      );
+      return ok({ ok: true });
+    }
+
     // null و رشته خالی یعنی «بدون سرور»؛ Number(null) صفر است و نباید به
     // «سرور شماره صفر» تبدیل شود
     let serverId: number | null = null;
@@ -88,9 +100,21 @@ export async function PATCH(req: Request) {
               is_protected  = $4,
               alert_down    = $5,
               note          = $6,
+              -- فرم قدیمی که این فیلد را نمی‌فرستد مقدار فعلی را عوض نمی‌کند
+              alert_util    = COALESCE($7, alert_util),
+              suggested_server_id = CASE WHEN $2::int IS NULL THEN suggested_server_id END,
+              suggest_reason      = CASE WHEN $2::int IS NULL THEN suggest_reason END,
               updated_at    = now()
         WHERE id = $1`,
-      [id, serverId, countTraffic, body.is_protected === true, body.alert_down === true, note],
+      [
+        id,
+        serverId,
+        countTraffic,
+        body.is_protected === true,
+        body.alert_down === true,
+        note,
+        typeof body.alert_util === 'boolean' ? body.alert_util : null,
+      ],
     );
 
     return ok({ ok: true });

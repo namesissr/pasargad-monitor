@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * جزئیات یک سوییچ: منابع، محیط، همه پورت‌ها با مصرف امروز و ماه جاری،
- * و تاریخچه shut/no shut.
+ * همسایه‌ها و MACها، پیشنهاد اتصال به سرور، و تاریخچه فرمان‌ها.
  *
  * مصرف امروز و ماه از تجمیع روزانه پورت می‌آید، پس مثل گزارش سرورها
  * حداکثر پنج دقیقه عقب است. سرعت لحظه‌ای از آخرین خواندن.
@@ -28,7 +28,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
               w.uptime_sec::float8 AS uptime_sec, w.status, w.last_seen_at, w.last_poll_at,
               w.last_poll_ms, w.last_error, w.fail_streak, w.cpu_percent,
               w.mem_used_bytes::float8 AS mem_used_bytes, w.mem_total_bytes::float8 AS mem_total_bytes,
-              w.load1, w.max_temp_c, w.env, w.env_ok, w.env_checked_at
+              w.load1, w.max_temp_c, w.env, w.env_ok, w.env_checked_at,
+              w.config_checked_at, w.config_changed_at, w.config_error,
+              (SELECT COUNT(*)::int FROM switch_configs c WHERE c.switch_id = w.id) AS config_count
          FROM switches w
          LEFT JOIN datacenters dc ON dc.id = w.datacenter_id
         WHERE w.id = $1`,
@@ -49,7 +51,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
               p.transceiver, p.server_id, s.name AS server_name, host(s.main_ip) AS server_ip,
               c.name AS customer_name,
               p.count_traffic, p.count_since, p.is_protected, p.alert_down, p.note,
-              p.is_present, p.last_change_at, p.counters_at,
+              p.is_present, p.last_change_at, p.counters_at, p.alert_util,
+              p.neighbors, p.macs, p.mac_count, p.discovered_at,
+              p.suggested_server_id, ss.name AS suggested_server_name, p.suggest_reason,
+              p.rate_limit_mbps, p.rate_limit_in, p.rate_limit_out,
               COALESCE(t.in_bytes, 0)::float8  AS today_in,
               COALESCE(t.out_bytes, 0)::float8 AS today_out,
               COALESCE(m.in_bytes, 0)::float8  AS month_in,
@@ -63,6 +68,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
          FROM switch_ports p
          LEFT JOIN servers s   ON s.id = p.server_id
          LEFT JOIN customers c ON c.id = s.customer_id
+         -- پیشنهادی که هنوز معتبر است: پورت در این فاصله به سروری وصل نشده
+         LEFT JOIN servers ss  ON ss.id = p.suggested_server_id AND p.server_id IS NULL
          LEFT JOIN switch_port_daily t ON t.port_id = p.id AND t.day = CURRENT_DATE
          LEFT JOIN LATERAL (
            SELECT SUM(d.in_bytes) AS in_bytes, SUM(d.out_bytes) AS out_bytes, SUM(d.errors) AS errors
@@ -74,13 +81,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
                  CASE p.kind WHEN 'ethernet' THEN 0 WHEN 'port-channel' THEN 1 WHEN 'mgmt' THEN 2
                              WHEN 'vlan' THEN 3 ELSE 4 END,
                  -- Ethernet1/2 پیش از Ethernet1/10: مرتب‌سازی عددی تکه‌ها
-                 (SELECT array_agg(rm.x[1]::bigint) FROM regexp_matches(p.name, '(\d+)', 'g') AS rm(x)),
+                 (SELECT array_agg(rm.x[1]::bigint) FROM regexp_matches(p.name, '([0-9]+)', 'g') AS rm(x)),
                  p.name`,
       [id, period.from, period.to],
     );
 
     const actions = await query(
-      `SELECT a.id, a.port_id, a.port_name, a.action, a.save_config, a.reason, a.status,
+      `SELECT a.id, a.port_id, a.port_name, a.action, a.value, a.save_config, a.reason, a.status,
               a.requested_by_name, a.requested_at, a.started_at, a.finished_at, a.result
          FROM switch_actions a
         WHERE a.switch_id = $1

@@ -117,6 +117,51 @@ out.rejected = rejected;
 try { await m.show({ url: 'https://127.0.0.1:1' }, 'show version ; reload'); out.showRejected = false; }
 catch (e) { out.showRejected = /نامعتبر/.test(e.message); }
 
+
+// کشف: جدول MAC، ARP، LLDP، CDP
+out.macs = m.parseMacTable({ TABLE_mac_address: { ROW_mac_address: [
+  { disp_mac_addr: '0050.56A1.0001', disp_port: 'Eth1/1', disp_vlan: '10' },
+  { disp_mac_addr: '0050.56a1.0002', disp_port: 'Po10', disp_vlan: 20 },
+  { disp_mac_addr: '0050.56a1.0003', disp_port: 'sup-eth1(R)', disp_vlan: '-' },
+  { disp_mac_addr: 'bad', disp_port: 'Eth1/2', disp_vlan: '10' },
+] } });
+out.arp = m.parseArp({ TABLE_vrf: { ROW_vrf: [{ vrf_name_out: 'default', TABLE_adj: { ROW_adj: [
+  { 'ip-addr-out': '10.0.0.5', mac: '0050.56a1.0001', 'phy-intf': 'Ethernet1/1' },
+  { 'ip-addr-out': '10.0.0.6', mac: 'INCOMPLETE' },
+] } }] } });
+out.lldp = m.parseLldp({ TABLE_nbor_detail: { ROW_nbor_detail: [
+  { l_port_id: 'Eth1/1', sys_name: 'web-01.example.com', port_id: 'eno1', port_desc: 'eno1', sys_desc: 'Ubuntu 22.04',
+    mgmt_addr: '10.0.0.5', chassis_id: '0050.56a1.0001', enabled_capability: 'B, R' },
+] } });
+out.cdp = m.parseCdp({ TABLE_cdp_neighbor_detail_info: { ROW_cdp_neighbor_detail_info: {
+  intf_id: 'Ethernet1/49', sysname: 'core-sw(FDO1234)', port_id: 'Ethernet1/1', platform_id: 'N9K-C9336C-FX2',
+  v4mgmtaddr: '10.0.0.1', capability: ['router', 'switch'] } } });
+out.mac = ['0050.56A1.0001', '00-50-56-a1-00-01', Buffer.from([0, 0x50, 0x56, 0xa1, 0, 1]), 'zz', null].map(m.normalizeMac);
+out.host = ['Web-01.Example.com', 'core-sw(FDO1)', null].map(m.shortHostName);
+
+// پشتیبان پیکربندی: خط‌های زمان‌دار حذف می‌شوند تا هر پشتیبان «تغییر» نباشد
+out.cfg = m.cleanConfig('!Command: show running-config\r\n!Running configuration last done at: Mon Oct 20 10:00:00 2026\r\n!Time: Mon Oct 20 10:05:00 2026\r\n\r\nversion 9.3(8)\r\nhostname n9k\r\n');
+
+// محدودیت سرعت و توضیح
+const pol = m.parseServicePolicies('interface Ethernet1/1\n  description x\n  service-policy type qos input PANEL-RL-100M\n  service-policy type qos output CUSTOMER-QOS\n');
+out.pol = [pol.input, pol.output, m.rateFromPolicy(pol.input), m.rateFromPolicy(pol.output), m.rateFromPolicy(null), m.ratePolicyName(250)];
+out.desc = ['  web-01 rack 3  ', 'a;reload', 'a\nb', 'x'.repeat(255), '\x07bell', ''].map((v) => m.cleanDescription(v));
+out.desc64 = m.cleanDescription('x'.repeat(65), 64).ok;
+
+// فرمان‌های نوشتنی با سوییچ ساختگی: پورت ناامن، سرعت نامعتبر و policy بیگانه پیش از هر تغییری رد می‌شوند
+const calls = [];
+const origFetch = globalThis.fetch;
+const fakeSw = { id: 1, url: 'https://192.0.2.1', username: 'u', password: 'p', insecure_tls: true };
+out.guard = [];
+for (const [fn, args] of [
+  ['setDescription', [{ name: 'mgmt0' }, 'x']],
+  ['setDescription', [{ name: 'Ethernet1/1' }, 'a;reload']],
+  ['setRateLimit', [{ name: 'Vlan10' }, 100]],
+  ['setRateLimit', [{ name: 'Ethernet1/1' }, 1.5]],
+  ['setRateLimit', [{ name: 'Ethernet1/1' }, -1]],
+]) {
+  try { await m.nxapiDriver[fn](fakeSw, ...args); out.guard.push('ran'); } catch (e) { out.guard.push('rejected'); }
+}
 console.log(JSON.stringify(out));
 """
 
@@ -193,6 +238,25 @@ check(r["full"] == ["Ethernet1/2", "port-channel100", "Ethernet1/2", "mgmt0"], "
 check("۴۰۱" in r["explain"][0] and "feature nxapi" in r["explain"][1], "پیام خطای قابل اقدام")
 check("دسترسی ندارد" in r["explain"][2] and "خودامضا" in r["explain"][3], "پیام تایم‌اوت و گواهی")
 check(r["rejected"] == 3 and r["showRejected"] is True, "فرمان با جداکننده پیش از ارسال رد می‌شود")
+
+
+# ── کشف، پشتیبان و فرمان‌های تازه ─────────────────────────────
+check([x["port"] for x in r["macs"]] == ["Ethernet1/1", "port-channel10"], "جدول MAC: نام کامل؛ پورت داخلی و MAC خراب رد می‌شود")
+check(r["macs"][0]["mac"] == "00:50:56:a1:00:01" and r["macs"][1]["vlan"] == "20", "MAC یکسان‌شده و ویلن عددی به متن")
+check(r["arp"] == [{"ip": "10.0.0.5", "mac": "00:50:56:a1:00:01", "iface": "Ethernet1/1"}], "ARP تودرتو در vrf؛ INCOMPLETE رد می‌شود")
+l0 = r["lldp"][0]
+check(l0["port"] == "Ethernet1/1" and l0["sys_name"] == "web-01.example.com" and l0["caps"] == ["b", "r"], "LLDP: پورت محلی کامل و قابلیت‌ها")
+c0 = r["cdp"][0]
+check(c0["sys_name"] == "core-sw" and c0["mgmt_ip"] == "10.0.0.1" and c0["caps"] == ["router", "switch"], "CDP: سریال پرانتزی از نام حذف می‌شود")
+check(r["mac"] == ["00:50:56:a1:00:01"] * 3 + [None, None], "MAC سیسکو، هوآوی و بافر SNMP یک شکل می‌شوند")
+check(r["host"] == ["web-01", "core-sw", ""], "نام کوتاه میزبان برای مقایسه")
+check(r["cfg"] == "version 9.3(8)\nhostname n9k", "پیکربندی بدون خط‌های زمان‌دار و CRLF")
+check(r["pol"] == ["PANEL-RL-100M", "CUSTOMER-QOS", 100, None, None, "PANEL-RL-250M"], "policy پنل از بیگانه جداست")
+D = r["desc"]
+check(D[0] == {"ok": True, "value": "web-01 rack 3"} and D[5] == {"ok": True, "value": ""}, "توضیح عادی و خالی پذیرفته می‌شود")
+check(not any(d["ok"] for d in D[1:5]), "توضیح با «;»، خط تازه، بیش از ۲۵۴ نویسه یا نویسه کنترلی رد می‌شود")
+check(r["desc64"] is False, "سقف ۶۴ نویسه ifAlias")
+check(r["guard"] == ["rejected"] * 5, "mgmt/ویلن، توضیح ناامن، سرعت اعشاری یا منفی پیش از تماس با سوییچ رد می‌شود")
 
 
 # ── ۱ب) درایور SNMP، اجرای واقعی ───────────────────────────────
@@ -295,6 +359,21 @@ out.write = [
   m.snmpDriver.canWrite({ snmp_version: '3', snmp_write: true }),
   m.snmpDriver.canSave({ vendor: 'cisco' }), m.snmpDriver.canSave({ vendor: 'mikrotik' }),
 ];
+
+// کشف با SNMP: LLDP با شماره پورت محلی جدا، CDP، جدول MAC از Q-BRIDGE و ARP
+const nameOf = new Map([['1', 'Gi0/1'], ['2', 'Gi0/2'], ['3', 'Po1']]);
+out.disc = m.buildDiscovery({
+  lldpLocPortId: M({ 5: Buffer.from('Gi0/2') }),
+  lldpRemSysName: M({ '0.1.1': Buffer.from('web-01'), '0.5.2': Buffer.from('db-01'), '0.9.3': Buffer.from('ghost') }),
+  lldpRemPortId: M({ '0.1.1': Buffer.from([0, 0x50, 0x56, 0xa1, 0, 1]), '0.5.2': Buffer.from('eth0') }),
+  cdpCacheDeviceId: M({ '3.1': Buffer.from('core(FDO1)') }),
+  cdpCacheAddress: M({ '3.1': Buffer.from([10, 0, 0, 1]) }),
+  cdpCacheDevicePort: M({ '3.1': Buffer.from('Ethernet1/1') }),
+  basePortIfIndex: M({ 11: 1, 12: 2 }),
+  qFdbPort: M({ '10.0.80.86.161.0.1': 11, '20.0.80.86.161.0.2': 12, '10.0.80.86.161.0.3': 0 }),
+  arpPhys: M({ '1.10.0.0.5': Buffer.from([0, 0x50, 0x56, 0xa1, 0, 1]), '1.10.0.0.9': Buffer.alloc(6) }),
+}, nameOf);
+out.discBridge = m.buildDiscovery({ dFdbPort: M({ '0.80.86.161.0.9': 2 }) }, nameOf).macs;
 console.log(JSON.stringify(out));
 """
 
@@ -364,6 +443,169 @@ check(r["write"] == [False, True, False, True, True, False],
       "اجازه نوشتن: v2c فقط با کامیونیتی نوشتنی، v3 فقط با تیک؛ ذخیره فقط سیسکو")
 
 
+dn = r["disc"]["neighbors"]
+check([(n["port"], n["proto"], n["sys_name"]) for n in dn] == [("Gi0/1", "lldp", "web-01"), ("Gi0/2", "lldp", "db-01"), ("Po1", "cdp", "core")],
+      "SNMP LLDP: پورت محلی از ifIndex یا lldpLocPortId؛ پورت ناشناخته رد؛ CDP بی سریال")
+check(dn[0]["port_id"] == "00:50:56:a1:00:01" and dn[1]["port_id"] == "eth0" and dn[2]["mgmt_ip"] == "10.0.0.1",
+      "شناسه پورت MAC یا متن؛ آی‌پی مدیریت CDP")
+check(r["disc"]["macs"] == [{"port": "Gi0/1", "mac": "00:50:56:a1:00:01", "vlan": "10"}, {"port": "Gi0/2", "mac": "00:50:56:a1:00:02", "vlan": "20"}],
+      "Q-BRIDGE: پورت پل به ifIndex، ویلن از اندیس؛ پورت صفر رد می‌شود")
+check(r["discBridge"] == [{"port": "Gi0/2", "mac": "00:50:56:a1:00:09", "vlan": None}], "BRIDGE-MIB بدون basePort: شماره پورت پل همان ifIndex")
+check(r["disc"]["arp"] == [{"ip": "10.0.0.5", "mac": "00:50:56:a1:00:01", "iface": "Gi0/1"}], "ARP از ipNetToMedia؛ MAC صفر رد می‌شود")
+
+
+# ── ۱ج) پیشنهاد اتصال، تفاوت و پوشاندن رازها ─────────────────
+
+MATCH_SCRIPT = r"""
+const { suggestLinks } = await import(process.argv[1]);
+const servers = [
+  { id: 1, name: 'web-01', hostname: 'web-01.example.com', main_ip: '10.0.0.5', ips: ['10.0.0.50'] },
+  { id: 2, name: 'db-01', hostname: null, main_ip: '10.0.0.6', ips: [] },
+  { id: 3, name: 'web-1', hostname: null, main_ip: '10.0.0.7', ips: [] },
+  { id: 4, name: 'kvm-node', hostname: 'kvm-node', main_ip: '10.0.0.8', ips: [] },
+];
+const arp = [
+  { ip: '10.0.0.6', mac: 'aa:aa:aa:aa:aa:06' },
+  { ip: '10.0.0.50', mac: 'aa:aa:aa:aa:aa:50' },
+  { ip: '10.0.0.7', mac: 'aa:aa:aa:aa:aa:07' },
+];
+const base = { kind: 'ethernet', server_id: null, is_protected: false, member_of: null, mac_count: 1, macs: [], neighbors: [],
+  description: null, suggest_dismissed_server_id: null };
+const mac = (x) => [{ mac: x }];
+const ports = [
+  // LLDP با نام کامل دامنه؛ S در LLDP یعنی Station نه Switch
+  { ...base, id: 10, neighbors: [{ proto: 'lldp', sys_name: 'WEB-01.example.com', caps: ['s'] }] },
+  // MAC → ARP → آی‌پی دوم سرور
+  { ...base, id: 11, macs: mac('aa:aa:aa:aa:aa:50') },
+  { ...base, id: 12, macs: mac('aa:aa:aa:aa:aa:06') },
+  // توضیح: web-1 نباید با web-10 جور شود
+  { ...base, id: 13, description: 'uplink web-10' },
+  { ...base, id: 14, description: 'srv web-1 rack2' },
+  // دو سرور: مبهم
+  { ...base, id: 15, mac_count: 2, macs: [{ mac: 'aa:aa:aa:aa:aa:06' }, { mac: 'aa:aa:aa:aa:aa:07' }] },
+  // شبیه آپلینک: MAC زیاد، یا همسایه سوییچ ناشناخته
+  { ...base, id: 16, mac_count: 40, macs: mac('aa:aa:aa:aa:aa:06') },
+  { ...base, id: 17, macs: mac('aa:aa:aa:aa:aa:06'), neighbors: [{ proto: 'lldp', sys_name: 'core', caps: ['b', 'r'] }] },
+  { ...base, id: 18, macs: mac('aa:aa:aa:aa:aa:06'), neighbors: [{ proto: 'cdp', sys_name: 'core', caps: [] }] },
+  // نود مجازی‌سازی: MAC زیاد ولی نامش در LLDP
+  { ...base, id: 19, mac_count: 60, neighbors: [{ proto: 'lldp', sys_name: 'kvm-node', caps: ['b', 'r'] }] },
+  // رد شده، وصل شده، محافظت‌شده، عضو پورت‌چنل، ویلن
+  { ...base, id: 20, macs: mac('aa:aa:aa:aa:aa:06'), suggest_dismissed_server_id: 2 },
+  { ...base, id: 21, macs: mac('aa:aa:aa:aa:aa:06'), server_id: 2 },
+  { ...base, id: 22, macs: mac('aa:aa:aa:aa:aa:06'), is_protected: true },
+  { ...base, id: 23, macs: mac('aa:aa:aa:aa:aa:06'), member_of: 'port-channel1' },
+  { ...base, id: 24, macs: mac('aa:aa:aa:aa:aa:06'), kind: 'vlan' },
+  // نشانه قوی بر توضیح کهنه مقدم است
+  { ...base, id: 25, macs: mac('aa:aa:aa:aa:aa:06'), description: 'web-01' },
+];
+const res = suggestLinks({ ports, servers, arp });
+console.log(JSON.stringify(Object.fromEntries([...res].map(([k, v]) => [k, v.server_id]))));
+"""
+
+proc = subprocess.run(
+    [node, "--input-type=module", "-e", MATCH_SCRIPT, os.path.join(ROOT, "worker", "switch-match.mjs")],
+    capture_output=True, text=True, timeout=60,
+)
+if proc.returncode != 0:
+    print(proc.stderr)
+    sys.exit(1)
+sg = json.loads(proc.stdout.strip().splitlines()[-1])
+check(sg.get("10") == 1, "LLDP: نام کامل دامنه با نام سرور جور می‌شود (S در LLDP ایستگاه است)")
+check(sg.get("11") == 1 and sg.get("12") == 2, "MAC روی پورت ← ARP ← آی‌پی اصلی یا دوم سرور")
+check("13" not in sg and sg.get("14") == 3, "توضیح با مرز کلمه: web-1 با web-10 جور نمی‌شود")
+check("15" not in sg, "دو سرور روی یک پورت: پیشنهادی نیست")
+check(not any(k in sg for k in ["16", "17", "18"]), "MAC زیاد یا همسایه سوییچ/CDP ناشناخته: آپلینک، پیشنهادی نیست")
+check(sg.get("19") == 4, "نود مجازی‌سازی با MAC زیاد با نام LLDP پیدا می‌شود")
+check(not any(k in sg for k in ["20", "21", "22", "23", "24"]), "رد شده، وصل، محافظت‌شده، عضو پورت‌چنل و ویلن پیشنهاد نمی‌گیرند")
+check(sg.get("25") == 2, "نشانه قوی (ARP) بر توضیح دستی مقدم است")
+
+# کتابخانه‌های تایپ‌اسکریپتی با کامپایلر خود پروژه ترجمه و اجرا می‌شوند
+TS_SCRIPT = r"""
+const { createRequire } = await import('node:module');
+const fs = await import('node:fs');
+const require = createRequire(process.argv[1] + '/package.json');
+const ts = require('typescript');
+const load = async (rel) => {
+  const src = fs.readFileSync(process.argv[1] + '/' + rel, 'utf8');
+  const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } }).outputText;
+  return import('data:text/javascript;base64,' + Buffer.from(js).toString('base64'));
+};
+const d = await load('lib/diff.ts');
+const mk = await load('lib/config-mask.ts');
+const out = {};
+const A = 'a\nb\nc\nd\ne\nf\ng';
+const B = 'a\nb\nX\nd\ne\nf\ng\nh';
+out.diff = d.diffLines(A, B).map((l) => l.op + l.text);
+out.same = d.diffLines(A, A).every((l) => l.op === '=');
+out.stats = d.diffStats(d.diffLines(A, B));
+// بازسازی: خط‌های قدیم و تازه از دل تفاوت درمی‌آیند — روی متن تصادفی
+let rebuilt = true;
+let seed = 7;
+const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+for (let t = 0; t < 200; t++) {
+  const gen = () => Array.from({ length: Math.floor(rnd() * 30) }, () => 'l' + Math.floor(rnd() * 6)).join('\n');
+  const x = gen(), y = gen();
+  const ls = d.diffLines(x, y);
+  const old = ls.filter((l) => l.op !== '+').map((l) => l.text).join('\n');
+  const neu = ls.filter((l) => l.op !== '-').map((l) => l.text).join('\n');
+  if (old !== x || neu !== y) { rebuilt = false; break; }
+}
+out.rebuilt = rebuilt;
+const big = Array.from({ length: 5000 }, (_, i) => 'line ' + i).join('\n');
+const big2 = big.replace('line 2500', 'line 2500 changed');
+const h = d.diffHunks(d.diffLines(big, big2), 3);
+out.hunks = [h.hunks.length, h.hunks[0].lines.length, h.hunks[0].skippedBefore, h.skippedAfter];
+const t0 = Date.now();
+d.diffLines(big, Array.from({ length: 5000 }, (_, i) => 'other ' + i).join('\n'));
+out.fast = Date.now() - t0 < 5000;
+
+const cfg = [
+  'username admin password 5 $5$abc$hash  role network-admin',
+  'snmp-server user mon network-operator auth sha 0xAAAA priv aes-128 0xBBBB localizedkey',
+  'snmp-server user mon2 network-operator auth md5 0xCCCC priv 0xDDDD localizedkey',
+  'snmp-server community s3cret group network-operator',
+  'snmp-server host 10.0.0.9 traps version 2c trapcomm',
+  'tacacs-server key 7 "tackey"',
+  'tacacs-server host 10.0.0.2 key 7 "hostkey"',
+  'radius-server key 7 radkey',
+  'ip ospf message-digest-key 1 md5 3 ospfkey',
+  'ntp authentication-key 1 md5 ntpkey 7',
+  'key chain KC1',
+  'key-string 7 kskey',
+  'neighbor 10.0.0.1 password 3 bgpkey',
+  'hsrp 10',
+  'authentication text hsrpkey',
+  '!Command: password in a comment stays',
+  'no password strength-check',
+  'hostname n9k',
+].join('\n');
+const masked = mk.maskConfig(cfg);
+out.masked = masked.text.split('\n');
+out.maskedCount = masked.masked;
+out.leak = ['$5$abc$hash', '0xAAAA', '0xBBBB', '0xCCCC', '0xDDDD', 's3cret', 'trapcomm', 'tackey', 'hostkey', 'radkey', 'ospfkey',
+  'ntpkey', 'kskey', 'bgpkey', 'hsrpkey'].filter((x) => masked.text.includes(x));
+out.idem = mk.maskConfig(masked.text).text === masked.text;
+console.log(JSON.stringify(out));
+"""
+
+proc = subprocess.run([node, "--input-type=module", "-e", TS_SCRIPT, ROOT], capture_output=True, text=True, timeout=120, cwd=ROOT)
+if proc.returncode != 0:
+    print(proc.stderr)
+    sys.exit(1)
+r = json.loads(proc.stdout.strip().splitlines()[-1])
+check(r["diff"] == ["=a", "=b", "-c", "+X", "=d", "=e", "=f", "=g", "+h"], "تفاوت خط‌به‌خط: %s" % r["diff"])
+check(r["same"] is True and r["stats"] == {"added": 2, "removed": 1}, "متن یکسان بی‌تفاوت؛ شمارش اضافه و حذف")
+check(r["rebuilt"] is True, "روی ۲۰۰ جفت متن تصادفی، هر دو نسخه از دل تفاوت بازسازی می‌شوند")
+check(r["hunks"] == [1, 8, 2497, 2496], "فقط تکه تغییرکرده (حذف و اضافه) با سه خط اطراف: %s" % r["hunks"])
+check(r["fast"] is True, "دو پیکربندی کاملا متفاوت پنج‌هزارخطی زیر پنج ثانیه")
+check(r["leak"] == [], "هیچ رازی پس از پوشاندن دیده نمی‌شود: %s" % r["leak"])
+M_ = r["masked"]
+check(M_[0].startswith("username admin password 5 ••••••") and M_[0].endswith("role network-admin"), "نوع رمز و بقیه خط می‌ماند")
+check(M_[10] == "key chain KC1" and M_[15] == "!Command: password in a comment stays", "key chain و توضیح «!» دست نمی‌خورد")
+check(M_[16] == "no password strength-check" and M_[17] == "hostname n9k", "password strength-check و خط عادی دست نمی‌خورد")
+check(r["maskedCount"] == 15 and r["idem"] is True, "شمار رازهای پوشیده؛ پوشاندن دوباره چیزی را عوض نمی‌کند (%s)" % r["maskedCount"])
+
+
 # ── ۲) قاعده‌ها در کد واقعی ──────────────────────────────────────
 
 actions = read("app/api/switch-actions/route.ts")
@@ -383,9 +625,12 @@ set_nx = nx[nx.index("async setAdmin(sw, port, up)"):]
 check(set_nx.index("isSafePortName(port.name)") < set_nx.index("configure("), "NX-API: نام پورت پیش از خط فرمان سنجیده می‌شود")
 
 sn = read("worker/snmp.mjs")
-set_sn = sn[sn.index("async setAdmin(sw, port, up)"):]
-check(set_sn.index("names.includes(expected)") < set_sn.index("O.ifAdminStatus"),
-      "SNMP: پیش از SET، نام همان ifIndex با نام پورت مقایسه می‌شود")
+assert_fn = sn[sn.index("async function assertIfName"):]
+check("names.includes(expected)" in assert_fn[:assert_fn.index("\n}\n")] and "throw" in assert_fn[:assert_fn.index("\n}\n")],
+      "SNMP: assertIfName نام همان ifIndex را با نام پورت مقایسه و در ناهمخوانی خطا می‌دهد")
+for meth, oid in [("async setAdmin(sw, port, up)", "O.ifAdminStatus"), ("async setDescription(sw, port, text)", "O.ifAlias")]:
+    body = sn[sn.index(meth):]
+    check(body.index("assertIfName(") < body.index(oid), "SNMP %s: پیش از SET نام ifIndex سنجیده می‌شود" % meth.split("(")[0])
 check("session.on('error'" in sn, "SNMP: خطای سوکت UDP ورکر را نمی‌کشد")
 
 apply_ = sw[sw.index("export async function applySwitchTrafficToServers"):]
@@ -418,6 +663,41 @@ check("CHECK (NOT count_traffic" not in mig, "CHECK شمارش ترافیک حذ
 
 inc = read("worker/incidents.mjs")
 check(inc.count("switch_port_id IS NOT DISTINCT FROM $5") == 2, "باز و بسته کردن رویداد کلید پورت را هم می‌سنجد")
+
+
+# فرمان‌های تازه و پشتیبان پیکربندی
+check("cleanDescription(body.value" in post and "can_rate_limit" in post and "port.is_protected" in post[post.index("action === 'rate_limit'"):],
+      "API: توضیح پاک‌سازی می‌شود؛ محدودیت فقط NX-API و نه روی پورت محافظت‌شده")
+check("can_backup" in post[post.index("async function queueBackup"):], "API: پشتیبان‌گیری فقط برای سوییچی که پشتیبانی می‌کند")
+check(run.index("driver.canWrite(sw)") < run.index("runDescription(") and run.index("driver.canWrite(sw)") < run.index("runRateLimit("),
+      "ورکر: نوع پورت و اجازه نوشتن پیش از توضیح و محدودیت سنجیده می‌شود")
+rl = sw[sw.index("async function runRateLimit"):]
+check(rl.index("port.is_protected") < rl.index("driver.setRateLimit("), "ورکر: پورت محافظت‌شده محدود نمی‌شود")
+check(rl.index("driver.setRateLimit(") < rl.index("driver.readRateLimit("), "ورکر: پس از محدودیت، وضعیت واقعی از running-config خوانده می‌شود")
+set_rl = nx[nx.index("async setRateLimit(sw, port, mbps)"):]
+check(set_rl.index("rateFromPolicy(current[dir]) === null") < set_rl.index("configure("),
+      "NX-API: policy بیگانه روی پورت پیش از هر تغییری فرمان را رد می‌کند")
+set_d = nx[nx.index("async setDescription(sw, port, text)"):]
+check(set_d.index("isSafePortName(port.name)") < set_d.index("configure(") and set_d.index("cleanDescription(") < set_d.index("configure("),
+      "NX-API: نام پورت و متن توضیح پیش از خط فرمان سنجیده می‌شوند")
+
+for rel in ["app/api/switches/[id]/configs/route.ts", "app/api/switches/[id]/configs/[cid]/route.ts"]:
+    check("await requireAdmin()" in read(rel) and "requireUser" not in read(rel), "پیکربندی سوییچ فقط مدیر: %s" % rel)
+cfg_route = read("app/api/switches/[id]/configs/[cid]/route.ts")
+check("reveal ? { text: row.config, masked: 0 } : maskConfig(row.config)" in cfg_route, "متن پیکربندی پیش‌فرض پوشیده است، دانلود هم")
+check("maskLine(l.text)" in cfg_route, "تفاوت دو نسخه هم خط‌به‌خط پوشیده می‌شود")
+check("config" not in read("app/api/switches/[id]/configs/route.ts").split("FROM switch_configs")[0].split("SELECT id, taken_at")[1],
+      "فهرست نسخه‌ها متن پیکربندی را برنمی‌گرداند")
+check("config" not in pub_cols, "ستون‌های عمومی سوییچ پیکربندی ندارند")
+rep = read("app/api/switches/report/route.ts")
+check("/^[=+\\-@\\t\\r]/" in rep and "`'${s}`" in rep, "CSV گزارش: فرمول اکسل در توضیح پورت خنثی می‌شود")
+ports_api = read("app/api/switch-ports/route.ts")
+check("alert_util    = COALESCE($7, alert_util)" in ports_api, "فرم قدیمی بدون alert_util مقدار فعلی را پاک نمی‌کند")
+mig48 = read("db/migrations/048_switch_insight.sql")
+check("'description', 'rate_limit', 'backup'" in mig48 and "switch_actions_one_backup" in mig48, "۰۴۸: فرمان‌های تازه و یک پشتیبان‌گیری باز برای هر سوییچ")
+check(mig48.count("IF NOT EXISTS") >= 20 and "DROP CONSTRAINT IF EXISTS switch_actions_action_check" in mig48, "۰۴۸ دوباره‌اجراپذیر است")
+check("'([0-9]+)'" in read("app/api/switches/[id]/route.ts") and "(\\d+)" not in read("app/api/switches/[id]/route.ts"),
+      "مرتب‌سازی عددی پورت: \\d در رشته الگویی جاوااسکریپت به d تبدیل می‌شد")
 
 
 if failed:

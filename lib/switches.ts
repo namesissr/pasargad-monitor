@@ -16,6 +16,13 @@ END)`;
 /** ذخیره در startup-config: NX-API، یا SNMP روی سیسکو (CISCO-CONFIG-COPY-MIB) */
 export const SWITCH_CAN_SAVE = `(w.protocol = 'nxapi' OR COALESCE(w.vendor = 'cisco', FALSE))`;
 
+/**
+ * محدودیت سرعت و پشتیبان پیکربندی فقط با NX-API: در SNMP راه استانداردی
+ * برای policy کیفیت سرویس یا خواندن running-config نیست.
+ */
+export const SWITCH_CAN_RATE_LIMIT = `(w.protocol = 'nxapi')`;
+export const SWITCH_CAN_BACKUP = `(w.protocol = 'nxapi')`;
+
 /** ستون‌های قابل نمایش؛ هیچ رازی در آن نیست، فقط «تنظیم شده یا نه» */
 export const SWITCH_PUBLIC_COLUMNS = `
   w.id, w.name, w.protocol, w.url, w.username, w.insecure_tls,
@@ -27,4 +34,6 @@ export const SWITCH_PUBLIC_COLUMNS = `
   (COALESCE(w.snmp_auth_pass, '') <> '')       AS has_auth_pass,
   (COALESCE(w.snmp_priv_pass, '') <> '')       AS has_priv_pass,
   ${SWITCH_CAN_WRITE} AS can_write,
-  ${SWITCH_CAN_SAVE}  AS can_save`;
+  ${SWITCH_CAN_SAVE}  AS can_save,
+  ${SWITCH_CAN_RATE_LIMIT} AS can_rate_limit,
+  ${SWITCH_CAN_BACKUP} AS can_backup`;

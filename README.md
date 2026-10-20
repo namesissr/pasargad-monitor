@@ -29,7 +29,7 @@
 | تلگرام مشتری | هشدار سهمیه، تمدید، پرداخت و پاسخ تیکت در تلگرام مشتری — [docs/customer-telegram.md](docs/customer-telegram.md) |
 | تلگرام از ایران | راه‌اندازی واسط روی سرور خارج، قدم‌به‌قدم — [docs/telegram-relay.md](docs/telegram-relay.md) |
 | اطلاعیه و ارسال همگانی | پاپ‌آپ اطلاعیه در پرتال، و ایمیل و پیامک گروهی — [docs/announcements.md](docs/announcements.md) |
-| سوییچ‌ها | Cisco Nexus از راه NX-API، و هر برندی با SNMP v2c/v3: مصرف هر پورت، منابع و سخت‌افزار سوییچ، shut/no shut پورت، مصرف پورت به‌جای ایجنت — [docs/switches.md](docs/switches.md) |
+| سوییچ‌ها | Cisco Nexus از راه NX-API، و هر برندی با SNMP v2c/v3: مصرف هر پورت، منابع و سخت‌افزار سوییچ، shut/no shut، توضیح و محدودیت سرعت پورت، همسایه‌ها و MACها با پیشنهاد اتصال پورت به سرور، هشدار اشباع/خطا/قطع و وصل، پشتیبان پیکربندی با تفاوت نسخه‌ها، گزارش صدک ۹۵، مصرف پورت به‌جای ایجنت — [docs/switches.md](docs/switches.md) |
 
 ---
 
@@ -265,7 +265,7 @@ python3 scripts/test-telegram.py   # تلگرام مشتری
 python3 scripts/test-announcements.py  # اطلاعیه و ارسال همگانی
 python3 scripts/test-shop.py       # فروشگاه و تحویل
 python3 scripts/test-topups.py     # موجودی ترافیک پیش‌خرید
-python3 scripts/test-switch.py     # سوییچ: تجزیه NX-API و SNMP، و قاعده‌های shut
+python3 scripts/test-switch.py     # سوییچ: تجزیه NX-API و SNMP، کشف، پیشنهاد اتصال، تفاوت و پوشاندن پیکربندی، قاعده‌های فرمان
 ```
 
 `check-code.py` در چند ثانیه چند دسته خطای رایج را می‌گیرد: ایمپورت

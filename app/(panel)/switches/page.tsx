@@ -83,12 +83,18 @@ export default function SwitchesPage() {
           <h1 className="text-lg font-bold">سوییچ‌ها</h1>
           <p className="text-xs text-muted mt-1">
             Cisco Nexus از راه NX-API، یا هر برندی با SNMP v2c و v3: مصرف و وضعیت هر پورت، منابع و
-            سخت‌افزار خود سوییچ، و خاموش و روشن کردن پورت. راهنما در docs/switches.md است.
+            سخت‌افزار خود سوییچ، همسایه‌ها و MACها، پشتیبان پیکربندی، و خاموش و روشن کردن پورت. راهنما در
+            docs/switches.md است.
           </p>
         </div>
-        <button type="button" className="btn-primary" onClick={() => setEditing('new')}>
-          افزودن سوییچ
-        </button>
+        <div className="flex gap-2">
+          <Link href="/switches/report" className="btn-ghost">
+            گزارش پورت‌ها
+          </Link>
+          <button type="button" className="btn-primary" onClick={() => setEditing('new')}>
+            افزودن سوییچ
+          </button>
+        </div>
       </div>
 
       {error && <Notice type="warn">به‌روزرسانی انجام نشد: {error}</Notice>}

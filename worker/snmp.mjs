@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import snmp from 'net-snmp';
-import { portKind, summarizeEnvironment } from './nxapi.mjs';
+import { portKind, summarizeEnvironment, normalizeMac, cleanDescription } from './nxapi.mjs';
 import { formatDuration } from './format.mjs';
 
 /**
@@ -100,6 +100,25 @@ const O = {
   entPhysicalSoftwareRev: '1.3.6.1.2.1.47.1.1.1.1.10',
   entPhysicalSerialNum: '1.3.6.1.2.1.47.1.1.1.1.11',
   entPhysicalModelName: '1.3.6.1.2.1.47.1.1.1.1.13',
+
+  // LLDP-MIB: اندیس lldpRemTable = timeMark.localPortNum.remIndex
+  lldpLocPortId: '1.0.8802.1.1.2.1.3.7.1.3',
+  lldpLocPortDesc: '1.0.8802.1.1.2.1.3.7.1.4',
+  lldpRemChassisId: '1.0.8802.1.1.2.1.4.1.1.5',
+  lldpRemPortId: '1.0.8802.1.1.2.1.4.1.1.7',
+  lldpRemPortDesc: '1.0.8802.1.1.2.1.4.1.1.8',
+  lldpRemSysName: '1.0.8802.1.1.2.1.4.1.1.9',
+  lldpRemSysDesc: '1.0.8802.1.1.2.1.4.1.1.10',
+  // CISCO-CDP-MIB: اندیس cdpCacheTable = ifIndex.deviceIndex
+  cdpCacheAddress: '1.3.6.1.4.1.9.9.23.1.2.1.1.4',
+  cdpCacheDeviceId: '1.3.6.1.4.1.9.9.23.1.2.1.1.6',
+  cdpCacheDevicePort: '1.3.6.1.4.1.9.9.23.1.2.1.1.7',
+  cdpCachePlatform: '1.3.6.1.4.1.9.9.23.1.2.1.1.8',
+  // جدول MAC: Q-BRIDGE (fdbId.mac) و BRIDGE-MIB قدیمی (mac)
+  dot1qTpFdbPort: '1.3.6.1.2.1.17.7.1.2.2.1.2',
+  dot1dTpFdbPort: '1.3.6.1.2.1.17.4.3.1.2',
+  // ARP: اندیس ipNetToMedia = ifIndex.a.b.c.d
+  ipNetToMediaPhysAddress: '1.3.6.1.2.1.4.22.1.2',
 
   // CISCO-CONFIG-COPY-MIB ccCopyEntry
   ccCopySourceFileType: '1.3.6.1.4.1.9.9.96.1.1.1.1.3',
@@ -412,6 +431,8 @@ export function buildPorts(cols, uptimeTicks, extra = {}) {
       out_rate_bps: null,
       if_index: Number(idx),
       counter_bits: hc ? 64 : 32,
+      // برای تشخیص قطع و وصلی که بین دو خواندن رخ داده و برگشته
+      last_change_ticks: lc,
     });
   }
   return ports;
@@ -555,6 +576,99 @@ export function versionFromDescr(descr) {
   return m ? m[1].replace(/,$/, '') : null;
 }
 
+// ── کشف ────────────────────────────────────────────────────
+
+/** شش عدد انتهای اندیس OID به MAC */
+function macFromIndex(parts) {
+  if (parts.length < 6) return null;
+  const bytes = parts.slice(-6).map(Number);
+  if (bytes.some((b) => !Number.isInteger(b) || b < 0 || b > 255)) return null;
+  return bytes.map((b) => b.toString(16).padStart(2, '0')).join(':');
+}
+
+/**
+ * ستون‌های کشف ← همسایه‌ها، MACها و ARP به همان شکلی که NX-API می‌دهد.
+ * nameOf: ifIndex ← نام پورت، از همان خواندن.
+ */
+export function buildDiscovery(c, nameOf) {
+  const portOf = (ifIndex) => nameOf.get(String(ifIndex)) ?? null;
+  const portNames = new Set(nameOf.values());
+
+  // LLDP: شماره پورت محلی گاهی همان ifIndex است و گاهی شماره جدا که نامش
+  // در lldpLocPortId یا lldpLocPortDesc است
+  const localPort = (num) => {
+    for (const key of ['lldpLocPortId', 'lldpLocPortDesc']) {
+      const v = str(c[key]?.get(String(num)));
+      if (v && portNames.has(v)) return v;
+    }
+    return portOf(num);
+  };
+
+  const neighbors = [];
+  for (const [idx, sysName] of c.lldpRemSysName ?? []) {
+    const parts = idx.split('.');
+    if (parts.length < 3) continue;
+    const port = localPort(parts[1]);
+    if (!port) continue;
+    const pid = c.lldpRemPortId?.get(idx);
+    neighbors.push({
+      port,
+      proto: 'lldp',
+      sys_name: str(sysName),
+      port_id: Buffer.isBuffer(pid) && pid.length === 6 ? normalizeMac(pid) : str(pid),
+      port_desc: str(c.lldpRemPortDesc?.get(idx)),
+      platform: str(c.lldpRemSysDesc?.get(idx))?.slice(0, 120) ?? null,
+      mgmt_ip: null,
+      chassis_id: Buffer.isBuffer(c.lldpRemChassisId?.get(idx)) && c.lldpRemChassisId.get(idx).length === 6
+        ? normalizeMac(c.lldpRemChassisId.get(idx))
+        : str(c.lldpRemChassisId?.get(idx)),
+      caps: [],
+    });
+  }
+  for (const [idx, devId] of c.cdpCacheDeviceId ?? []) {
+    const [ifIndex] = idx.split('.');
+    const port = portOf(ifIndex);
+    if (!port) continue;
+    const addr = c.cdpCacheAddress?.get(idx);
+    neighbors.push({
+      port,
+      proto: 'cdp',
+      sys_name: str(devId)?.replace(/\(.*\)$/, '').trim() ?? null,
+      port_id: str(c.cdpCacheDevicePort?.get(idx)),
+      port_desc: null,
+      platform: str(c.cdpCachePlatform?.get(idx)),
+      mgmt_ip: Buffer.isBuffer(addr) && addr.length === 4 ? [...addr].join('.') : null,
+      chassis_id: null,
+      caps: [],
+    });
+  }
+
+  // MAC: Q-BRIDGE اگر بود، وگرنه BRIDGE-MIB. مقدار شماره پورت پل است، نه ifIndex.
+  const bridgeToIf = new Map([...(c.basePortIfIndex ?? [])].map(([bp, ifi]) => [bp, String(num(ifi))]));
+  const ifOfBridge = (bp) => bridgeToIf.get(String(bp)) ?? String(bp);
+  const macs = [];
+  const qb = c.qFdbPort?.size ? c.qFdbPort : null;
+  for (const [idx, bp] of qb ?? c.dFdbPort ?? []) {
+    const parts = idx.split('.');
+    const mac = macFromIndex(parts);
+    const port = portOf(ifOfBridge(num(bp)));
+    if (!mac || !port || !num(bp)) continue;
+    macs.push({ port, mac, vlan: qb && parts.length >= 7 ? parts[0] : null });
+  }
+
+  const arp = [];
+  for (const [idx, phys] of c.arpPhys ?? []) {
+    const parts = idx.split('.');
+    if (parts.length < 5) continue;
+    const ip = parts.slice(-4).join('.');
+    const mac = normalizeMac(phys);
+    if (!mac || mac === '00:00:00:00:00:00') continue;
+    arp.push({ ip, mac, iface: portOf(parts[0]) });
+  }
+
+  return { neighbors, macs, arp };
+}
+
 // ── خواندن ─────────────────────────────────────────────────
 
 async function readVlans(s, vendor, soft) {
@@ -670,6 +784,51 @@ async function readEntity(s, soft) {
   };
 }
 
+async function readDiscovery(s, ports, soft) {
+  const nameOf = new Map(ports.map((p) => [String(p.if_index), p.name]));
+  const c = {};
+  const w = async (key, oid, rep = 40) => {
+    c[key] = (await soft(walk(s, oid, rep))) ?? new Map();
+  };
+  await w('lldpRemSysName', O.lldpRemSysName);
+  if (c.lldpRemSysName.size) {
+    await w('lldpRemPortId', O.lldpRemPortId);
+    await w('lldpRemPortDesc', O.lldpRemPortDesc);
+    await w('lldpRemSysDesc', O.lldpRemSysDesc);
+    await w('lldpRemChassisId', O.lldpRemChassisId);
+    await w('lldpLocPortId', O.lldpLocPortId);
+    await w('lldpLocPortDesc', O.lldpLocPortDesc);
+  }
+  await w('cdpCacheDeviceId', O.cdpCacheDeviceId);
+  if (c.cdpCacheDeviceId.size) {
+    await w('cdpCacheDevicePort', O.cdpCacheDevicePort);
+    await w('cdpCachePlatform', O.cdpCachePlatform);
+    await w('cdpCacheAddress', O.cdpCacheAddress);
+  }
+  await w('qFdbPort', O.dot1qTpFdbPort, 60);
+  if (!c.qFdbPort.size) await w('dFdbPort', O.dot1dTpFdbPort, 60);
+  if (c.qFdbPort.size || c.dFdbPort?.size) await w('basePortIfIndex', O.dot1dBasePortIfIndex);
+  await w('arpPhys', O.ipNetToMediaPhysAddress, 60);
+  return buildDiscovery(c, nameOf);
+}
+
+/**
+ * آیا ifIndex هنوز همان پورت است؟ روی سوییچی که پس از ریبوت شماره‌ها را
+ * عوض کرده، بدون این بررسی فرمان روی پورت مشتری دیگری می‌نشست.
+ */
+async function assertIfName(s, idx, portName) {
+  const r = await getOids(s, [`${O.ifName}.${idx}`, `${O.ifDescr}.${idx}`]);
+  const names = [str(r.get(`${O.ifName}.${idx}`)), str(r.get(`${O.ifDescr}.${idx}`))].filter(Boolean);
+  const expected = String(portName).replace(/ #\d+$/, '');
+  if (!names.includes(expected)) {
+    throw new SnmpError(
+      'نام اینترفیس عوض شده',
+      `شماره اینترفیس ${idx} حالا «${names[0] ?? 'ناموجود'}» است نه «${expected}» — شماره‌ها روی سوییچ عوض شده‌اند. ` +
+        'فرمان اجرا نشد؛ پس از خواندن بعدی دوباره تلاش کنید.',
+    );
+  }
+}
+
 const IF_COLUMNS = [
   'ifDescr', 'ifType', 'ifMtu', 'ifSpeed', 'ifPhysAddress', 'ifAdminStatus', 'ifOperStatus',
   'ifLastChange', 'ifInOctets', 'ifInDiscards', 'ifInErrors', 'ifOutOctets', 'ifOutDiscards',
@@ -685,6 +844,10 @@ const IF_COLUMNS = [
 export const snmpDriver = {
   canWrite: (sw) => (sw.snmp_version === '3' ? Boolean(sw.snmp_write) : Boolean(sw.snmp_write_community)),
   canSave: (sw) => sw.vendor === 'cisco',
+  // توضیح پورت با ifAlias: هر جا نوشتن مجاز باشد
+  canDescribe: (sw) => snmpDriver.canWrite(sw),
+  canRateLimit: () => false,
+  canBackup: () => false,
   explain: explainSnmpError,
 
   async collect(sw, due) {
@@ -720,6 +883,7 @@ export const snmpDriver = {
 
       const res = await readResources(s, vendor, soft);
       const env = due('env') ? await readEnvironment(s, vendor, soft) : null;
+      const discovery = due('nbr') ? await readDiscovery(s, ports, soft) : null;
 
       let ver = {
         hostname: str(sys.get(O.sysName)),
@@ -740,7 +904,7 @@ export const snmpDriver = {
         };
       }
       // نبود یک MIB اختیاری خطا نیست؛ فقط خطاهای واقعی (تایم‌اوت وسط کار) می‌مانند
-      return { ports, res, ver, env, xcvr: null, notes: [...new Set(notes)] };
+      return { ports, res, ver, env, xcvr: null, notes: [...new Set(notes)], discovery };
     } finally {
       s.close();
     }
@@ -760,16 +924,7 @@ export const snmpDriver = {
     }
     const s = openSession(sw, { write: true });
     try {
-      const r = await getOids(s, [`${O.ifName}.${idx}`, `${O.ifDescr}.${idx}`]);
-      const names = [str(r.get(`${O.ifName}.${idx}`)), str(r.get(`${O.ifDescr}.${idx}`))].filter(Boolean);
-      const expected = String(port.name).replace(/ #\d+$/, '');
-      if (!names.includes(expected)) {
-        throw new SnmpError(
-          'نام اینترفیس عوض شده',
-          `شماره اینترفیس ${idx} حالا «${names[0] ?? 'ناموجود'}» است نه «${expected}» — شماره‌ها روی سوییچ عوض شده‌اند. ` +
-            'فرمان اجرا نشد؛ پس از خواندن بعدی دوباره تلاش کنید.',
-        );
-      }
+      await assertIfName(s, idx, port.name);
       await setOids(s, [{ oid: `${O.ifAdminStatus}.${idx}`, type: snmp.ObjectType.Integer, value: up ? 1 : 2 }]);
     } finally {
       s.close();
@@ -826,6 +981,21 @@ export const snmpDriver = {
       for (const row of rows) {
         await setOids(s, [int(`${O.ccCopyEntryRowStatus}.${row}`, 6)]).catch(() => {}); // destroy
       }
+      s.close();
+    }
+  },
+
+  /** توضیح پورت با ifAlias (حداکثر ۶۴ نویسه در IF-MIB). همان بررسی نام ifIndex. */
+  async setDescription(sw, port, text) {
+    const d = cleanDescription(text, 64);
+    if (!d.ok) throw new SnmpError(d.error);
+    const idx = Number(port.if_index);
+    if (!Number.isInteger(idx) || idx <= 0) throw new SnmpError('شماره اینترفیس معلوم نیست', 'شماره اینترفیس این پورت هنوز خوانده نشده');
+    const s = openSession(sw, { write: true });
+    try {
+      await assertIfName(s, idx, port.name);
+      await setOids(s, [{ oid: `${O.ifAlias}.${idx}`, type: snmp.ObjectType.OctetString, value: d.value }]);
+    } finally {
       s.close();
     }
   },
