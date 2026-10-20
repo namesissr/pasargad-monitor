@@ -71,10 +71,24 @@ async function inBatches(items, size, fn) {
 export async function checkServers() {
   const downAfter = await settingNum('down_after_sec', 120);
 
+  // پورت سوییچ سرور دو چیز را عوض می‌کند:
+  //  • اگر همه پورت‌هایش را مدیر از پنل shut کرده، قطعی عمدی است (مثلا
+  //    عدم پرداخت) و پیامک «سرور قطع شد» هر ساعت فقط نویز است.
+  //  • سروری که ترافیکش از سوییچ می‌آید ممکن است اصلا ایجنت نداشته باشد؛
+  //    برایش «ایجنت گزارش نمی‌دهد» هشدار بی‌معنی است.
   const servers = await q(
-    `SELECT id, name, status, host(main_ip) AS ip, ssh_port, last_seen_at,
-            EXTRACT(EPOCH FROM (now() - last_seen_at)) AS since_seen
-       FROM servers WHERE is_active`,
+    `SELECT s.id, s.name, s.status, host(s.main_ip) AS ip, s.ssh_port, s.last_seen_at,
+            EXTRACT(EPOCH FROM (now() - s.last_seen_at)) AS since_seen,
+            sp.has_port, sp.all_shut
+       FROM servers s
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) > 0 AS has_port,
+                COUNT(*) > 0 AND bool_and(p.admin_up = FALSE) AS all_shut
+           FROM switch_ports p
+           JOIN switches w ON w.id = p.switch_id
+          WHERE p.server_id = s.id AND p.is_present AND w.is_active
+       ) sp ON TRUE
+      WHERE s.is_active`,
   );
 
   for (const s of servers) {
@@ -122,7 +136,11 @@ export async function checkServers() {
       log(`وضعیت ${s.name} از ${s.status} به ${newStatus} تغییر کرد`);
     }
 
-    if (!ok) {
+    if (!ok && s.all_shut) {
+      // پورتش عمدا خاموش است؛ قطعی را ثبت می‌کنیم ولی هشدار نمی‌دهیم
+      await resolveIncident({ serverId: s.id, kind: 'down' });
+      await resolveIncident({ serverId: s.id, kind: 'agent_lost' });
+    } else if (!ok) {
       const downFor = since === null ? null : Math.round(since);
       await openIncident({
         serverId: s.id,
@@ -140,7 +158,7 @@ export async function checkServers() {
         recoveryMessage: `پاسارگاد میزبان — سرور ${s.name} دوباره در دسترس است.`,
       });
 
-      if (method !== 'agent') {
+      if (method !== 'agent' && !(s.has_port && !s.last_seen_at)) {
         await openIncident({
           serverId: s.id,
           kind: 'agent_lost',

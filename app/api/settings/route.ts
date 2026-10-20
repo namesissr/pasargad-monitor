@@ -23,6 +23,8 @@ const ALLOWED = [
   'down_after_sec',
   'raw_retention_days',
   'check_interval_sec',
+  'switch_poll_sec',
+  'switch_cpu_threshold',
   'traffic_calendar',
   'panel_title',
   'email_enabled',

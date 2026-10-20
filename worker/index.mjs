@@ -8,6 +8,14 @@ import { checkCustomerAlerts } from './customer-alerts.mjs';
 import { issueRenewalInvoices } from './invoices.mjs';
 import { pollTelegram, pruneLinkTokens } from './telegram-link.mjs';
 import { drainBroadcasts } from './broadcasts.mjs';
+import {
+  pollSwitches,
+  drainSwitchActions,
+  rollupSwitchHourly,
+  rollupSwitchDaily,
+  applySwitchTrafficToServers,
+  purgeSwitches,
+} from './switches.mjs';
 import { hashPassword } from './hash.mjs';
 
 /**
@@ -43,6 +51,8 @@ const CYCLE = {
   // صف ارسال همگانی. هر دور یک دسته کوچک می‌رود؛ کوتاه‌بودن فاصله فقط
   // یعنی ارسال زودتر تمام می‌شود، نه اینکه فشار بیشتری بیاید.
   broadcasts: 15_000,
+  // صف shut/no shut سوییچ. کوتاه است چون ادمین روی دکمه منتظر نتیجه است.
+  switchActions: 3_000,
 };
 
 let stopping = false;
@@ -130,13 +140,33 @@ async function main() {
   schedule(
     'تجمیع',
     async () => {
+      // ترتیب مهم است: ساعتی پورت‌ها پیش از ساعتی سرورها، و جایگزینی
+      // ترافیک سوییچ بعد از آن، چون rollupHourly هر بار عدد ایجنت را
+      // دوباره می‌نویسد. روزانه سرورها هم باید عدد جایگزین‌شده را ببیند.
+      await rollupSwitchHourly(3);
       await rollupHourly(3);
+      await applySwitchTrafficToServers(3);
       await rollupDaily(3);
+      await rollupSwitchDaily(3);
     },
     async () => CYCLE.rollup,
   );
 
-  schedule('پاک‌سازی', purgeOld, async () => CYCLE.purge);
+  schedule(
+    'پاک‌سازی',
+    async () => {
+      await purgeOld();
+      await purgeSwitches();
+    },
+    async () => CYCLE.purge,
+  );
+
+  schedule(
+    'خواندن سوییچ‌ها',
+    pollSwitches,
+    async () => Math.max(10, await settingNum('switch_poll_sec', 30)) * 1000,
+  );
+  schedule('صف سوییچ', drainSwitchActions, async () => CYCLE.switchActions);
 
   schedule('هشدار مشتری', checkCustomerAlerts, async () => CYCLE.customerAlerts);
   schedule('صدور فاکتور', issueRenewalInvoices, async () => CYCLE.invoices);

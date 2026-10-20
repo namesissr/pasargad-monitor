@@ -420,6 +420,7 @@ def check_route_auth():
         src = read(path)
         guards = (
             "requireUser",
+            "requireAdmin",
             "requireCustomer",
             "requireOwnedServer",
             "requireOwnedTicket",

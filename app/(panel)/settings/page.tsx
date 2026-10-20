@@ -818,6 +818,12 @@ export default function SettingsPage() {
           <Field label="نگهداری نمونه خام (روز)" hint="تجمیع روزانه همیشه می‌ماند؛ فقط نمونه‌های ثانیه‌ای پاک می‌شوند">
             <input className="input ltr" value={form.raw_retention_days ?? ''} onChange={set('raw_retention_days')} />
           </Field>
+          <Field label="فاصله خواندن سوییچ (ثانیه)" hint="هر چند ثانیه پورت‌ها و منابع هر سوییچ خوانده شود؛ کمتر از ۱۰ پذیرفته نمی‌شود">
+            <input className="input ltr" value={form.switch_poll_sec ?? ''} onChange={set('switch_poll_sec')} />
+          </Field>
+          <Field label="آستانه پردازنده سوییچ (درصد)" hint="میانگین پنج دقیقه؛ صفر یعنی بدون هشدار">
+            <input className="input ltr" value={form.switch_cpu_threshold ?? ''} onChange={set('switch_cpu_threshold')} />
+          </Field>
           <Field label="مبنای دوره ماهانه" hint="گروه‌بندی گزارش ماهانه و محاسبه سهمیه">
             <select className="input" value={form.traffic_calendar ?? 'jalali'} onChange={set('traffic_calendar')}>
               <option value="jalali">تقویم شمسی</option>

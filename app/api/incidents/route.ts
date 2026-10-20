@@ -40,12 +40,15 @@ export async function GET(req: Request) {
     const rows = await query(
       `SELECT i.id, i.server_id, s.name AS server_name, host(s.main_ip) AS server_ip,
               i.ip_id, host(a.ip) AS ip,
+              i.switch_id, w.name AS switch_name, sp.name AS port_name,
               i.kind, i.severity, i.message, i.value,
               i.started_at, i.resolved_at, i.notified_at, i.ack_at,
               EXTRACT(EPOCH FROM (COALESCE(i.resolved_at, now()) - i.started_at))::int AS duration_sec
          FROM incidents i
          LEFT JOIN servers s      ON s.id = i.server_id
          LEFT JOIN ip_addresses a ON a.id = i.ip_id
+         LEFT JOIN switches w     ON w.id = i.switch_id
+         LEFT JOIN switch_ports sp ON sp.id = i.switch_port_id
          ${clause}
         ORDER BY i.started_at DESC
         LIMIT $${p.length - 1} OFFSET $${p.length}`,

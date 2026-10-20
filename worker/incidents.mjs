@@ -14,22 +14,33 @@ import { clock, formatDuration } from './format.mjs';
  */
 
 /** باز کردن رویداد اگر از قبل باز نبود. شناسه رویداد را برمی‌گرداند. */
-export async function openIncident({ serverId = null, ipId = null, kind, severity = 'critical', message, value = null }) {
+export async function openIncident({
+  serverId = null,
+  ipId = null,
+  switchId = null,
+  switchPortId = null,
+  kind,
+  severity = 'critical',
+  message,
+  value = null,
+}) {
   const existing = await q1(
     `SELECT id, notified_at, ack_at FROM incidents
       WHERE resolved_at IS NULL AND kind = $1
         AND server_id IS NOT DISTINCT FROM $2
         AND ip_id IS NOT DISTINCT FROM $3
+        AND switch_id IS NOT DISTINCT FROM $4
+        AND switch_port_id IS NOT DISTINCT FROM $5
       ORDER BY started_at DESC LIMIT 1`,
-    [kind, serverId, ipId],
+    [kind, serverId, ipId, switchId, switchPortId],
   );
 
   if (existing) return existing;
 
   const row = await q1(
-    `INSERT INTO incidents (server_id, ip_id, kind, severity, message, value)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, notified_at, ack_at`,
-    [serverId, ipId, kind, severity, message, value],
+    `INSERT INTO incidents (server_id, ip_id, switch_id, switch_port_id, kind, severity, message, value)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, notified_at, ack_at`,
+    [serverId, ipId, switchId, switchPortId, kind, severity, message, value],
   );
 
   log(`رویداد باز شد: ${kind} — ${message}`);
@@ -37,7 +48,14 @@ export async function openIncident({ serverId = null, ipId = null, kind, severit
 }
 
 /** بستن رویداد باز از این نوع، و در صورت لزوم پیامک بازیابی */
-export async function resolveIncident({ serverId = null, ipId = null, kind, recoveryMessage = null }) {
+export async function resolveIncident({
+  serverId = null,
+  ipId = null,
+  switchId = null,
+  switchPortId = null,
+  kind,
+  recoveryMessage = null,
+}) {
   const row = await q1(
     `UPDATE incidents SET resolved_at = now()
       WHERE id = (
@@ -45,10 +63,12 @@ export async function resolveIncident({ serverId = null, ipId = null, kind, reco
          WHERE resolved_at IS NULL AND kind = $1
            AND server_id IS NOT DISTINCT FROM $2
            AND ip_id IS NOT DISTINCT FROM $3
+           AND switch_id IS NOT DISTINCT FROM $4
+           AND switch_port_id IS NOT DISTINCT FROM $5
          ORDER BY started_at DESC LIMIT 1
       )
       RETURNING id, notified_at, started_at`,
-    [kind, serverId, ipId],
+    [kind, serverId, ipId, switchId, switchPortId],
   );
 
   if (!row) return null;
@@ -76,10 +96,13 @@ export async function dispatchNotifications() {
     `SELECT i.id, i.kind, i.severity, i.message, i.notified_at, i.started_at,
             s.name AS server_name, host(s.main_ip) AS server_ip,
             host(a.ip) AS ip_addr,
+            w.name AS switch_name, sp.name AS port_name,
             COALESCE(r.send_sms, TRUE) AS send_sms
        FROM incidents i
        LEFT JOIN servers s      ON s.id = i.server_id
        LEFT JOIN ip_addresses a ON a.id = i.ip_id
+       LEFT JOIN switches w     ON w.id = i.switch_id
+       LEFT JOIN switch_ports sp ON sp.id = i.switch_port_id
        LEFT JOIN LATERAL (
          SELECT send_sms FROM alert_rules
           WHERE enabled AND kind = i.kind
@@ -101,7 +124,10 @@ export async function dispatchNotifications() {
       continue;
     }
 
-    const target = inc.server_name ? `${inc.server_name} (${inc.server_ip})` : inc.ip_addr || 'نامشخص';
+    const sw = inc.switch_name ? `سوییچ ${inc.switch_name}${inc.port_name ? ` / ${inc.port_name}` : ''}` : null;
+    const target = inc.server_name
+      ? `${inc.server_name} (${inc.server_ip})${sw ? ` — ${sw}` : ''}`
+      : sw || inc.ip_addr || 'نامشخص';
     const repeat = inc.notified_at ? '\n[یادآوری — مشکل هنوز باز است]' : '';
     const text = `پاسارگاد میزبان — هشدار\n${target}\n${inc.message}\nساعت ${clock()}${repeat}`;
 

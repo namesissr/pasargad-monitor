@@ -69,6 +69,19 @@ export async function requireUser(): Promise<SessionPayload> {
   return user;
 }
 
+/**
+ * فقط نقش admin.
+ *
+ * requireUser همه کارکنان را می‌پذیرد — operator و viewer هم. برای کاری
+ * که روی تجهیزات واقعی اثر دارد (خاموش کردن پورت سوییچ) یا راز ذخیره
+ * می‌کند (گذرواژه سوییچ)، این کافی نیست.
+ */
+export async function requireAdmin(): Promise<SessionPayload> {
+  const user = await requireUser();
+  if (user.role !== 'admin') throw new ForbiddenError('این کار فقط از حساب مدیر ممکن است');
+  return user;
+}
+
 export class ForbiddenError extends Error {
   constructor(message = 'به این بخش دسترسی ندارید') {
     super(message);

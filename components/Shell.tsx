@@ -16,6 +16,7 @@ const NAV = [
     { href: '/datacenters', label: 'دیتاسنترها', icon: '⬡' },
     { href: '/ips', label: 'آی‌پی‌ها', icon: '◈' },
     { href: '/virtualizor', label: 'هایپروایزرها', icon: '⧉' },
+    { href: '/switches', label: 'سوییچ‌ها', icon: '⇄' },
   ]},
   { group: 'مشتریان', items: [
     { href: '/customers', label: 'مشتریان', icon: '☺' },
