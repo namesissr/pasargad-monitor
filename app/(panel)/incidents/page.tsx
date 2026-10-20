@@ -37,7 +37,7 @@ interface IncidentData {
 
 const KINDS = [
   'all', 'down', 'agent_lost', 'cpu', 'ram', 'disk', 'traffic', 'ip_down',
-  'switch_down', 'switch_env', 'switch_cpu', 'port_down',
+  'switch_down', 'switch_env', 'switch_cpu', 'port_down', 'port_saturated', 'port_errors', 'port_flapping',
 ];
 
 export default function IncidentsPage() {

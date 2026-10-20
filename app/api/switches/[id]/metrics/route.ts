@@ -11,6 +11,7 @@ export const dynamic = 'force-dynamic';
  * بدون port_id: پردازنده، حافظه و دمای خود سوییچ.
  * با port_id: سرعت و حجم ورودی/خروجی پورت.
  * با port_id و view=daily: مصرف روزانه پورت برای جدول.
+ * با port_id و view=events: تاریخچه قطع و وصل پورت.
  *
  * منبع با طول بازه عوض می‌شود — همان قاعده نمودار سرورها.
  */
@@ -53,6 +54,22 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           [portId, days],
         );
         return ok({ days: rows });
+      }
+
+      if (url.searchParams.get('view') === 'events') {
+        const events = await query(
+          `SELECT ts, oper_up, detail FROM switch_port_events
+            WHERE port_id = $1 ORDER BY ts DESC LIMIT 100`,
+          [portId],
+        );
+        const counts = await queryOne(
+          `SELECT COUNT(*) FILTER (WHERE ts >= now() - interval '1 hour')::int  AS last_hour,
+                  COUNT(*) FILTER (WHERE ts >= now() - interval '24 hours')::int AS last_day,
+                  COUNT(*) FILTER (WHERE ts >= now() - interval '7 days')::int   AS last_week
+             FROM switch_port_events WHERE port_id = $1`,
+          [portId],
+        );
+        return ok({ events, counts });
       }
     }
 

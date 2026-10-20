@@ -1,6 +1,19 @@
 import { randomInt } from 'node:crypto';
 import snmp from 'net-snmp';
-import { portKind, summarizeEnvironment } from './nxapi.mjs';
+import {
+  portKind,
+  summarizeEnvironment,
+  normalizeMac,
+  cleanDescription,
+  cleanConfig,
+  fullPortName,
+  isSafePortName,
+  interfaceBlock,
+  parseServicePolicies,
+  rateFromPolicy,
+  rateLimitSnippet,
+} from './nxapi.mjs';
+import { TransferError, expectFile, offerFile } from './transfer.mjs';
 import { formatDuration } from './format.mjs';
 
 /**
@@ -101,12 +114,38 @@ const O = {
   entPhysicalSerialNum: '1.3.6.1.2.1.47.1.1.1.1.11',
   entPhysicalModelName: '1.3.6.1.2.1.47.1.1.1.1.13',
 
+  // LLDP-MIB: اندیس lldpRemTable = timeMark.localPortNum.remIndex
+  lldpLocPortId: '1.0.8802.1.1.2.1.3.7.1.3',
+  lldpLocPortDesc: '1.0.8802.1.1.2.1.3.7.1.4',
+  lldpRemChassisId: '1.0.8802.1.1.2.1.4.1.1.5',
+  lldpRemPortId: '1.0.8802.1.1.2.1.4.1.1.7',
+  lldpRemPortDesc: '1.0.8802.1.1.2.1.4.1.1.8',
+  lldpRemSysName: '1.0.8802.1.1.2.1.4.1.1.9',
+  lldpRemSysDesc: '1.0.8802.1.1.2.1.4.1.1.10',
+  // CISCO-CDP-MIB: اندیس cdpCacheTable = ifIndex.deviceIndex
+  cdpCacheAddress: '1.3.6.1.4.1.9.9.23.1.2.1.1.4',
+  cdpCacheDeviceId: '1.3.6.1.4.1.9.9.23.1.2.1.1.6',
+  cdpCacheDevicePort: '1.3.6.1.4.1.9.9.23.1.2.1.1.7',
+  cdpCachePlatform: '1.3.6.1.4.1.9.9.23.1.2.1.1.8',
+  // جدول MAC: Q-BRIDGE (fdbId.mac) و BRIDGE-MIB قدیمی (mac)
+  dot1qTpFdbPort: '1.3.6.1.2.1.17.7.1.2.2.1.2',
+  dot1dTpFdbPort: '1.3.6.1.2.1.17.4.3.1.2',
+  // ARP: اندیس ipNetToMedia = ifIndex.a.b.c.d
+  ipNetToMediaPhysAddress: '1.3.6.1.2.1.4.22.1.2',
+
   // CISCO-CONFIG-COPY-MIB ccCopyEntry
+  ccCopyProtocol: '1.3.6.1.4.1.9.9.96.1.1.1.1.2',
   ccCopySourceFileType: '1.3.6.1.4.1.9.9.96.1.1.1.1.3',
   ccCopyDestFileType: '1.3.6.1.4.1.9.9.96.1.1.1.1.4',
+  ccCopyServerAddress: '1.3.6.1.4.1.9.9.96.1.1.1.1.5',
+  ccCopyFileName: '1.3.6.1.4.1.9.9.96.1.1.1.1.6',
+  ccCopyUserName: '1.3.6.1.4.1.9.9.96.1.1.1.1.7',
+  ccCopyUserPassword: '1.3.6.1.4.1.9.9.96.1.1.1.1.8',
   ccCopyState: '1.3.6.1.4.1.9.9.96.1.1.1.1.10',
   ccCopyFailCause: '1.3.6.1.4.1.9.9.96.1.1.1.1.13',
   ccCopyEntryRowStatus: '1.3.6.1.4.1.9.9.96.1.1.1.1.14',
+  ccCopyServerAddressType: '1.3.6.1.4.1.9.9.96.1.1.1.1.15',
+  ccCopyServerAddressRev1: '1.3.6.1.4.1.9.9.96.1.1.1.1.16',
 };
 
 // شماره سازمان در sysObjectID ← برند
@@ -147,7 +186,7 @@ export class SnmpError extends Error {
 /** پیام قابل اقدام برای خطای SNMP */
 export function explainSnmpError(err) {
   if (!err) return 'خطای ناشناخته';
-  if (err instanceof SnmpError) return err.hint;
+  if (err instanceof SnmpError || err instanceof TransferError) return err.hint;
   const name = err.name || '';
   const msg = String(err.message || '');
   if (name === 'RequestTimedOutError' || /timed out/i.test(msg)) {
@@ -412,6 +451,8 @@ export function buildPorts(cols, uptimeTicks, extra = {}) {
       out_rate_bps: null,
       if_index: Number(idx),
       counter_bits: hc ? 64 : 32,
+      // برای تشخیص قطع و وصلی که بین دو خواندن رخ داده و برگشته
+      last_change_ticks: lc,
     });
   }
   return ports;
@@ -544,6 +585,15 @@ export function buildEnvironment(c) {
   return summarizeEnvironment(temps, fans, psus);
 }
 
+/** خانواده سیستم‌عامل سیسکو از sysDescr؛ نحو فرمان‌های پیکربندی به آن بستگی دارد */
+export function osFamilyOf(descr) {
+  const d = String(descr ?? '');
+  if (/NX-OS/i.test(d)) return 'nxos';
+  if (/IOS[ -]XE/i.test(d)) return 'iosxe';
+  if (/Cisco IOS/i.test(d)) return 'ios';
+  return null;
+}
+
 /** «Version 9.3(8)» از sysDescr سیسکو، و الگوهای رایج بقیه */
 export function versionFromDescr(descr) {
   const s = String(descr ?? '');
@@ -553,6 +603,99 @@ export function versionFromDescr(descr) {
     /JUNOS\s+([0-9][\w.-]*)/i.exec(s) ||
     /\bV(\d{3}R\d{3}\w*)/.exec(s);
   return m ? m[1].replace(/,$/, '') : null;
+}
+
+// ── کشف ────────────────────────────────────────────────────
+
+/** شش عدد انتهای اندیس OID به MAC */
+function macFromIndex(parts) {
+  if (parts.length < 6) return null;
+  const bytes = parts.slice(-6).map(Number);
+  if (bytes.some((b) => !Number.isInteger(b) || b < 0 || b > 255)) return null;
+  return bytes.map((b) => b.toString(16).padStart(2, '0')).join(':');
+}
+
+/**
+ * ستون‌های کشف ← همسایه‌ها، MACها و ARP به همان شکلی که NX-API می‌دهد.
+ * nameOf: ifIndex ← نام پورت، از همان خواندن.
+ */
+export function buildDiscovery(c, nameOf) {
+  const portOf = (ifIndex) => nameOf.get(String(ifIndex)) ?? null;
+  const portNames = new Set(nameOf.values());
+
+  // LLDP: شماره پورت محلی گاهی همان ifIndex است و گاهی شماره جدا که نامش
+  // در lldpLocPortId یا lldpLocPortDesc است
+  const localPort = (num) => {
+    for (const key of ['lldpLocPortId', 'lldpLocPortDesc']) {
+      const v = str(c[key]?.get(String(num)));
+      if (v && portNames.has(v)) return v;
+    }
+    return portOf(num);
+  };
+
+  const neighbors = [];
+  for (const [idx, sysName] of c.lldpRemSysName ?? []) {
+    const parts = idx.split('.');
+    if (parts.length < 3) continue;
+    const port = localPort(parts[1]);
+    if (!port) continue;
+    const pid = c.lldpRemPortId?.get(idx);
+    neighbors.push({
+      port,
+      proto: 'lldp',
+      sys_name: str(sysName),
+      port_id: Buffer.isBuffer(pid) && pid.length === 6 ? normalizeMac(pid) : str(pid),
+      port_desc: str(c.lldpRemPortDesc?.get(idx)),
+      platform: str(c.lldpRemSysDesc?.get(idx))?.slice(0, 120) ?? null,
+      mgmt_ip: null,
+      chassis_id: Buffer.isBuffer(c.lldpRemChassisId?.get(idx)) && c.lldpRemChassisId.get(idx).length === 6
+        ? normalizeMac(c.lldpRemChassisId.get(idx))
+        : str(c.lldpRemChassisId?.get(idx)),
+      caps: [],
+    });
+  }
+  for (const [idx, devId] of c.cdpCacheDeviceId ?? []) {
+    const [ifIndex] = idx.split('.');
+    const port = portOf(ifIndex);
+    if (!port) continue;
+    const addr = c.cdpCacheAddress?.get(idx);
+    neighbors.push({
+      port,
+      proto: 'cdp',
+      sys_name: str(devId)?.replace(/\(.*\)$/, '').trim() ?? null,
+      port_id: str(c.cdpCacheDevicePort?.get(idx)),
+      port_desc: null,
+      platform: str(c.cdpCachePlatform?.get(idx)),
+      mgmt_ip: Buffer.isBuffer(addr) && addr.length === 4 ? [...addr].join('.') : null,
+      chassis_id: null,
+      caps: [],
+    });
+  }
+
+  // MAC: Q-BRIDGE اگر بود، وگرنه BRIDGE-MIB. مقدار شماره پورت پل است، نه ifIndex.
+  const bridgeToIf = new Map([...(c.basePortIfIndex ?? [])].map(([bp, ifi]) => [bp, String(num(ifi))]));
+  const ifOfBridge = (bp) => bridgeToIf.get(String(bp)) ?? String(bp);
+  const macs = [];
+  const qb = c.qFdbPort?.size ? c.qFdbPort : null;
+  for (const [idx, bp] of qb ?? c.dFdbPort ?? []) {
+    const parts = idx.split('.');
+    const mac = macFromIndex(parts);
+    const port = portOf(ifOfBridge(num(bp)));
+    if (!mac || !port || !num(bp)) continue;
+    macs.push({ port, mac, vlan: qb && parts.length >= 7 ? parts[0] : null });
+  }
+
+  const arp = [];
+  for (const [idx, phys] of c.arpPhys ?? []) {
+    const parts = idx.split('.');
+    if (parts.length < 5) continue;
+    const ip = parts.slice(-4).join('.');
+    const mac = normalizeMac(phys);
+    if (!mac || mac === '00:00:00:00:00:00') continue;
+    arp.push({ ip, mac, iface: portOf(parts[0]) });
+  }
+
+  return { neighbors, macs, arp };
 }
 
 // ── خواندن ─────────────────────────────────────────────────
@@ -670,6 +813,51 @@ async function readEntity(s, soft) {
   };
 }
 
+async function readDiscovery(s, ports, soft) {
+  const nameOf = new Map(ports.map((p) => [String(p.if_index), p.name]));
+  const c = {};
+  const w = async (key, oid, rep = 40) => {
+    c[key] = (await soft(walk(s, oid, rep))) ?? new Map();
+  };
+  await w('lldpRemSysName', O.lldpRemSysName);
+  if (c.lldpRemSysName.size) {
+    await w('lldpRemPortId', O.lldpRemPortId);
+    await w('lldpRemPortDesc', O.lldpRemPortDesc);
+    await w('lldpRemSysDesc', O.lldpRemSysDesc);
+    await w('lldpRemChassisId', O.lldpRemChassisId);
+    await w('lldpLocPortId', O.lldpLocPortId);
+    await w('lldpLocPortDesc', O.lldpLocPortDesc);
+  }
+  await w('cdpCacheDeviceId', O.cdpCacheDeviceId);
+  if (c.cdpCacheDeviceId.size) {
+    await w('cdpCacheDevicePort', O.cdpCacheDevicePort);
+    await w('cdpCachePlatform', O.cdpCachePlatform);
+    await w('cdpCacheAddress', O.cdpCacheAddress);
+  }
+  await w('qFdbPort', O.dot1qTpFdbPort, 60);
+  if (!c.qFdbPort.size) await w('dFdbPort', O.dot1dTpFdbPort, 60);
+  if (c.qFdbPort.size || c.dFdbPort?.size) await w('basePortIfIndex', O.dot1dBasePortIfIndex);
+  await w('arpPhys', O.ipNetToMediaPhysAddress, 60);
+  return buildDiscovery(c, nameOf);
+}
+
+/**
+ * آیا ifIndex هنوز همان پورت است؟ روی سوییچی که پس از ریبوت شماره‌ها را
+ * عوض کرده، بدون این بررسی فرمان روی پورت مشتری دیگری می‌نشست.
+ */
+async function assertIfName(s, idx, portName) {
+  const r = await getOids(s, [`${O.ifName}.${idx}`, `${O.ifDescr}.${idx}`]);
+  const names = [str(r.get(`${O.ifName}.${idx}`)), str(r.get(`${O.ifDescr}.${idx}`))].filter(Boolean);
+  const expected = String(portName).replace(/ #\d+$/, '');
+  if (!names.includes(expected)) {
+    throw new SnmpError(
+      'نام اینترفیس عوض شده',
+      `شماره اینترفیس ${idx} حالا «${names[0] ?? 'ناموجود'}» است نه «${expected}» — شماره‌ها روی سوییچ عوض شده‌اند. ` +
+        'فرمان اجرا نشد؛ پس از خواندن بعدی دوباره تلاش کنید.',
+    );
+  }
+}
+
 const IF_COLUMNS = [
   'ifDescr', 'ifType', 'ifMtu', 'ifSpeed', 'ifPhysAddress', 'ifAdminStatus', 'ifOperStatus',
   'ifLastChange', 'ifInOctets', 'ifInDiscards', 'ifInErrors', 'ifOutOctets', 'ifOutDiscards',
@@ -682,9 +870,180 @@ const IF_COLUMNS = [
  * همه درخواست‌های یک خواندن روی یک نشست UDP است و نشست در پایان بسته
  * می‌شود؛ هیچ سوکتی بین دو خواندن باز نمی‌ماند.
  */
+// ── انتقال پیکربندی (CISCO-CONFIG-COPY-MIB) ─────────────────
+
+const TRANSFERS = ['sftp', 'tftp'];
+const PROTOCOL = { tftp: 1, sftp: 5 };
+const FILE = { networkFile: 1, startupConfig: 3, runningConfig: 4 };
+const FAIL_CAUSE = {
+  1: 'علت نامعلوم',
+  2: 'نام یا مسیر فایل پذیرفته نشد',
+  3: 'اتصال سوییچ به سرور پنل تایم‌اوت شد — سوییچ به آدرس سرور پنل راه ندارد، یا پورت ۲۲ (SFTP) یا UDP ۶۹ (TFTP) بسته است',
+  4: 'حافظه سوییچ کافی نبود',
+  5: 'پیکربندی‌ای برای کپی نیست',
+  6: 'سوییچ این روش انتقال را پشتیبانی نمی‌کند',
+  7: 'بخشی از پیکربندی پذیرفته نشد',
+  8: 'سوییچ آماده نیست',
+  9: 'کپی لغو شد',
+};
+
+/** نام پورت به شکل پیکربندی نکسوس؛ ifName ممکن است کوتاه باشد (Eth1/1) */
+function configPortName(port) {
+  const name = fullPortName(port.name);
+  if (!isSafePortName(name)) throw new SnmpError('پورت نامعتبر', `روی ${port.name} از پنل فرمان اجرا نمی‌شود`);
+  return name;
+}
+
+function policiesOf(config, name) {
+  const block = interfaceBlock(config, name);
+  if (!block) throw new SnmpError('اینترفیس پیدا نشد', `بلوک «interface ${name}» در running-config نیست`);
+  const raw = parseServicePolicies(block);
+  return {
+    raw,
+    input: rateFromPolicy(raw.input),
+    output: rateFromPolicy(raw.output),
+    foreign: [raw.input, raw.output].filter((x) => x && rateFromPolicy(x) === null),
+  };
+}
+
+/** تنظیمات انتقال: sw.transfer را ورکر از تنظیمات پنل می‌گذارد */
+function transferOf(sw) {
+  const protocol = sw.config_transfer;
+  if (!TRANSFERS.includes(protocol)) {
+    throw new SnmpError('روش انتقال ندارد', 'برای این سوییچ روش انتقال فایل (SFTP یا TFTP) در ویرایش سوییچ انتخاب نشده');
+  }
+  const t = sw.transfer ?? {};
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(t.host ?? ''))) {
+    throw new SnmpError('آدرس سرور پنل نیست', 'در تنظیمات ← پایش «آدرس سرور پنل از دید سوییچ» (IPv4) را بدهید');
+  }
+  if (protocol === 'sftp' && (!t.user || !t.pass)) {
+    throw new SnmpError('کاربر SFTP نیست', 'در تنظیمات ← پایش کاربر و گذرواژه SFTP سرور پنل را بدهید');
+  }
+  return { protocol, ...t };
+}
+
+async function pullRunning(sw) {
+  const t = transferOf(sw);
+  const slot = await expectFile(t.protocol, t);
+  const s = openSession(sw, { write: true });
+  try {
+    await configCopy(
+      s,
+      { protocol: t.protocol, source: FILE.runningConfig, dest: FILE.networkFile, server: t.host, fileName: slot.fileName, user: t.user, pass: t.pass },
+      { timeoutSec: 120, what: 'خواندن running-config' },
+    );
+    return await slot.read();
+  } finally {
+    s.close();
+    await slot.cleanup();
+  }
+}
+
+async function pushRunning(sw, text) {
+  const t = transferOf(sw);
+  const slot = await offerFile(t.protocol, t, text);
+  const s = openSession(sw, { write: true });
+  try {
+    return await configCopy(
+      s,
+      { protocol: t.protocol, source: FILE.networkFile, dest: FILE.runningConfig, server: t.host, fileName: slot.fileName, user: t.user, pass: t.pass },
+      { timeoutSec: 90, what: 'اعمال پیکربندی', allowPartial: true },
+    );
+  } finally {
+    s.close();
+    await slot.cleanup();
+  }
+}
+
+/**
+ * یک کپی با ccCopyTable. ردیف موقت با شماره تصادفی ساخته، تا پایان دنبال و
+ * بعد پاک می‌شود.
+ *
+ * روش‌ها، به همین ترتیب تا یکی پذیرفته شود:
+ *   ۱. روش مستند سیسکو: همه ستون‌ها و createAndGo در یک SET.
+ *   ۲. روش استاندارد RFC 2579: createAndWait، ستون‌ها، active.
+ * و برای آدرس سرور: ccCopyServerAddressRev1 (تازه)، وگرنه ccCopyServerAddress
+ * (قدیمی، فقط IPv4) برای نسخه‌هایی که ستون تازه را ندارند.
+ */
+export function copyVarbinds(row, spec, addrStyle) {
+  const int = (oid, value) => ({ oid: `${oid}.${row}`, type: snmp.ObjectType.Integer, value });
+  const oct = (oid, value) => ({ oid: `${oid}.${row}`, type: snmp.ObjectType.OctetString, value });
+  const vbs = [int(O.ccCopySourceFileType, spec.source), int(O.ccCopyDestFileType, spec.dest)];
+  if (spec.protocol) {
+    vbs.unshift(int(O.ccCopyProtocol, PROTOCOL[spec.protocol]));
+    if (addrStyle === 'rev1') {
+      vbs.push(int(O.ccCopyServerAddressType, 1), oct(O.ccCopyServerAddressRev1, Buffer.from(spec.server.split('.').map(Number))));
+    } else {
+      vbs.push({ oid: `${O.ccCopyServerAddress}.${row}`, type: snmp.ObjectType.IpAddress, value: spec.server });
+    }
+    vbs.push(oct(O.ccCopyFileName, spec.fileName));
+    if (spec.protocol === 'sftp') vbs.push(oct(O.ccCopyUserName, spec.user), oct(O.ccCopyUserPassword, spec.pass));
+  }
+  return vbs;
+}
+
+async function configCopy(s, spec, { timeoutSec, what, allowPartial = false }) {
+  const status = (row, value) => ({ oid: `${O.ccCopyEntryRowStatus}.${row}`, type: snmp.ObjectType.Integer, value });
+  const styles = spec.protocol ? ['rev1', 'legacy'] : [null];
+  const attempts = [];
+  for (const mode of ['go', 'wait']) for (const a of styles) attempts.push([mode, a]);
+
+  const rows = [];
+  try {
+    let row = null;
+    let lastErr = null;
+    for (const [mode, addr] of attempts) {
+      row = randomInt(1, 2 ** 31 - 1);
+      rows.push(row);
+      try {
+        if (mode === 'go') {
+          await setOids(s, [...copyVarbinds(row, spec, addr), status(row, 4)]); // createAndGo
+        } else {
+          await setOids(s, [status(row, 5)]); // createAndWait
+          await setOids(s, copyVarbinds(row, spec, addr));
+          await setOids(s, [status(row, 1)]); // active
+        }
+        lastErr = null;
+        break;
+      } catch (err) {
+        // تایم‌اوت یا نبود اجازه نوشتن با روش دیگر هم حل نمی‌شود
+        if (err?.name === 'RequestTimedOutError' || /اجازه نوشتن/.test(explainSnmpError(err))) throw err;
+        lastErr = err;
+      }
+    }
+    if (lastErr) throw lastErr;
+
+    for (let i = 0; i < timeoutSec; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const r = await getOids(s, [`${O.ccCopyState}.${row}`, `${O.ccCopyFailCause}.${row}`]);
+      const state = num(r.get(`${O.ccCopyState}.${row}`));
+      if (state === 3) return { partial: false };
+      if (state === 4) {
+        const cause = num(r.get(`${O.ccCopyFailCause}.${row}`));
+        if (cause === 7 && allowPartial) return { partial: true };
+        // سیسکو خطای ورود SFTP را «نامعلوم» گزارش می‌کند
+        const why =
+          cause === 1 && spec.protocol === 'sftp'
+            ? 'علت نامعلوم — کاربر و گذرواژه SFTP در تنظیمات، دسترسی سوییچ به پورت ۲۲ سرور پنل، و پذیرش کلید میزبان (docs/switches.md) را بررسی کنید'
+            : FAIL_CAUSE[cause] ?? `ccCopyFailCause=${cause ?? '?'}`;
+        throw new SnmpError(`${what} ناموفق`, `${what} انجام نشد: ${why}`);
+      }
+    }
+    throw new SnmpError(`${what} تمام نشد`, `${what} تا ${timeoutSec} ثانیه تمام نشد`);
+  } finally {
+    for (const row of rows) await setOids(s, [status(row, 6)]).catch(() => {}); // destroy
+  }
+}
+
 export const snmpDriver = {
   canWrite: (sw) => (sw.snmp_version === '3' ? Boolean(sw.snmp_write) : Boolean(sw.snmp_write_community)),
   canSave: (sw) => sw.vendor === 'cisco',
+  // توضیح پورت با ifAlias: هر جا نوشتن مجاز باشد
+  canDescribe: (sw) => snmpDriver.canWrite(sw),
+  // فقط سیسکو (CISCO-CONFIG-COPY-MIB)، با روش انتقال فایل و اجازه نوشتن
+  canBackup: (sw) => sw.vendor === 'cisco' && TRANSFERS.includes(sw.config_transfer) && snmpDriver.canWrite(sw),
+  // نحو policy-map همان نکسوس است؛ IOS نحو دیگری دارد
+  canRateLimit: (sw) => snmpDriver.canBackup(sw) && sw.os_family === 'nxos',
   explain: explainSnmpError,
 
   async collect(sw, due) {
@@ -720,6 +1079,7 @@ export const snmpDriver = {
 
       const res = await readResources(s, vendor, soft);
       const env = due('env') ? await readEnvironment(s, vendor, soft) : null;
+      const discovery = due('nbr') ? await readDiscovery(s, ports, soft) : null;
 
       let ver = {
         hostname: str(sys.get(O.sysName)),
@@ -727,6 +1087,7 @@ export const snmpDriver = {
         vendor,
         sys_object_id: sysObjectId,
         os_version: versionFromDescr(descr),
+        os_family: vendor === 'cisco' ? osFamilyOf(descr) : null,
         model: null,
         serial: null,
       };
@@ -740,7 +1101,7 @@ export const snmpDriver = {
         };
       }
       // نبود یک MIB اختیاری خطا نیست؛ فقط خطاهای واقعی (تایم‌اوت وسط کار) می‌مانند
-      return { ports, res, ver, env, xcvr: null, notes: [...new Set(notes)] };
+      return { ports, res, ver, env, xcvr: null, notes: [...new Set(notes)], discovery };
     } finally {
       s.close();
     }
@@ -760,16 +1121,7 @@ export const snmpDriver = {
     }
     const s = openSession(sw, { write: true });
     try {
-      const r = await getOids(s, [`${O.ifName}.${idx}`, `${O.ifDescr}.${idx}`]);
-      const names = [str(r.get(`${O.ifName}.${idx}`)), str(r.get(`${O.ifDescr}.${idx}`))].filter(Boolean);
-      const expected = String(port.name).replace(/ #\d+$/, '');
-      if (!names.includes(expected)) {
-        throw new SnmpError(
-          'نام اینترفیس عوض شده',
-          `شماره اینترفیس ${idx} حالا «${names[0] ?? 'ناموجود'}» است نه «${expected}» — شماره‌ها روی سوییچ عوض شده‌اند. ` +
-            'فرمان اجرا نشد؛ پس از خواندن بعدی دوباره تلاش کنید.',
-        );
-      }
+      await assertIfName(s, idx, port.name);
       await setOids(s, [{ oid: `${O.ifAdminStatus}.${idx}`, type: snmp.ObjectType.Integer, value: up ? 1 : 2 }]);
     } finally {
       s.close();
@@ -790,42 +1142,65 @@ export const snmpDriver = {
       throw new SnmpError('پشتیبانی نمی‌شود', 'ذخیره پیکربندی با SNMP فقط روی سیسکو پشتیبانی می‌شود');
     }
     const s = openSession(sw, { write: true });
-    const rows = [];
-    const int = (oid, value) => ({ oid, type: snmp.ObjectType.Integer, value });
     try {
-      let row = randomInt(1, 2 ** 31 - 1);
-      rows.push(row);
-      try {
-        await setOids(s, [
-          int(`${O.ccCopySourceFileType}.${row}`, 4), // runningConfig
-          int(`${O.ccCopyDestFileType}.${row}`, 3), // startupConfig
-          int(`${O.ccCopyEntryRowStatus}.${row}`, 4), // createAndGo
-        ]);
-      } catch (first) {
-        // تایم‌اوت یا نبود اجازه نوشتن با روش دوم هم حل نمی‌شود
-        if (first?.name === 'RequestTimedOutError' || /اجازه نوشتن/.test(explainSnmpError(first))) throw first;
-        row = randomInt(1, 2 ** 31 - 1);
-        rows.push(row);
-        await setOids(s, [int(`${O.ccCopyEntryRowStatus}.${row}`, 5)]); // createAndWait
-        await setOids(s, [int(`${O.ccCopySourceFileType}.${row}`, 4), int(`${O.ccCopyDestFileType}.${row}`, 3)]);
-        await setOids(s, [int(`${O.ccCopyEntryRowStatus}.${row}`, 1)]); // active
-      }
-
-      for (let i = 0; i < 60; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const r = await getOids(s, [`${O.ccCopyState}.${row}`, `${O.ccCopyFailCause}.${row}`]);
-        const state = num(r.get(`${O.ccCopyState}.${row}`));
-        if (state === 3) return;
-        if (state === 4) {
-          const cause = num(r.get(`${O.ccCopyFailCause}.${row}`));
-          throw new SnmpError('ذخیره ناموفق', `سوییچ ذخیره را انجام نداد (ccCopyFailCause=${cause ?? '?'})`);
-        }
-      }
-      throw new SnmpError('ذخیره تمام نشد', 'ذخیره پیکربندی تا یک دقیقه تمام نشد');
+      await configCopy(s, { source: FILE.runningConfig, dest: FILE.startupConfig }, { timeoutSec: 60, what: 'ذخیره پیکربندی' });
     } finally {
-      for (const row of rows) {
-        await setOids(s, [int(`${O.ccCopyEntryRowStatus}.${row}`, 6)]).catch(() => {}); // destroy
+      s.close();
+    }
+  },
+
+  /** پشتیبان: running-config از راه انتقال فایل */
+  async backup(sw) {
+    return cleanConfig(await pullRunning(sw));
+  },
+
+  async readRateLimit(sw, port) {
+    const name = configPortName(port);
+    return policiesOf(await pullRunning(sw), name);
+  },
+
+  /**
+   * محدودیت سرعت روی نکسوس با SNMP: همان policer مسیر NX-API، ولی به شکل
+   * تکه پیکربندی که سوییچ از سرور پنل برمی‌دارد و در running-config ادغام
+   * می‌کند. پیش و پس از آن running-config خوانده می‌شود: پیش از آن برای
+   * اینکه policy بیگانه دست نخورد، پس از آن چون «کپی موفق» یعنی فایل
+   * رسید، نه اینکه هر خطش پذیرفته شد.
+   */
+  async setRateLimit(sw, port, mbps) {
+    if (!snmpDriver.canRateLimit(sw)) {
+      throw new SnmpError('پشتیبانی نمی‌شود', 'محدودیت سرعت با SNMP فقط برای Cisco Nexus با روش انتقال فایل و اجازه نوشتن است');
+    }
+    if (!Number.isInteger(mbps) || mbps < 0) throw new SnmpError('سرعت نامعتبر', 'سرعت نامعتبر است');
+    const name = configPortName(port);
+    const before = policiesOf(await pullRunning(sw), name);
+    for (const dir of ['input', 'output']) {
+      if (before.raw[dir] && before[dir] === null) {
+        const msg = `روی ${dir === 'input' ? 'ورودی' : 'خروجی'} این پورت policy دیگری (${before.raw[dir]}) هست که پنل نگذاشته؛ دست نخورد`;
+        throw new SnmpError(msg, msg);
       }
+    }
+    const pushed = await pushRunning(sw, rateLimitSnippet(name, before.raw, mbps));
+    const after = policiesOf(await pullRunning(sw), name);
+    const outputOk = !mbps || after.output === mbps;
+    return {
+      input: mbps ? after.input === mbps : false,
+      output: mbps ? outputOk : false,
+      outputError: outputOk ? null : pushed.partial ? 'سوییچ بخشی از پیکربندی را نپذیرفت' : 'policer خروجی پذیرفته نشد',
+      actual: after,
+    };
+  },
+
+  /** توضیح پورت با ifAlias (حداکثر ۶۴ نویسه در IF-MIB). همان بررسی نام ifIndex. */
+  async setDescription(sw, port, text) {
+    const d = cleanDescription(text, 64);
+    if (!d.ok) throw new SnmpError(d.error);
+    const idx = Number(port.if_index);
+    if (!Number.isInteger(idx) || idx <= 0) throw new SnmpError('شماره اینترفیس معلوم نیست', 'شماره اینترفیس این پورت هنوز خوانده نشده');
+    const s = openSession(sw, { write: true });
+    try {
+      await assertIfName(s, idx, port.name);
+      await setOids(s, [{ oid: `${O.ifAlias}.${idx}`, type: snmp.ObjectType.OctetString, value: d.value }]);
+    } finally {
       s.close();
     }
   },

@@ -23,6 +23,7 @@ interface SettingsData {
   emailConfigured: boolean;
   /** رمز SMTP هرگز برنمی‌گردد؛ فقط اینکه تنظیم شده یا نه */
   smtpPassSet: boolean;
+  switchSftpPassSet?: boolean;
   /** توکن درگاه هم همین‌طور */
   paypingTokenSet: boolean;
   recentSms: { id: number; recipient: string; body: string; ok: boolean; error: string | null; created_at: string }[];
@@ -824,11 +825,58 @@ export default function SettingsPage() {
           <Field label="آستانه پردازنده سوییچ (درصد)" hint="میانگین پنج دقیقه؛ صفر یعنی بدون هشدار">
             <input className="input ltr" value={form.switch_cpu_threshold ?? ''} onChange={set('switch_cpu_threshold')} />
           </Field>
+          <Field label="آستانه اشباع پورت (درصد)" hint="میانگین پنج دقیقه نسبت به سرعت پورت؛ فقط پورت‌هایی که «هشدار اشباع» دارند. صفر یعنی خاموش">
+            <input className="input ltr" value={form.switch_util_threshold ?? ''} onChange={set('switch_util_threshold')} />
+          </Field>
+          <Field label="آستانه خطای پورت" hint="مجموع خطای ورودی، خروجی و CRC در پانزده دقیقه؛ صفر یعنی خاموش">
+            <input className="input ltr" value={form.switch_err_threshold ?? ''} onChange={set('switch_err_threshold')} />
+          </Field>
+          <Field label="آستانه قطع و وصل پورت" hint="تعداد قطع و وصل در پانزده دقیقه؛ صفر یعنی خاموش">
+            <input className="input ltr" value={form.switch_flap_threshold ?? ''} onChange={set('switch_flap_threshold')} />
+          </Field>
+          <Field label="پشتیبان پیکربندی سوییچ (ساعت)" hint="هر چند ساعت running-config سوییچ‌های NX-API (و سیسکوهای SNMP با انتقال فایل) خوانده شود؛ نسخه فقط اگر عوض شده باشد ذخیره می‌شود. صفر یعنی خاموش">
+            <input className="input ltr" value={form.switch_backup_hours ?? ''} onChange={set('switch_backup_hours')} />
+          </Field>
+          <Field label="نگهداری داده صدک ۹۵ (روز)" hint="تجمیع پنج‌دقیقه‌ای پورت‌ها برای گزارش صدک ۹۵؛ حداقل ۳۵">
+            <input className="input ltr" value={form.switch_5min_days ?? ''} onChange={set('switch_5min_days')} />
+          </Field>
           <Field label="مبنای دوره ماهانه" hint="گروه‌بندی گزارش ماهانه و محاسبه سهمیه">
             <select className="input" value={form.traffic_calendar ?? 'jalali'} onChange={set('traffic_calendar')}>
               <option value="jalali">تقویم شمسی</option>
               <option value="gregorian">تقویم میلادی</option>
             </select>
+          </Field>
+        </div>
+
+        <div className="border-t border-line pt-4 space-y-1">
+          <h3 className="text-xs font-bold">انتقال پیکربندی سوییچ با SNMP (سیسکو)</h3>
+          <p className="text-[11px] text-muted">
+            برای محدودیت سرعت و پشتیبان پیکربندی سوییچ‌هایی که با SNMP اضافه شده‌اند: سوییچ فایل را از این سرور برمی‌دارد
+            یا به آن می‌فرستد (SFTP روی پورت ۲۲، TFTP روی UDP ۶۹). راه‌اندازی در docs/switches.md. فقط مدیر عوضشان می‌کند.
+          </p>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-4">
+          <Field label="آی‌پی سرور پنل از دید سوییچ‌ها" hint="آدرسی که سوییچ از شبکه مدیریت به آن می‌رسد">
+            <input className="input ltr" value={form.switch_transfer_host ?? ''} onChange={set('switch_transfer_host')} placeholder="10.0.0.10" />
+          </Field>
+          <Field label="مسیر پوشه SFTP" hint="از دید کاربر SFTP (داخل chroot)؛ پیش‌فرض /files">
+            <input className="input ltr" value={form.switch_sftp_path ?? ''} onChange={set('switch_sftp_path')} placeholder="/files" />
+          </Field>
+          <Field label="کاربر SFTP" hint="کاربر محدود sshd همین سرور">
+            <input className="input ltr" value={form.switch_sftp_user ?? ''} onChange={set('switch_sftp_user')} autoComplete="off" />
+          </Field>
+          <Field
+            label="گذرواژه SFTP"
+            hint={data.switchSftpPassSet ? 'تنظیم شده — خالی یعنی همان قبلی بماند' : 'هنوز تنظیم نشده'}
+          >
+            <input
+              className="input ltr"
+              type="password"
+              value={form.switch_sftp_pass ?? ''}
+              onChange={set('switch_sftp_pass')}
+              autoComplete="new-password"
+              placeholder={data.switchSftpPassSet ? '••••••••' : ''}
+            />
           </Field>
         </div>
 

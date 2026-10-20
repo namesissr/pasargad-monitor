@@ -25,6 +25,15 @@ const ALLOWED = [
   'check_interval_sec',
   'switch_poll_sec',
   'switch_cpu_threshold',
+  'switch_util_threshold',
+  'switch_err_threshold',
+  'switch_flap_threshold',
+  'switch_backup_hours',
+  'switch_5min_days',
+  'switch_transfer_host',
+  'switch_sftp_user',
+  'switch_sftp_pass',
+  'switch_sftp_path',
   'traffic_calendar',
   'panel_title',
   'email_enabled',
@@ -65,7 +74,13 @@ const ALLOWED = [
  * می‌کند، رمز از شبکه رد می‌شود و در تاریخچه مرورگر و لاگ‌ها می‌نشیند.
  * پنل فقط می‌داند تنظیم شده یا نه.
  */
-const SECRET = ['smtp_pass', 'payping_token'];
+const SECRET = ['smtp_pass', 'payping_token', 'switch_sftp_pass'];
+
+/**
+ * فقط مدیر: سوییچ پیکربندی‌اش (با هش گذرواژه‌ها) را به همین نشانی می‌فرستد.
+ * کسی که نشانی را به سرور خودش عوض کند، پشتیبان بعدی را دریافت می‌کند.
+ */
+const ADMIN_ONLY = ['switch_transfer_host', 'switch_sftp_user', 'switch_sftp_pass', 'switch_sftp_path'];
 
 export async function GET() {
   return handle(async () => {
@@ -82,6 +97,7 @@ export async function GET() {
     const emailConfigured = Boolean(raw.smtp_host && raw.smtp_from);
     const smtpPassSet = Boolean(raw.smtp_pass);
     const paypingTokenSet = Boolean(raw.payping_token);
+    const switchSftpPassSet = Boolean(raw.switch_sftp_pass);
     const recent = await query(
       `SELECT id, recipient, body, ok, error, created_at FROM notifications ORDER BY created_at DESC LIMIT 20`,
     );
@@ -93,6 +109,7 @@ export async function GET() {
       emailConfigured,
       smtpPassSet,
       paypingTokenSet,
+      switchSftpPassSet,
       recentSms: recent,
     });
   });
@@ -100,7 +117,7 @@ export async function GET() {
 
 export async function PATCH(req: Request) {
   return handle(async () => {
-    await requireUser();
+    const user = await requireUser();
     const body = await readJson<Record<string, unknown>>(req);
 
     const patch: Record<string, string> = {};
@@ -137,6 +154,45 @@ export async function PATCH(req: Request) {
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
         return fail('پورت SMTP نامعتبر است', 400);
       }
+    }
+
+    // آستانه‌های سوییچ: عدد نامعتبر در ورکر بی‌صدا پیش‌فرض می‌شد و ادمین
+    // فکر می‌کرد تنظیمش اعمال شده
+    const SWITCH_NUM: Record<string, [number, number, string]> = {
+      switch_util_threshold: [0, 100, 'آستانه اشباع پورت باید بین ۰ تا ۱۰۰ باشد'],
+      switch_err_threshold: [0, 1e9, 'آستانه خطای پورت نامعتبر است'],
+      switch_flap_threshold: [0, 1000, 'آستانه قطع و وصل نامعتبر است'],
+      switch_backup_hours: [0, 24 * 30, 'فاصله پشتیبان‌گیری باید بین ۰ تا ۷۲۰ ساعت باشد'],
+      switch_5min_days: [35, 800, 'نگهداری داده پنج‌دقیقه‌ای باید بین ۳۵ تا ۸۰۰ روز باشد'],
+    };
+    for (const [key, [min, max, msg]] of Object.entries(SWITCH_NUM)) {
+      if (!(key in patch)) continue;
+      const n = Number(patch[key]);
+      if (patch[key].trim() === '' || !Number.isFinite(n) || n < min || n > max) return fail(msg, 400);
+    }
+
+    // صفحه تنظیمات همه فیلدها را می‌فرستد؛ برای غیرمدیر فقط تغییر واقعی رد می‌شود
+    if (user.role !== 'admin' && ADMIN_ONLY.some((k) => k in patch)) {
+      const current = await getSettings(true);
+      for (const k of ADMIN_ONLY) {
+        if (!(k in patch)) continue;
+        if (patch[k] !== (current[k] ?? '')) return fail('نشانی و کاربر انتقال پیکربندی سوییچ را فقط مدیر عوض می‌کند', 403);
+        delete patch[k];
+      }
+    }
+    if ('switch_transfer_host' in patch) {
+      patch.switch_transfer_host = patch.switch_transfer_host.trim();
+      const h = patch.switch_transfer_host;
+      if (h && !(/^\d{1,3}(\.\d{1,3}){3}$/.test(h) && h.split('.').every((x) => Number(x) <= 255))) {
+        return fail('نشانی سرور پنل برای سوییچ‌ها باید آی‌پی نسخه ۴ باشد', 400);
+      }
+    }
+    if ('switch_sftp_user' in patch && !/^[A-Za-z0-9._-]{0,32}$/.test(patch.switch_sftp_user.trim())) {
+      return fail('نام کاربر SFTP نامعتبر است', 400);
+    }
+    if ('switch_sftp_path' in patch) {
+      const sp = patch.switch_sftp_path.trim();
+      if (sp && !/^\/[A-Za-z0-9._\/-]{0,200}$/.test(sp)) return fail('مسیر SFTP باید با / شروع شود، مثل /files', 400);
     }
 
     if (!Object.keys(patch).length) return fail('هیچ تنظیمی برای ذخیره فرستاده نشده است', 400);

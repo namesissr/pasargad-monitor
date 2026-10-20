@@ -79,6 +79,39 @@ export async function GET() {
         LIMIT 30`,
     );
 
+    // سوییچ‌ها: فقط خلاصه. مجموع ترافیک فقط از پورت‌های اترنت، چون
+    // پورت‌چنل جمع همان عضوهاست و دوباره شمرده می‌شد.
+    const switches = await query(
+      `SELECT w.id, w.name, w.status, w.cpu_percent, w.max_temp_c, w.env_ok,
+              CASE WHEN w.mem_total_bytes > 0
+                   THEN w.mem_used_bytes::float8 / w.mem_total_bytes * 100 END AS mem_pct,
+              COUNT(p.id) FILTER (WHERE p.kind = 'ethernet')::int AS ports_total,
+              COUNT(p.id) FILTER (WHERE p.kind = 'ethernet' AND p.oper_up)::int AS ports_up,
+              COALESCE(SUM(p.in_bps) FILTER (WHERE p.kind = 'ethernet'), 0)::float8  AS in_bps,
+              COALESCE(SUM(p.out_bps) FILTER (WHERE p.kind = 'ethernet'), 0)::float8 AS out_bps,
+              (SELECT COUNT(*)::int FROM incidents i WHERE i.switch_id = w.id AND i.resolved_at IS NULL) AS incidents
+         FROM switches w
+         LEFT JOIN switch_ports p ON p.switch_id = w.id AND p.is_present
+        WHERE w.is_active
+        GROUP BY w.id
+        ORDER BY (w.status = 'down') DESC, w.name`,
+    );
+
+    // پرمصرف‌ترین پورت‌ها نسبت به ظرفیت؛ فقط با شمارنده تازه
+    const busyPorts = await query(
+      `SELECT p.id, p.switch_id, w.name AS switch_name, p.name, p.description, s.name AS server_name,
+              p.in_bps::float8 AS in_bps, p.out_bps::float8 AS out_bps, p.speed_mbps,
+              GREATEST(p.in_bps, p.out_bps)::float8 / (p.speed_mbps * 1e6) * 100 AS util
+         FROM switch_ports p
+         JOIN switches w     ON w.id = p.switch_id
+         LEFT JOIN servers s ON s.id = p.server_id
+        WHERE w.is_active AND p.is_present AND p.oper_up AND p.speed_mbps > 0
+          AND p.kind IN ('ethernet', 'port-channel')
+          AND p.counters_at > now() - interval '10 minutes'
+        ORDER BY util DESC NULLS LAST
+        LIMIT 6`,
+    );
+
     // هزینه دوره جاری با همان منطق صفحه حسابداری، از روی داده‌ای که
     // همین کوئری برگردانده — بدون رفت‌وبرگشت اضافه به دیتابیس.
     const cost = { rent: 0, traffic: 0, ip: 0, total: 0 };
@@ -114,6 +147,8 @@ export async function GET() {
 
     return ok({
       servers,
+      switches,
+      busyPorts,
       ipStats,
       incidents,
       cost,

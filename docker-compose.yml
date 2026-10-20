@@ -68,6 +68,14 @@ services:
       ADMIN_PHONE: ${ADMIN_PHONE:-}
       ADMIN_NAME: ${ADMIN_NAME:-}
       TZ: ${REPORT_TZ:-Asia/Tehran}
+    # انتقال پیکربندی سوییچ‌های SNMP (docs/switches.md):
+    #   TFTP  سوییچ به UDP ۶۹ این سرور وصل می‌شود. پیش‌فرض فقط localhost است
+    #         و از بیرون بسته؛ SWITCH_TFTP_BIND را آی‌پی شبکه مدیریت بگذارید.
+    #   SFTP  sshd خود سرور با کاربر محدود؛ پوشه‌اش اینجا به ورکر وصل است.
+    ports:
+      - "${SWITCH_TFTP_BIND:-127.0.0.1}:69:69/udp"
+    volumes:
+      - ${SWITCH_SFTP_DIR:-/srv/pasargad-sftp/files}:/transfer
 
   edge:
     image: nginx:1.27-alpine

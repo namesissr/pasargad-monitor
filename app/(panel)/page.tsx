@@ -43,8 +43,38 @@ interface LiveServer {
   period_tx: number;
 }
 
+interface LiveSwitch {
+  id: number;
+  name: string;
+  status: string;
+  cpu_percent: number | null;
+  mem_pct: number | null;
+  max_temp_c: number | null;
+  env_ok: boolean | null;
+  ports_total: number;
+  ports_up: number;
+  in_bps: number;
+  out_bps: number;
+  incidents: number;
+}
+
+interface BusyPort {
+  id: number;
+  switch_id: number;
+  switch_name: string;
+  name: string;
+  description: string | null;
+  server_name: string | null;
+  in_bps: number;
+  out_bps: number;
+  speed_mbps: number;
+  util: number;
+}
+
 interface LiveData {
   servers: LiveServer[];
+  switches?: LiveSwitch[];
+  busyPorts?: BusyPort[];
   ipStats: { status: string; cnt: number }[];
   incidents: {
     id: number;
@@ -163,6 +193,8 @@ export default function DashboardPage() {
         </section>
       )}
 
+      {(data.switches ?? []).length > 0 && <SwitchesSection switches={data.switches ?? []} busy={data.busyPorts ?? []} />}
+
       {/* وضعیت آی‌پی‌ها */}
       <section className="card p-4">
         <div className="flex items-center justify-between mb-3">
@@ -268,5 +300,77 @@ export default function DashboardPage() {
         )}
       </section>
     </div>
+  );
+}
+
+/** خلاصه سوییچ‌ها و پرمصرف‌ترین پورت‌ها نسبت به ظرفیت */
+function SwitchesSection({ switches, busy }: { switches: LiveSwitch[]; busy: BusyPort[] }) {
+  return (
+    <section className="grid lg:grid-cols-2 gap-3">
+      <div className="card overflow-hidden">
+        <div className="px-4 py-3 border-b border-line flex items-center justify-between">
+          <h2 className="text-sm font-bold">سوییچ‌ها</h2>
+          <Link href="/switches" className="text-xs text-muted hover:text-cyan">
+            همه سوییچ‌ها ←
+          </Link>
+        </div>
+        <ul className="divide-y divide-line/60">
+          {switches.map((w) => (
+            <li key={w.id}>
+              <Link href={`/switches/${w.id}`} className="px-4 py-2.5 flex items-center gap-3 text-xs hover:bg-panel2/50">
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="font-bold text-sm truncate">{w.name}</span>
+                    <StatusBadge status={w.status} />
+                    {w.incidents > 0 && <span className="badge bg-danger/15 text-danger">{faNum(w.incidents)} رویداد</span>}
+                    {w.env_ok === false && <span className="badge bg-danger/15 text-danger">سخت‌افزار</span>}
+                  </span>
+                  <span className="block text-muted mt-0.5">
+                    پورت وصل {faNum(w.ports_up)} از {faNum(w.ports_total)}
+                    {w.cpu_percent !== null && ` · پردازنده ${formatPercent(w.cpu_percent, 0)}`}
+                    {w.mem_pct !== null && ` · حافظه ${formatPercent(w.mem_pct, 0)}`}
+                    {w.max_temp_c !== null && ` · ${faNum(Math.round(w.max_temp_c))}°C`}
+                  </span>
+                </span>
+                <span className="text-end shrink-0 text-[11px]">
+                  <span className="block">
+                    <span className="text-cyan">↓</span> {formatBps(w.in_bps)}
+                  </span>
+                  <span className="block">
+                    <span className="text-amber">↑</span> {formatBps(w.out_bps)}
+                  </span>
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="px-4 py-3 border-b border-line flex items-center justify-between">
+          <h2 className="text-sm font-bold">پرمصرف‌ترین پورت‌ها</h2>
+          <Link href="/switches/report" className="text-xs text-muted hover:text-cyan">
+            گزارش و صدک ۹۵ ←
+          </Link>
+        </div>
+        {busy.length === 0 ? (
+          <p className="px-4 py-6 text-xs text-muted text-center">پورت فعالی با ترافیک نیست.</p>
+        ) : (
+          <ul className="divide-y divide-line/60">
+            {busy.map((p) => (
+              <li key={p.id}>
+                <Link href={`/switches/${p.switch_id}`} className="px-4 py-2.5 block hover:bg-panel2/50">
+                  <UsageBar
+                    percent={p.util}
+                    label={`${p.switch_name} / ${p.name}${p.server_name ? ` — ${p.server_name}` : p.description ? ` — ${p.description}` : ''}`}
+                    right={`${formatBps(Math.max(p.in_bps, p.out_bps))} · ${formatPercent(p.util, 0)}`}
+                  />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }

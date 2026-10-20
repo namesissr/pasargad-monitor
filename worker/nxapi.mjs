@@ -654,6 +654,220 @@ export function counterDelta(prev, cur, bits = 64) {
   return bits === 32 && p < 2 ** 32 ? c + 2 ** 32 - p : 0;
 }
 
+/**
+ * خروجی متنی یک فرمان (cli_show_ascii). برای فرمان‌هایی که خروجی جیسون
+ * ندارند یا متنش همان چیزی است که لازم است — مثل running-config.
+ */
+export async function showAscii(sw, command, { timeoutMs = 60_000 } = {}) {
+  if (/;/.test(command)) throw new NxapiError('فرمان نامعتبر');
+  const res = await post(
+    sw,
+    { ins_api: { version: '1.0', type: 'cli_show_ascii', chunk: '0', sid: '1', input: command, output_format: 'json' } },
+    timeoutMs,
+  );
+  const [o] = outputsOf(res);
+  if (!o) throw new NxapiError(`پاسخی برای «${command}» نیامد`);
+  if (!isOk(o)) {
+    const msg = String(o.clierror || o.msg || `کد ${o.code}`).trim();
+    throw new NxapiError(`«${command}»: ${msg}`, { hint: `«${command}»: ${msg}` });
+  }
+  return typeof o.body === 'string' ? o.body : String(o.body ?? '');
+}
+
+// ── کشف: MAC، ARP، همسایه ─────────────────────────────────
+
+/**
+ * MAC به یک شکل: aa:bb:cc:dd:ee:ff. سوییچ‌ها هرکدام قالب خودشان را دارند
+ * (0050.56a1.0001 در سیسکو، 00-50-56-… در هوآوی، بافر خام در SNMP) و
+ * بدون یکسان‌سازی، MAC یک دستگاه در دو سوییچ با هم جور نمی‌شد.
+ */
+export function normalizeMac(v) {
+  if (v === null || v === undefined) return null;
+  if (Buffer.isBuffer(v)) {
+    return v.length === 6 ? [...v].map((b) => b.toString(16).padStart(2, '0')).join(':') : null;
+  }
+  const hex = String(v).toLowerCase().replace(/[^0-9a-f]/g, '');
+  if (hex.length !== 12) return null;
+  return hex.match(/../g).join(':');
+}
+
+/** نام همسایه برای مقایسه: کوچک، بدون دامنه و بدون سریال پرانتزی CDP */
+export function shortHostName(v) {
+  return String(v ?? '')
+    .replace(/\(.*\)$/, '')
+    .trim()
+    .toLowerCase()
+    .split('.')[0];
+}
+
+const isPortName = (n) => /^(Ethernet\d|port-channel\d)/.test(n);
+
+/** «show mac address-table» → [{port, mac, vlan}] — فقط پورت‌های فیزیکی و پورت‌چنل */
+export function parseMacTable(body) {
+  const out = [];
+  for (const r of findRows(body, 'ROW_mac_address')) {
+    const port = fullPortName(pick(r, 'disp_port', 'port'));
+    const mac = normalizeMac(pick(r, 'disp_mac_addr', 'mac_addr'));
+    if (!mac || !isPortName(port)) continue;
+    const vlan = pick(r, 'disp_vlan', 'vlan');
+    out.push({ port, mac, vlan: vlan === null ? null : String(vlan).trim() });
+  }
+  return out;
+}
+
+/** «show ip arp vrf all» → [{ip, mac, iface}] */
+export function parseArp(body) {
+  const out = [];
+  for (const r of findRows(body, 'ROW_adj')) {
+    const ip = String(pick(r, 'ip-addr-out', 'ip_addr_out', 'ip-addr') ?? '').trim();
+    const mac = normalizeMac(pick(r, 'mac', 'mac-addr'));
+    if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) || !mac) continue;
+    out.push({ ip, mac, iface: pick(r, 'phy-intf', 'intf-out') ?? null });
+  }
+  return out;
+}
+
+const capList = (v) =>
+  (Array.isArray(v) ? v : String(v ?? '').split(/[,\s]+/))
+    .map((x) => String(x).trim().toLowerCase())
+    .filter(Boolean);
+
+/** «show lldp neighbors detail» → همسایه‌ها */
+export function parseLldp(body) {
+  const out = [];
+  for (const r of findRows(body, 'ROW_nbor_detail')) {
+    const port = fullPortName(pick(r, 'l_port_id', 'local_port_id', 'l_port'));
+    if (!port) continue;
+    out.push({
+      port,
+      proto: 'lldp',
+      sys_name: pick(r, 'sys_name') === null ? null : String(pick(r, 'sys_name')),
+      port_id: pick(r, 'port_id') === null ? null : String(pick(r, 'port_id')),
+      port_desc: pick(r, 'port_desc') ?? null,
+      platform: pick(r, 'sys_desc') === null ? null : String(pick(r, 'sys_desc')).slice(0, 120),
+      mgmt_ip: pick(r, 'mgmt_addr', 'mgmt_addr_ipv4') ?? null,
+      chassis_id: pick(r, 'chassis_id') ?? null,
+      caps: capList(pick(r, 'enabled_capability', 'system_capability')),
+    });
+  }
+  return out;
+}
+
+/** «show cdp neighbors detail» → همسایه‌ها */
+export function parseCdp(body) {
+  const out = [];
+  for (const r of findRows(body, 'ROW_cdp_neighbor_detail_info')) {
+    const port = fullPortName(pick(r, 'intf_id', 'local_intf'));
+    if (!port) continue;
+    const name = pick(r, 'sysname', 'device_id');
+    out.push({
+      port,
+      proto: 'cdp',
+      sys_name: name === null ? null : String(name).replace(/\(.*\)$/, '').trim(),
+      port_id: pick(r, 'port_id') ?? null,
+      port_desc: null,
+      platform: pick(r, 'platform_id') ?? null,
+      mgmt_ip: pick(r, 'v4mgmtaddr', 'v4addr') ?? null,
+      chassis_id: null,
+      caps: capList(pick(r, 'capability')),
+    });
+  }
+  return out;
+}
+
+/**
+ * running-config بدون خط‌های متغیر. «!Time:» و «!Running configuration last
+ * done at» با هر بار خواندن عوض می‌شوند؛ اگر می‌ماندند، هر پشتیبان «تغییر
+ * کرده» حساب می‌شد.
+ */
+export function cleanConfig(text) {
+  return String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .split('\n')
+    .filter((l) => !/^!(Time|Command|Running configuration last done at|Startup config saved at)\b/i.test(l.trim()))
+    .join('\n')
+    .trim();
+}
+
+// ── محدودیت سرعت ───────────────────────────────────────────
+
+/** نام policy-mapی که پنل می‌سازد؛ هر سرعت یکی، برای همه پورت‌ها مشترک */
+export const ratePolicyName = (mbps) => `PANEL-RL-${mbps}M`;
+
+/**
+ * service-policyهای qos روی یک اینترفیس، از «show running-config interface X».
+ * پنل فقط policyهای خودش (PANEL-RL-*) را برمی‌دارد یا عوض می‌کند؛ policy
+ * دیگری که دستی گذاشته شده دست نمی‌خورد.
+ */
+export function parseServicePolicies(text) {
+  const out = { input: null, output: null };
+  for (const m of String(text ?? '').matchAll(/^\s*service-policy\s+type\s+qos\s+(input|output)\s+(\S+)/gim)) {
+    out[m[1].toLowerCase()] = m[2];
+  }
+  return out;
+}
+
+/** سرعت از نام policy پنل؛ policy بیگانه تهی */
+export function rateFromPolicy(name) {
+  const m = /^PANEL-RL-(\d+)M$/.exec(String(name ?? ''));
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * بلوک یک اینترفیس از کل running-config: خط «interface X» و خط‌های
+ * تورفته بعدش. برای SNMP که فقط کل پیکربندی را می‌تواند بخواند.
+ */
+export function interfaceBlock(config, name) {
+  const lines = String(config ?? '').replace(/\r\n/g, '\n').split('\n');
+  const head = `interface ${name}`.toLowerCase();
+  const start = lines.findIndex((l) => l.trim().toLowerCase() === head && !/^\s/.test(l));
+  if (start < 0) return '';
+  const out = [lines[start]];
+  for (let i = start + 1; i < lines.length && /^\s+\S/.test(lines[i]); i++) out.push(lines[i]);
+  return out.join('\n');
+}
+
+/**
+ * تکه پیکربندی محدودیت سرعت برای ادغام در running-config (همان فرمان‌های
+ * مسیر NX-API، یک‌جا). current: policyهای فعلی پورت که فقط مال پنل‌اند —
+ * policy بیگانه پیش از این رد شده است. خط service-policy خروجی آخر است:
+ * اگر سوییچ آن را نپذیرد، بقیه اعمال شده‌اند و خواندن دوباره همین را نشان می‌دهد.
+ */
+export function rateLimitSnippet(name, current, mbps) {
+  const policy = mbps > 0 ? ratePolicyName(mbps) : null;
+  const lines = [];
+  if (policy) {
+    lines.push(
+      `policy-map type qos ${policy}`,
+      '  class class-default',
+      `    police cir ${mbps} mbps bc 200 ms conform transmit violate drop`,
+    );
+  }
+  lines.push(`interface ${name}`);
+  for (const dir of ['input', 'output']) {
+    if (current[dir] && current[dir] !== policy) lines.push(`  no service-policy type qos ${dir} ${current[dir]}`);
+  }
+  if (policy) {
+    for (const dir of ['input', 'output']) {
+      if (current[dir] !== policy) lines.push(`  service-policy type qos ${dir} ${policy}`);
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * توضیح پورت برای خط فرمان. «;» جداکننده فرمان‌های NX-API است و خط تازه
+ * فرمان تازه؛ هر دو یعنی تزریق فرمان، پس رد می‌شوند نه حذف.
+ */
+export function cleanDescription(v, max = 254) {
+  const s = String(v ?? '').trim();
+  if (/[;\r\n\t]/.test(s)) return { ok: false, error: 'توضیح نباید «;» یا خط تازه داشته باشد' };
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(s)) return { ok: false, error: 'توضیح نویسه کنترلی دارد' };
+  if (s.length > max) return { ok: false, error: `توضیح حداکثر ${max} نویسه است` };
+  return { ok: true, value: s };
+}
+
 // ── درایور ─────────────────────────────────────────────────
 
 async function readEnvironment(sw, soft) {
@@ -709,7 +923,96 @@ export const nxapiDriver = {
       };
     });
 
-    return { ports, res, ver: ver ? { ...ver, vendor: 'cisco' } : null, env, xcvr, notes };
+    // همسایه‌ها، MAC و ARP: هر پنج دقیقه. هرکدام جدا، چون روی سوییچی که
+    // LLDP یا CDP خاموش است، آن فرمان خطا می‌دهد و نباید بقیه را ببرد.
+    let discovery = null;
+    if (due('nbr')) {
+      const quiet = (p) => p.catch(() => null);
+      const macBody = await soft(show(sw, 'show mac address-table', { timeoutMs: 45_000 }));
+      const arpBody = await quiet(show(sw, 'show ip arp vrf all', { timeoutMs: 45_000 }));
+      const lldpBody = await quiet(show(sw, 'show lldp neighbors detail'));
+      const cdpBody = await quiet(show(sw, 'show cdp neighbors detail'));
+      discovery = {
+        macs: macBody ? parseMacTable(macBody) : null,
+        arp: arpBody ? parseArp(arpBody) : [],
+        neighbors: [...(lldpBody ? parseLldp(lldpBody) : []), ...(cdpBody ? parseCdp(cdpBody) : [])],
+      };
+    }
+
+    return { ports, res, ver: ver ? { ...ver, vendor: 'cisco', os_family: 'nxos' } : null, env, xcvr, notes, discovery };
+  },
+
+  canDescribe: () => true,
+  canRateLimit: () => true,
+  canBackup: () => true,
+
+  async setDescription(sw, port, text) {
+    if (!isSafePortName(port.name)) throw new NxapiError('پورت نامعتبر', { hint: `روی ${port.name} از پنل فرمان اجرا نمی‌شود` });
+    const d = cleanDescription(text);
+    if (!d.ok) throw new NxapiError(d.error, { hint: d.error });
+    await configure(sw, [`interface ${port.name}`, d.value ? `description ${d.value}` : 'no description']);
+  },
+
+  /**
+   * محدودیت سرعت با policer روی هر دو جهت.
+   *
+   * policy-map پنل (PANEL-RL-<n>M) اگر نباشد ساخته می‌شود و به ورودی و
+   * خروجی اینترفیس وصل می‌شود. ورودی همیشه ممکن است؛ خروجی روی بعضی
+   * مدل‌ها و نسخه‌ها پشتیبانی نمی‌شود — آن وقت فقط ورودی می‌ماند و نتیجه
+   * همین را می‌گوید.
+   *
+   * اگر روی همان جهت policy دیگری هست که پنل نگذاشته، دست نمی‌خورد و خطا
+   * برمی‌گردد: ممکن است QoS عمدی کسی باشد.
+   *
+   * mbps صفر یعنی برداشتن محدودیت.
+   */
+  async setRateLimit(sw, port, mbps) {
+    if (!isSafePortName(port.name)) throw new NxapiError('پورت نامعتبر', { hint: `روی ${port.name} از پنل فرمان اجرا نمی‌شود` });
+    // عدد مستقیم در خط فرمان می‌رود
+    if (!Number.isInteger(mbps) || mbps < 0) throw new NxapiError('سرعت نامعتبر', { hint: 'سرعت نامعتبر است' });
+    const current = parseServicePolicies(await showAscii(sw, `show running-config interface ${port.name}`));
+    for (const dir of ['input', 'output']) {
+      if (current[dir] && rateFromPolicy(current[dir]) === null) {
+        const msg = `روی ${dir === 'input' ? 'ورودی' : 'خروجی'} این پورت policy دیگری (${current[dir]}) هست که پنل نگذاشته؛ دست نخورد`;
+        throw new NxapiError(msg, { hint: msg });
+      }
+    }
+
+    const iface = `interface ${port.name}`;
+    // برداشتن policy قبلی پنل از هر دو جهت
+    for (const dir of ['input', 'output']) {
+      if (current[dir]) await configure(sw, [iface, `no service-policy type qos ${dir} ${current[dir]}`]);
+    }
+    if (!mbps) return { input: false, output: false, outputError: null };
+
+    const name = ratePolicyName(mbps);
+    await configure(sw, [
+      `policy-map type qos ${name}`,
+      'class class-default',
+      `police cir ${mbps} mbps bc 200 ms conform transmit violate drop`,
+    ]);
+    await configure(sw, [iface, `service-policy type qos input ${name}`]);
+    let outputError = null;
+    try {
+      await configure(sw, [iface, `service-policy type qos output ${name}`]);
+    } catch (err) {
+      outputError = explainError(err);
+    }
+    return { input: true, output: !outputError, outputError };
+  },
+
+  /** محدودیت فعلی پورت از خود سوییچ */
+  async readRateLimit(sw, port) {
+    const p = parseServicePolicies(await showAscii(sw, `show running-config interface ${port.name}`));
+    return {
+      input: rateFromPolicy(p.input),
+      output: rateFromPolicy(p.output),
+      foreign: [p.input, p.output].filter((x) => x && rateFromPolicy(x) === null),
+    };
+  },
+
+  async backup(sw) {
+    return cleanConfig(await showAscii(sw, 'show running-config', { timeoutMs: 120_000 }));
   },
 
   async setAdmin(sw, port, up) {
