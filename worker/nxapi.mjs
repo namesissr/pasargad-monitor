@@ -573,6 +573,14 @@ export function parseEnvironment({ temperature, fan, power }) {
     };
   });
 
+  return summarizeEnvironment(temps, fans, psus);
+}
+
+/**
+ * فهرست مشکلات و بیشترین دما از دما، فن و تغذیه — مشترک بین NX-API و SNMP
+ * تا متن هشدار سخت‌افزار برای هر دو یکی باشد.
+ */
+export function summarizeEnvironment(temps, fans, psus) {
   const problems = [];
   for (const t of temps) {
     if (!t.ok) problems.push(`دمای ${t.name}: ${t.current ?? '?'}°C${t.alarm ? ` (${t.alarm})` : ''}`);
@@ -580,7 +588,7 @@ export function parseEnvironment({ temperature, fan, power }) {
   for (const f of fans) if (!f.ok) problems.push(`فن ${f.name}: ${f.status}`);
   for (const p of psus) if (!p.ok) problems.push(`منبع تغذیه ${p.name}: ${p.status}`);
 
-  const temps_c = temps.map((t) => t.current).filter((x) => x !== null);
+  const temps_c = temps.map((t) => t.current).filter((x) => x !== null && x !== undefined);
   return {
     temps,
     fans,
@@ -632,11 +640,90 @@ export function parseTransceivers(body) {
  * دلتای شمارنده. شمارنده کوچک‌تر از قبل یعنی سوییچ ری‌استارت شده یا
  * «clear counters» زده‌اند؛ آن بازه صفر حساب می‌شود نه عدد منفی یا
  * نجومی — همان قاعده ایجنت.
+ *
+ * استثنا شمارنده ۳۲ بیتی است (سوییچ SNMP قدیمی بدون ifHCInOctets): روی
+ * لینک یک‌گیگ هر ۳۴ ثانیه یک دور می‌زند، پس کوچک‌تر شدنش معمولا سرریز است
+ * نه ری‌استارت. فراخوان باید دلتای سرریز را با ظرفیت لینک بسنجد.
  */
-export function counterDelta(prev, cur) {
+export function counterDelta(prev, cur, bits = 64) {
   if (prev === null || prev === undefined || cur === null || cur === undefined) return null;
   const p = Number(prev);
   const c = Number(cur);
   if (!Number.isFinite(p) || !Number.isFinite(c)) return null;
-  return c >= p ? c - p : 0;
+  if (c >= p) return c - p;
+  return bits === 32 && p < 2 ** 32 ? c + 2 ** 32 - p : 0;
 }
+
+// ── درایور ─────────────────────────────────────────────────
+
+async function readEnvironment(sw, soft) {
+  const temperature = await soft(show(sw, 'show environment temperature'));
+  const fan = await soft(show(sw, 'show environment fan'));
+  const power = await soft(show(sw, 'show environment power'));
+  if (!temperature && !fan && !power) return null;
+  return parseEnvironment({ temperature, fan, power });
+}
+
+/**
+ * درایور NX-API. همان رابطی را دارد که درایور SNMP دارد، تا چرخه خواندن و
+ * صف فرمان در switches.mjs نداند سوییچ با چه پروتکلی خوانده می‌شود.
+ *
+ * collect: پورت‌ها و منابع. اگر خود پورت‌ها خوانده نشوند خطا می‌اندازد
+ * (یعنی سوییچ در دسترس نیست)؛ خطای بخش‌های جانبی فقط در notes می‌آید.
+ * due(kind) می‌گوید وقت خواندن بخش کند (version، env، xcvr) رسیده یا نه.
+ */
+export const nxapiDriver = {
+  canWrite: () => true,
+  canSave: () => true,
+  explain: explainError,
+
+  async collect(sw, due) {
+    const ifaceBody = await show(sw, 'show interface', { timeoutMs: 45_000 });
+
+    const notes = [];
+    const soft = (p) =>
+      p.catch((e) => {
+        notes.push(explainError(e));
+        return null;
+      });
+
+    const statusMap = (await soft(show(sw, 'show interface status').then(parseInterfaceStatus))) ?? new Map();
+    const res = await soft(show(sw, 'show system resources').then(parseResources));
+    const ver = !sw.model || due('version') ? await soft(show(sw, 'show version').then(parseVersion)) : null;
+    const env = due('env') ? await readEnvironment(sw, soft) : null;
+    const xcvr = due('xcvr')
+      ? await soft(show(sw, 'show interface transceiver details', { timeoutMs: 60_000 }).then(parseTransceivers))
+      : null;
+
+    const ports = parseInterfaces(ifaceBody).map((p) => {
+      const st = statusMap.get(p.name);
+      // err-disabled را «show interface status» روشن‌تر می‌گوید
+      const errState = p.oper_up === false && st?.state && /err|xcvr|sfp/i.test(st.state);
+      return {
+        ...p,
+        oper_reason: errState ? st.state : p.oper_reason,
+        vlan: st?.vlan ?? null,
+        xcvr_type: st?.xcvr_type ?? null,
+        if_index: null,
+        counter_bits: 64,
+      };
+    });
+
+    return { ports, res, ver: ver ? { ...ver, vendor: 'cisco' } : null, env, xcvr, notes };
+  },
+
+  async setAdmin(sw, port, up) {
+    if (!isSafePortName(port.name)) {
+      const msg = `روی ${port.name} از پنل فرمان اجرا نمی‌شود`;
+      throw new NxapiError(msg, { hint: msg });
+    }
+    await configure(sw, [`interface ${port.name}`, up ? 'no shutdown' : 'shutdown']);
+  },
+
+  save: saveConfig,
+
+  async readPort(sw, port) {
+    const [after] = parseInterfaces(await show(sw, `show interface ${port.name}`));
+    return after ?? null;
+  },
+};

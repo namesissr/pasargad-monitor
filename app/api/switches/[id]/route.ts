@@ -3,6 +3,7 @@ import { requireUser } from '@/lib/auth';
 import { fail, handle, ok } from '@/lib/http';
 import { getSetting } from '@/lib/settings';
 import { currentMonth, type Calendar } from '@/lib/period';
+import { SWITCH_PUBLIC_COLUMNS } from '@/lib/switches';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,13 +22,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     if (!Number.isInteger(id) || id <= 0) return fail('شناسه سوییچ نامعتبر است', 400);
 
     const sw = await queryOne(
-      `SELECT w.id, w.name, w.url, w.username, w.insecure_tls, w.datacenter_id, dc.name AS datacenter_name,
+      `SELECT ${SWITCH_PUBLIC_COLUMNS},
+              w.datacenter_id, dc.name AS datacenter_name,
               w.location, w.notes, w.is_active, w.hostname, w.model, w.serial, w.os_version,
               w.uptime_sec::float8 AS uptime_sec, w.status, w.last_seen_at, w.last_poll_at,
               w.last_poll_ms, w.last_error, w.fail_streak, w.cpu_percent,
               w.mem_used_bytes::float8 AS mem_used_bytes, w.mem_total_bytes::float8 AS mem_total_bytes,
-              w.load1, w.max_temp_c, w.env, w.env_ok, w.env_checked_at,
-              (w.password <> '') AS has_password
+              w.load1, w.max_temp_c, w.env, w.env_ok, w.env_checked_at
          FROM switches w
          LEFT JOIN datacenters dc ON dc.id = w.datacenter_id
         WHERE w.id = $1`,

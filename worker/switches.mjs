@@ -1,29 +1,27 @@
 import { q, q1, settingNum, log, logErr } from './db.mjs';
 import { openIncident, resolveIncident } from './incidents.mjs';
 import { formatPercent } from './format.mjs';
-import {
-  show,
-  configure,
-  saveConfig,
-  parseInterfaces,
-  parseInterfaceStatus,
-  parseResources,
-  parseVersion,
-  parseEnvironment,
-  parseTransceivers,
-  counterDelta,
-  explainError,
-  isSafePortName,
-} from './nxapi.mjs';
+import { counterDelta, nxapiDriver } from './nxapi.mjs';
+import { snmpDriver } from './snmp.mjs';
 
 /**
  * پایش سوییچ‌ها: خواندن دوره‌ای، اجرای shut/no shut از صف، و تجمیع.
  *
- * هر خواندن یک «show interface» است که شمارنده همه پورت‌ها را با هم
- * می‌دهد، به‌علاوه منابع سوییچ. بقیه — محیط، ماژول نوری، نسخه — کندتر
- * عوض می‌شوند و با فاصله بیشتر خوانده می‌شوند تا پردازنده کنترل‌پلین
- * سوییچ بی‌دلیل درگیر نشود.
+ * هر خواندن شمارنده همه پورت‌ها را با هم می‌گیرد، به‌علاوه منابع سوییچ.
+ * بقیه — محیط، ماژول نوری، نسخه — کندتر عوض می‌شوند و با فاصله بیشتر
+ * خوانده می‌شوند تا پردازنده کنترل‌پلین سوییچ بی‌دلیل درگیر نشود.
+ *
+ * اینکه سوییچ با NX-API خوانده می‌شود یا SNMP فقط در «درایور» است
+ * (worker/nxapi.mjs و worker/snmp.mjs). از اینجا به بعد — دلتا، ذخیره،
+ * هشدار، صف فرمان — برای هر دو یکی است.
  */
+
+const driverFor = (sw) => (sw.protocol === 'snmp' ? snmpDriver : nxapiDriver);
+
+// ستون‌هایی که هر دو درایور لازم دارند
+const SWITCH_COLUMNS = `id, name, protocol, url, username, password, insecure_tls,
+  snmp_version, snmp_host, snmp_port, snmp_community, snmp_write_community, snmp_user,
+  snmp_auth_proto, snmp_auth_pass, snmp_priv_proto, snmp_priv_pass, snmp_write, vendor`;
 
 const SLOW_MS = {
   version: 5 * 60_000,
@@ -35,7 +33,7 @@ const SLOW_MS = {
 // می‌شوند؛ ضرری ندارد.
 const lastSlow = new Map();
 
-function due(sw, kind) {
+function isDue(sw, kind) {
   return Date.now() - (lastSlow.get(`${sw.id}:${kind}`) ?? 0) >= SLOW_MS[kind];
 }
 
@@ -60,7 +58,7 @@ export async function pollSwitches() {
   );
 
   const list = await q(
-    `SELECT id, name, url, username, password, insecure_tls, status, fail_streak, model, max_temp_c
+    `SELECT ${SWITCH_COLUMNS}, status, fail_streak, model, max_temp_c
        FROM switches WHERE is_active ORDER BY id`,
   );
 
@@ -106,65 +104,28 @@ async function markFailure(sw, message, ms) {
   }
 }
 
-async function readEnvironment(sw, notes) {
-  const read = (cmd) =>
-    show(sw, cmd).catch((e) => {
-      notes.push(explainError(e));
-      return null;
-    });
-  const temperature = await read('show environment temperature');
-  const fan = await read('show environment fan');
-  const power = await read('show environment power');
-  if (!temperature && !fan && !power) return null;
-  return parseEnvironment({ temperature, fan, power });
-}
-
 async function pollOne(sw) {
   const started = Date.now();
+  const driver = driverFor(sw);
 
-  let ifaceBody;
+  // بخش کند فقط وقتی خوانده می‌شود که وقتش رسیده باشد
+  const due = (kind) => {
+    if (!isDue(sw, kind)) return false;
+    markDone(sw, kind);
+    return true;
+  };
+
+  let data;
   try {
-    ifaceBody = await show(sw, 'show interface', { timeoutMs: 45_000 });
+    data = await driver.collect(sw, due);
   } catch (err) {
-    await markFailure(sw, explainError(err), Date.now() - started);
+    await markFailure(sw, driver.explain(err), Date.now() - started);
     return;
   }
-
-  // خطاهای غیرکشنده: پورت‌ها خوانده شدند ولی بخشی دیگر نه
-  const notes = [];
-  const soft = (p) =>
-    p.catch((e) => {
-      notes.push(explainError(e));
-      return null;
-    });
-
-  const statusMap = (await soft(show(sw, 'show interface status').then(parseInterfaceStatus))) ?? new Map();
-  const res = await soft(show(sw, 'show system resources').then(parseResources));
-
-  let ver = null;
-  if (!sw.model || due(sw, 'version')) {
-    markDone(sw, 'version');
-    ver = await soft(show(sw, 'show version').then(parseVersion));
-  }
-
-  let env = null;
-  if (due(sw, 'env')) {
-    markDone(sw, 'env');
-    env = await readEnvironment(sw, notes);
-  }
-
-  let xcvr = null;
-  if (due(sw, 'xcvr')) {
-    markDone(sw, 'xcvr');
-    xcvr = await soft(
-      show(sw, 'show interface transceiver details', { timeoutMs: 60_000 }).then(parseTransceivers),
-    );
-  }
+  const { ports, res, ver, env, xcvr, notes } = data;
 
   const nowMs = Date.now();
   const ts = new Date(nowMs).toISOString();
-  const ports = parseInterfaces(ifaceBody);
-
   const prevRows = await q(
     `SELECT id, name, in_bytes, out_bytes, in_errors, out_errors, in_discards, out_discards,
             crc_errors, counters_at, oper_up, last_change_at, server_id, alert_down
@@ -177,11 +138,6 @@ async function pollOne(sw) {
   const deltas = new Map();
 
   for (const p of ports) {
-    const st = statusMap.get(p.name);
-    let reason = p.oper_reason;
-    // err-disabled را «show interface status» روشن‌تر می‌گوید
-    if (p.oper_up === false && st?.state && /err|xcvr|sfp/i.test(st.state)) reason = st.state;
-
     const p0 = prev.get(p.name);
     const elapsed = p0?.counters_at ? (nowMs - new Date(p0.counters_at).getTime()) / 1000 : null;
 
@@ -189,8 +145,16 @@ async function pollOne(sw) {
     let outBps = p.out_rate_bps ?? 0;
 
     if (p0 && elapsed && elapsed > 0 && COUNTED_KINDS.has(p.kind)) {
-      const dIn = counterDelta(p0.in_bytes, p.in_bytes);
-      const dOut = counterDelta(p0.out_bytes, p.out_bytes);
+      const bits = p.counter_bits ?? 64;
+      let dIn = counterDelta(p0.in_bytes, p.in_bytes, bits);
+      let dOut = counterDelta(p0.out_bytes, p.out_bytes, bits);
+      // شمارنده ۳۲ بیتی: دلتای «سرریز» بیشتر از ظرفیت لینک یعنی در واقع
+      // ری‌استارت بوده نه سرریز
+      if (bits === 32 && p.speed_mbps) {
+        const cap = ((p.speed_mbps * 1e6) / 8) * elapsed * 1.2;
+        if (dIn !== null && dIn > cap) dIn = 0;
+        if (dOut !== null && dOut > cap) dOut = 0;
+      }
       if (dIn !== null && dOut !== null) {
         inBps = Math.round((dIn * 8) / elapsed);
         outBps = Math.round((dOut * 8) / elapsed);
@@ -215,15 +179,15 @@ async function pollOne(sw) {
       description: p.description,
       admin_up: p.admin_up,
       oper_up: p.oper_up,
-      oper_reason: reason,
+      oper_reason: p.oper_reason,
       speed_mbps: p.speed_mbps,
       mtu: p.mtu === null ? null : Math.round(p.mtu),
       mode: p.mode,
-      vlan: st?.vlan ?? null,
+      vlan: p.vlan ?? null,
       mac: p.mac,
       member_of: p.member_of,
       hw_type: p.hw_type,
-      xcvr_type: st?.xcvr_type ?? null,
+      xcvr_type: p.xcvr_type ?? null,
       last_flap: p.last_flap,
       in_bytes: p.in_bytes,
       out_bytes: p.out_bytes,
@@ -235,6 +199,7 @@ async function pollOne(sw) {
       in_bps: p.oper_up === false ? 0 : inBps,
       out_bps: p.oper_up === false ? 0 : outBps,
       transceiver: xcvr ? (xcvr.get(p.name) ?? null) : null,
+      if_index: p.if_index ?? null,
     });
   }
 
@@ -243,12 +208,12 @@ async function pollOne(sw) {
        switch_id, name, kind, description, admin_up, oper_up, oper_reason, speed_mbps, mtu,
        mode, vlan, mac, member_of, hw_type, xcvr_type, last_flap,
        in_bytes, out_bytes, in_errors, out_errors, in_discards, out_discards, crc_errors,
-       counters_at, in_bps, out_bps, transceiver, is_protected, is_present, last_change_at, updated_at
+       counters_at, in_bps, out_bps, transceiver, if_index, is_protected, is_present, last_change_at, updated_at
      )
      SELECT $1, r.name, r.kind, r.description, r.admin_up, r.oper_up, r.oper_reason, r.speed_mbps, r.mtu,
             r.mode, r.vlan, r.mac, r.member_of, r.hw_type, r.xcvr_type, r.last_flap,
             r.in_bytes, r.out_bytes, r.in_errors, r.out_errors, r.in_discards, r.out_discards, r.crc_errors,
-            $2::timestamptz, r.in_bps, r.out_bps, r.transceiver,
+            $2::timestamptz, r.in_bps, r.out_bps, r.transceiver, r.if_index,
             -- پورت مدیریت پیش‌فرض محافظت‌شده است: shut کردنش دسترسی پنل
             -- به خود سوییچ را می‌بُرد
             r.kind = 'mgmt', TRUE, $2::timestamptz, now()
@@ -258,7 +223,7 @@ async function pollOne(sw) {
               member_of text, hw_type text, xcvr_type text, last_flap text,
               in_bytes bigint, out_bytes bigint, in_errors bigint, out_errors bigint,
               in_discards bigint, out_discards bigint, crc_errors bigint,
-              in_bps bigint, out_bps bigint, transceiver jsonb)
+              in_bps bigint, out_bps bigint, transceiver jsonb, if_index int)
      ON CONFLICT (switch_id, name) DO UPDATE SET
        kind           = EXCLUDED.kind,
        description    = EXCLUDED.description,
@@ -285,6 +250,7 @@ async function pollOne(sw) {
        in_bps         = EXCLUDED.in_bps,
        out_bps        = EXCLUDED.out_bps,
        transceiver    = CASE WHEN $4 THEN EXCLUDED.transceiver ELSE switch_ports.transceiver END,
+       if_index       = EXCLUDED.if_index,
        is_present     = TRUE,
        last_change_at = CASE WHEN switch_ports.oper_up IS DISTINCT FROM EXCLUDED.oper_up
                              THEN EXCLUDED.last_change_at ELSE switch_ports.last_change_at END,
@@ -342,6 +308,8 @@ async function pollOne(sw) {
        env_ok          = CASE WHEN $13 THEN $15 ELSE env_ok END,
        env_checked_at  = CASE WHEN $13 THEN now() ELSE env_checked_at END,
        max_temp_c      = $16,
+       vendor          = COALESCE($17, vendor),
+       sys_object_id   = COALESCE($18, sys_object_id),
        updated_at      = now()
      WHERE id = $1`,
     [
@@ -361,6 +329,8 @@ async function pollOne(sw) {
       env ? JSON.stringify({ temps: env.temps, fans: env.fans, psus: env.psus, problems: env.problems }) : null,
       env ? env.problems.length === 0 : null,
       maxTemp,
+      ver?.vendor ?? null,
+      ver?.sys_object_id ?? null,
     ],
   );
 
@@ -516,7 +486,7 @@ export async function drainSwitchActions() {
       logErr('اجرای درخواست سوییچ خطا داد:', err.message);
       await q(
         `UPDATE switch_actions SET status = 'failed', finished_at = now(), result = $2 WHERE id = $1`,
-        [a.id, explainError(err)],
+        [a.id, err.hint || err.message],
       );
     });
   }
@@ -526,49 +496,60 @@ async function runAction(a) {
   const finish = (status, result) =>
     q(`UPDATE switch_actions SET status = $2, result = $3, finished_at = now() WHERE id = $1`, [a.id, status, result]);
 
-  const sw = await q1(
-    `SELECT id, name, url, username, password, insecure_tls, is_active FROM switches WHERE id = $1`,
-    [a.switch_id],
-  );
+  const sw = await q1(`SELECT ${SWITCH_COLUMNS}, is_active FROM switches WHERE id = $1`, [a.switch_id]);
   if (!sw || !sw.is_active) return finish('failed', 'سوییچ غیرفعال یا حذف شده است');
+  const driver = driverFor(sw);
 
   const port = a.port_id
-    ? await q1(`SELECT id, name, kind, is_protected FROM switch_ports WHERE id = $1 AND switch_id = $2`, [
+    ? await q1(`SELECT id, name, kind, is_protected, if_index FROM switch_ports WHERE id = $1 AND switch_id = $2`, [
         a.port_id,
         a.switch_id,
       ])
     : null;
   if (!port) return finish('failed', 'پورت پیدا نشد');
-  if (!isSafePortName(port.name)) return finish('failed', `روی ${port.name} از پنل فرمان اجرا نمی‌شود`);
+  // پورت مدیریت، ویلن و لوپ‌بک هرگز؛ خاموش کردن mgmt دسترسی پنل به خود
+  // سوییچ را می‌بُرد
+  if (!['ethernet', 'port-channel'].includes(port.kind)) {
+    return finish('failed', `روی ${port.name} از پنل فرمان اجرا نمی‌شود`);
+  }
   if (a.action === 'shutdown' && port.is_protected) {
     return finish('failed', 'پورت محافظت‌شده است و از پنل خاموش نمی‌شود');
   }
+  if (!driver.canWrite(sw)) {
+    return finish('failed', 'برای این سوییچ اجازه نوشتن تنظیم نشده (کامیونیتی نوشتنی یا «اجازه نوشتن» v3)');
+  }
 
   const wantUp = a.action === 'no_shutdown';
-  const lines = [`interface ${port.name}`, wantUp ? 'no shutdown' : 'shutdown'];
-
   try {
-    await configure(sw, lines);
+    await driver.setAdmin(sw, port, wantUp);
   } catch (err) {
-    return finish('failed', explainError(err));
+    return finish('failed', driver.explain(err));
   }
 
   let saveNote = '';
   if (a.save_config) {
-    try {
-      await saveConfig(sw);
-      saveNote = ' و در startup-config ذخیره شد';
-    } catch (err) {
-      saveNote = ` — ولی ذخیره در startup-config انجام نشد (${explainError(err)}) و با ریبوت سوییچ برمی‌گردد`;
+    if (!driver.canSave(sw)) {
+      saveNote = ' — ذخیره در startup-config برای این سوییچ از پنل پشتیبانی نمی‌شود';
+    } else {
+      try {
+        await driver.save(sw);
+        saveNote = ' و در startup-config ذخیره شد';
+      } catch (err) {
+        saveNote = ` — ولی ذخیره در startup-config انجام نشد (${driver.explain(err)}) و با ریبوت سوییچ برمی‌گردد`;
+      }
     }
   }
 
-  // خواندن وضعیت واقعی پس از فرمان
+  // خواندن وضعیت واقعی پس از فرمان. بعضی سوییچ‌ها وضعیت را با کمی تأخیر
+  // به‌روز می‌کنند؛ یک بار دیگر پس از یک ثانیه.
   let after = null;
-  try {
-    [after] = parseInterfaces(await show(sw, `show interface ${port.name}`));
-  } catch (err) {
-    log(`خواندن وضعیت ${port.name} پس از فرمان ناموفق: ${explainError(err)}`);
+  for (let i = 0; i < 2 && (!after || after.admin_up !== wantUp); i++) {
+    if (i) await new Promise((r) => setTimeout(r, 1000));
+    try {
+      after = await driver.readPort(sw, port);
+    } catch (err) {
+      log(`خواندن وضعیت ${port.name} پس از فرمان ناموفق: ${driver.explain(err)}`);
+    }
   }
 
   if (after) {
