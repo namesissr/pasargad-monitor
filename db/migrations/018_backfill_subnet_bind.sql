@@ -25,16 +25,19 @@ DECLARE
   n_bind   INT;
   n_left   INT;
 BEGIN
-  -- ساب‌نت بر اساس دربرگیری؛ دقیق‌ترین بلوک برنده است
+  -- ساب‌نت بر اساس دربرگیری؛ دقیق‌ترین بلوک برنده است.
+  -- زیرپرس‌وجوی وابسته در SET، نه LATERAL در FROM: پستگرس اجازه نمی‌دهد
+  -- جدول هدف UPDATE از داخل LATERAL ارجاع داده شود.
   UPDATE ip_addresses i
-     SET subnet_id = s.id, updated_at = now()
-    FROM LATERAL (
-      SELECT sc.id FROM ip_subnets sc
-       WHERE i.ip << sc.cidr
-       ORDER BY masklen(sc.cidr) DESC
-       LIMIT 1
-    ) s
-   WHERE i.subnet_id IS NULL AND family(i.ip) = 4;
+     SET subnet_id = (
+           SELECT sc.id FROM ip_subnets sc
+            WHERE i.ip << sc.cidr
+            ORDER BY masklen(sc.cidr) DESC
+            LIMIT 1
+         ),
+         updated_at = now()
+   WHERE i.subnet_id IS NULL AND family(i.ip) = 4
+     AND EXISTS (SELECT 1 FROM ip_subnets sc WHERE i.ip << sc.cidr);
   GET DIAGNOSTICS n_subnet = ROW_COUNT;
 
   -- سرور لنگر از روی نود همان آی‌پی
